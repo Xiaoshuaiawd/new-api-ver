@@ -36,8 +36,21 @@ func InitRedisClient() (err error) {
 	if err != nil {
 		FatalLog("failed to parse Redis connection string: " + err.Error())
 	}
-	opt.PoolSize = GetEnvOrDefault("REDIS_POOL_SIZE", 10)
+	configuredPoolSize := GetEnvOrDefault("REDIS_POOL_SIZE", 10)
+	recommendedPoolSize := resolveRedisPoolSize(configuredPoolSize)
+	if recommendedPoolSize > configuredPoolSize && ChatLogEnabled {
+		SysLog(fmt.Sprintf("REDIS_POOL_SIZE=%d is too small for chat log workers=%d, auto bump to %d",
+			configuredPoolSize, ChatLogConsumerWorkers, recommendedPoolSize))
+	}
+	opt.PoolSize = recommendedPoolSize
+	if opt.MinIdleConns <= 0 {
+		opt.MinIdleConns = recommendedPoolSize / 4
+		if opt.MinIdleConns < 4 {
+			opt.MinIdleConns = 4
+		}
+	}
 	RDB = redis.NewClient(opt)
+	SysLog(fmt.Sprintf("Redis pool configured: size=%d min_idle=%d", opt.PoolSize, opt.MinIdleConns))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -51,6 +64,29 @@ func InitRedisClient() (err error) {
 		SysLog(fmt.Sprintf("Redis database: %d", opt.DB))
 	}
 	return err
+}
+
+func resolveRedisPoolSize(configuredPoolSize int) int {
+	if configuredPoolSize <= 0 {
+		configuredPoolSize = 10
+	}
+	// XREADGROUP is a blocking command and each consumer worker can hold one connection.
+	// Auto-raise tiny pool defaults when chat-log stream consumers are enabled.
+	if !ChatLogEnabled {
+		return configuredPoolSize
+	}
+	workers := ChatLogConsumerWorkers
+	if workers <= 0 {
+		workers = 1
+	}
+	chatLogMinPool := workers + 32
+	if chatLogMinPool < 64 {
+		chatLogMinPool = 64
+	}
+	if configuredPoolSize < chatLogMinPool {
+		return chatLogMinPool
+	}
+	return configuredPoolSize
 }
 
 func ParseRedisOption() *redis.Options {

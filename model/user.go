@@ -126,24 +126,30 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 
 	// 管理员区域 - 根据角色决定
 	if userRole == common.RoleAdminUser {
-		// 管理员可以访问管理员区域，但不能访问系统设置
+		// 管理员可以访问管理员区域，但不能访问系统设置和数据分布
 		defaultConfig["admin"] = map[string]interface{}{
-			"enabled":    true,
-			"channel":    true,
-			"models":     true,
-			"redemption": true,
-			"user":       true,
-			"setting":    false, // 管理员不能访问系统设置
+			"enabled":           true,
+			"channel":           true,
+			"data_distribution": false, // 管理员不能访问数据分布
+			"models":            true,
+			"deployment":        true,
+			"subscription":      true,
+			"redemption":        true,
+			"user":              true,
+			"setting":           false, // 管理员不能访问系统设置
 		}
 	} else if userRole == common.RoleRootUser {
 		// 超级管理员可以访问所有功能
 		defaultConfig["admin"] = map[string]interface{}{
-			"enabled":    true,
-			"channel":    true,
-			"models":     true,
-			"redemption": true,
-			"user":       true,
-			"setting":    true,
+			"enabled":           true,
+			"channel":           true,
+			"data_distribution": true,
+			"models":            true,
+			"deployment":        true,
+			"subscription":      true,
+			"redemption":        true,
+			"user":              true,
+			"setting":           true,
 		}
 	}
 	// 普通用户不包含admin区域

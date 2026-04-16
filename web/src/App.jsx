@@ -21,7 +21,7 @@ import React, { lazy, Suspense, useContext, useMemo } from 'react';
 import { Route, Routes, useLocation, useParams } from 'react-router-dom';
 import Loading from './components/common/ui/Loading';
 import User from './pages/User';
-import { AuthRedirect, PrivateRoute, AdminRoute } from './helpers';
+import { AuthRedirect, PrivateRoute, AdminRoute, RootRoute } from './helpers';
 import RegisterForm from './components/auth/RegisterForm';
 import LoginForm from './components/auth/LoginForm';
 import NotFound from './pages/NotFound';
@@ -32,6 +32,7 @@ import { StatusContext } from './context/Status';
 import PasswordResetForm from './components/auth/PasswordResetForm';
 import PasswordResetConfirm from './components/auth/PasswordResetConfirm';
 import Channel from './pages/Channel';
+import DataDistribution from './pages/DataDistribution';
 import Token from './pages/Token';
 import Redemption from './pages/Redemption';
 import TopUp from './pages/TopUp';
@@ -129,6 +130,14 @@ function App() {
             <AdminRoute>
               <Subscription />
             </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/data-distribution'
+          element={
+            <RootRoute>
+              <DataDistribution />
+            </RootRoute>
           }
         />
         <Route
@@ -250,11 +259,11 @@ function App() {
         <Route
           path='/console/setting'
           element={
-            <AdminRoute>
+            <RootRoute>
               <Suspense fallback={<Loading></Loading>} key={location.pathname}>
                 <Setting />
               </Suspense>
-            </AdminRoute>
+            </RootRoute>
           }
         />
         <Route

@@ -74,6 +74,21 @@ var MemoryCacheEnabled bool
 
 var LogConsumeEnabled = true
 
+// Chat log storage (async, partitioned)
+var ChatLogEnabled = false
+var ChatLogTimeZone = "Asia/Shanghai"
+var ChatLogStreamKey = "chat_log_events"
+var ChatLogDLQKey = "chat_log_events_dlq"
+var ChatLogConsumerGroup = "chat_log_cg"
+var ChatLogConsumerStartID = "0"
+var ChatLogMaxRetry = 8
+var ChatLogMaxBatch = 100
+var ChatLogConsumerWorkers = 8
+var ChatLogLocalWorkers = 2
+var ChatLogStreamMaxLen int64 = 0              // 0 means unlimited
+var ChatLogDLQMaxLen int64 = 0                 // 0 means unlimited
+var ChatLogPayloadInlineMaxBytes = 1024 * 1024 // 1MB
+
 var TLSInsecureSkipVerify bool
 var InsecureTLSConfig = &tls.Config{InsecureSkipVerify: true}
 

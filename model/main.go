@@ -25,6 +25,13 @@ var commonFalseVal string
 var logKeyCol string
 var logGroupCol string
 
+func getChatLogDSNEnvName() string {
+	if strings.TrimSpace(os.Getenv("MES_SQL_DSN")) != "" {
+		return "MES_SQL_DSN"
+	}
+	return ""
+}
+
 func initCol() {
 	// init common column names
 	if common.UsingPostgreSQL {
@@ -64,6 +71,7 @@ func initCol() {
 var DB *gorm.DB
 
 var LOG_DB *gorm.DB
+var CHAT_LOG_DB *gorm.DB
 
 func createRootAccountIfNeed() error {
 	var user User
@@ -174,6 +182,42 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 	})
 }
 
+func chooseChatLogDB(envName string) (*gorm.DB, error) {
+	dsn := strings.TrimSpace(os.Getenv(envName))
+	if dsn == "" {
+		return nil, nil
+	}
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		common.SysLog("using PostgreSQL as chat log database")
+		common.ChatLogSqlType = common.DatabaseTypePostgreSQL
+		return gorm.Open(postgres.New(postgres.Config{
+			DSN:                  dsn,
+			PreferSimpleProtocol: true,
+		}), &gorm.Config{
+			PrepareStmt: true,
+		})
+	}
+	if strings.HasPrefix(dsn, "local") {
+		common.SysLog("MES_SQL_DSN starts with local, using SQLite as chat log database")
+		common.ChatLogSqlType = common.DatabaseTypeSQLite
+		return gorm.Open(sqlite.Open(common.SQLitePath), &gorm.Config{
+			PrepareStmt: true,
+		})
+	}
+	common.SysLog("using MySQL as chat log database")
+	if !strings.Contains(dsn, "parseTime") {
+		if strings.Contains(dsn, "?") {
+			dsn += "&parseTime=true"
+		} else {
+			dsn += "?parseTime=true"
+		}
+	}
+	common.ChatLogSqlType = common.DatabaseTypeMySQL
+	return gorm.Open(mysql.Open(dsn), &gorm.Config{
+		PrepareStmt: true,
+	})
+}
+
 func InitDB() (err error) {
 	db, err := chooseDB("SQL_DSN", false)
 	if err == nil {
@@ -241,6 +285,48 @@ func InitLogDB() (err error) {
 		common.SysLog("database migration started")
 		err = migrateLOGDB()
 		return err
+	} else {
+		common.FatalLog(err)
+	}
+	return err
+}
+
+func InitChatLogDB() (err error) {
+	chatLogDSNEnvName := getChatLogDSNEnvName()
+	if chatLogDSNEnvName == "" {
+		CHAT_LOG_DB = LOG_DB
+		common.ChatLogSqlType = common.LogSqlType
+		if CHAT_LOG_DB == DB {
+			switch {
+			case common.UsingPostgreSQL:
+				common.ChatLogSqlType = common.DatabaseTypePostgreSQL
+			case common.UsingMySQL:
+				common.ChatLogSqlType = common.DatabaseTypeMySQL
+			default:
+				common.ChatLogSqlType = common.DatabaseTypeSQLite
+			}
+		}
+		return nil
+	}
+	db, err := chooseChatLogDB(chatLogDSNEnvName)
+	if err == nil {
+		if common.DebugEnabled {
+			db = db.Debug()
+		}
+		CHAT_LOG_DB = db
+		if common.ChatLogSqlType == common.DatabaseTypeMySQL {
+			if err := checkMySQLChineseSupport(CHAT_LOG_DB); err != nil {
+				panic(err)
+			}
+		}
+		sqlDB, err := CHAT_LOG_DB.DB()
+		if err != nil {
+			return err
+		}
+		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
+		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
+		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
+		return nil
 	} else {
 		common.FatalLog(err)
 	}

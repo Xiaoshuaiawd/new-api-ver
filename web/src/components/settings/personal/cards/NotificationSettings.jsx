@@ -85,6 +85,7 @@ const NotificationSettings = ({
     admin: {
       enabled: true,
       channel: true,
+      data_distribution: true,
       models: true,
       deployment: true,
       subscription: true,
@@ -169,6 +170,7 @@ const NotificationSettings = ({
       admin: {
         enabled: true,
         channel: true,
+        data_distribution: true,
         models: true,
         deployment: true,
         subscription: true,
@@ -293,6 +295,11 @@ const NotificationSettings = ({
       description: t('系统管理功能'),
       modules: [
         { key: 'channel', title: t('渠道管理'), description: t('API渠道配置') },
+        {
+          key: 'data_distribution',
+          title: t('数据分布'),
+          description: t('聊天日志分布统计'),
+        },
         { key: 'models', title: t('模型管理'), description: t('AI模型配置') },
         {
           key: 'deployment',
