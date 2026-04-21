@@ -33,7 +33,7 @@ services:
 #      - SQL_DSN=root:123456@tcp(mysql:3306)/new-api  # Point to the mysql service, uncomment if using MySQL
 #      - LOG_SQL_DSN=root:123456@tcp(mysql:3306)/new-api  # logs 表 MySQL DSN
 #      - MES_SQL_DSN=root:123456@tcp(mysql:3306)/new-api  # chat_log_* 分表 MySQL DSN
-      - REDIS_CONN_STRING=redis://redis
+      - REDIS_CONN_STRING=redis://:123456@redis:6379 # ⚠️ IMPORTANT: Change the password in production!
       - REDIS_POOL_SIZE=128 # Redis 连接池大小（高并发聊天日志建议 >= 64）
       - TZ=Asia/Shanghai
       - CHAT_LOG_ENABLED=true  # 是否启用聊天日志记录 (Whether to enable chat log recording)
@@ -51,6 +51,7 @@ services:
       - CHAT_LOG_PAYLOAD_INLINE_MAX_BYTES=1000000 # 超过该大小可走对象存储引用
       - ERROR_LOG_ENABLED=true # 是否启用错误日志记录 (Whether to enable error log recording)
       - BATCH_UPDATE_ENABLED=true  # 是否启用批量更新 (Whether to enable batch update)
+      - NODE_NAME=new-api-node-1  # 节点名称，用于审计日志中标识节点身份；多节点/容器部署时建议设置 (Node name used in audit logs; recommended when running multiple instances or in containers)
 #      - STREAMING_TIMEOUT=300  # 流模式无响应超时时间，单位秒，默认120秒，如果出现空补全可以尝试改为更大值 （Streaming timeout in seconds, default is 120s. Increase if experiencing empty completions）
 #      - SESSION_SECRET=random_string  # 多机部署时设置，必须修改这个随机字符串！！ （multi-node deployment, set this to a random string!!!!!!!）
       - SYNC_FREQUENCY=60  # Uncomment if regular database syncing is needed
@@ -74,6 +75,7 @@ services:
     image: redis:latest
     container_name: redis
     restart: always
+    command: ["redis-server", "--requirepass", "123456"]  # ⚠️ IMPORTANT: Change this password in production!
     networks:
       - new-api-network
 
