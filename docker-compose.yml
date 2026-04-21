@@ -42,8 +42,8 @@ services:
       - CHAT_LOG_DLQ_KEY=chat_log_events_dlq # Redis Stream 死信队列
       - CHAT_LOG_CONSUMER_GROUP=chat_log_cg # Redis 消费者组
       - CHAT_LOG_CONSUMER_START_ID=0 # 新建消费组起始位点：0=消费历史，$=仅新消息
-      - CHAT_LOG_MAX_RETRY=8 # 入库失败最大重试次数
-      - CHAT_LOG_MAX_BATCH=1000 # 每批消费条数（高吞吐建议 300~1000）
+      - CHAT_LOG_MAX_RETRY=3 # 入库失败最大重试次数
+      - CHAT_LOG_MAX_BATCH=10 # 每批消费条数（高吞吐建议 300~1000）
       - CHAT_LOG_CONSUMER_WORKERS=32 # Redis Stream 消费协程数
       - CHAT_LOG_LOCAL_WORKERS=4 # 本地降级队列消费协程数
       - CHAT_LOG_STREAM_MAX_LEN=20000000 # Redis 主队列最大长度（近似裁剪）
