@@ -55,7 +55,10 @@ func InitEnv() {
 		} else {
 			SessionSecret = ss
 		}
+	} else {
+		log.Println("WARNING: SESSION_SECRET is not set; a random value was generated for this process. Sessions will not survive restarts or work across multiple nodes unless you configure a shared SESSION_SECRET.")
 	}
+	SessionCookieName = BuildSessionCookieName(SessionSecret, os.Getenv("SESSION_COOKIE_NAME"))
 	if os.Getenv("CRYPTO_SECRET") != "" {
 		CryptoSecret = os.Getenv("CRYPTO_SECRET")
 	} else {
