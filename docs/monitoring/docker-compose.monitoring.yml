@@ -21,6 +21,23 @@ services:
       - "9093:9093"
     volumes:
       - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    depends_on:
+      - feishu-alert-adapter
+
+  feishu-alert-adapter:
+    build:
+      context: ../..
+      dockerfile: docs/monitoring/Dockerfile.feishu-alert-adapter
+    container_name: new-api-feishu-alert-adapter
+    environment:
+      ALERTMANAGER_FEISHU_ADAPTER_LISTEN: ":9098"
+      ALERTMANAGER_FEISHU_ADAPTER_PATH: "/alertmanager/feishu"
+      ALERTMANAGER_FEISHU_ADAPTER_BEARER_TOKEN: "__REPLACE_WITH_ALERTMANAGER_FEISHU_ADAPTER_BEARER_TOKEN__"
+      ALERTMANAGER_FEISHU_WEBHOOK_URL: "__REPLACE_WITH_FEISHU_BOT_WEBHOOK_URL__"
+      ALERTMANAGER_FEISHU_MESSAGE_PREFIX: "[new-api 监控告警]"
+      ALERTMANAGER_FEISHU_MIN_INTERVAL_SECONDS: "120"
+      ALERTMANAGER_FEISHU_MAX_ALERTS_PER_MESSAGE: "10"
+      ALERTMANAGER_FEISHU_REQUEST_TIMEOUT_SECONDS: "10"
 
   grafana:
     image: grafana/grafana:latest

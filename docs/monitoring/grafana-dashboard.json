@@ -66,12 +66,12 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.99, sum by (site, le) (rate(go_gc_duration_seconds_bucket{site=~\"${site:regex}\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (site, le) (rate(go_gc_duration_seconds_bucket{site=~\"$site\"}[$__rate_interval])))",
           "legendFormat": "{{site}} / GC P99",
           "refId": "A"
         },
         {
-          "expr": "sum by (site) (go_goroutines{site=~\"${site:regex}\"})",
+          "expr": "sum by (site) (go_goroutines{site=~\"$site\"})",
           "legendFormat": "{{site}} / Goroutines",
           "refId": "B"
         }
@@ -109,7 +109,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (site, channel_id, channel_name) (increase(newapi_channel_requests_total{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\"}[$__rate_interval]))",
+          "expr": "sum by (site, channel_id, channel_name) (increase(newapi_channel_requests_total{site=~\"$site\", channel_name=~\"$channel\"}[$__rate_interval]))",
           "legendFormat": "{{site}} / {{channel_name}} (#{{channel_id}})",
           "refId": "A"
         }
@@ -147,7 +147,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (site, channel_id, channel_name) (newapi_channel_success_rpm_last_1m{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\"})",
+          "expr": "sum by (site, channel_id, channel_name) (newapi_channel_success_rpm_last_1m{site=~\"$site\", channel_name=~\"$channel\"})",
           "legendFormat": "{{site}} / {{channel_name}} (#{{channel_id}})",
           "refId": "A"
         }
@@ -185,7 +185,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (site, channel_id, channel_name) (increase(newapi_channel_errors_total{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\"}[$__rate_interval]))",
+          "expr": "sum by (site, channel_id, channel_name) (increase(newapi_channel_errors_total{site=~\"$site\", channel_name=~\"$channel\"}[$__rate_interval]))",
           "legendFormat": "{{site}} / {{channel_name}} (#{{channel_id}})",
           "refId": "A"
         }
@@ -223,7 +223,7 @@
       },
       "targets": [
         {
-          "expr": "100 * sum by (site, channel_id, channel_name) (increase(newapi_channel_requests_total{site=~\"${site:regex}\", result=\"success\", channel_name=~\"${channel:regex}\"}[$__rate_interval])) / clamp_min(sum by (site, channel_id, channel_name) (increase(newapi_channel_requests_total{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\"}[$__rate_interval])), 1)",
+          "expr": "100 * sum by (site, channel_id, channel_name) (increase(newapi_channel_requests_total{site=~\"$site\", result=\"success\", channel_name=~\"$channel\"}[$__rate_interval])) / clamp_min(sum by (site, channel_id, channel_name) (increase(newapi_channel_requests_total{site=~\"$site\", channel_name=~\"$channel\"}[$__rate_interval])), 1)",
           "legendFormat": "{{site}} / {{channel_name}} (#{{channel_id}})",
           "refId": "A"
         }
@@ -283,7 +283,7 @@
       },
       "targets": [
         {
-          "expr": "sort_desc(newapi_channel_last_error_timestamp_seconds{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\", model_name=~\"${model:regex}\"} >= (${__from} / 1000)) * 1000",
+          "expr": "sort_desc(newapi_channel_last_error_timestamp_seconds{site=~\"$site\", channel_name=~\"$channel\", model_name=~\"$model\"} >= (${__from} / 1000)) * 1000",
           "format": "table",
           "instant": true,
           "refId": "A"
@@ -354,7 +354,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (site, channel_id, channel_name) (rate(newapi_channel_attempt_duration_seconds_sum{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\", result=\"success\"}[5m])) / clamp_min(sum by (site, channel_id, channel_name) (rate(newapi_channel_attempt_duration_seconds_count{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\", result=\"success\"}[5m])), 0.000001)",
+          "expr": "sum by (site, channel_id, channel_name) (rate(newapi_channel_attempt_duration_seconds_sum{site=~\"$site\", channel_name=~\"$channel\", result=\"success\"}[5m])) / clamp_min(sum by (site, channel_id, channel_name) (rate(newapi_channel_attempt_duration_seconds_count{site=~\"$site\", channel_name=~\"$channel\", result=\"success\"}[5m])), 0.000001)",
           "legendFormat": "{{site}} / {{channel_name}} (#{{channel_id}})",
           "refId": "A"
         }
@@ -388,7 +388,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (site, channel_id, channel_name) (rate(newapi_channel_first_response_duration_seconds_sum{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\"}[5m])) / clamp_min(sum by (site, channel_id, channel_name) (rate(newapi_channel_first_response_duration_seconds_count{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\"}[5m])), 0.000001)",
+          "expr": "sum by (site, channel_id, channel_name) (rate(newapi_channel_first_response_duration_seconds_sum{site=~\"$site\", channel_name=~\"$channel\"}[5m])) / clamp_min(sum by (site, channel_id, channel_name) (rate(newapi_channel_first_response_duration_seconds_count{site=~\"$site\", channel_name=~\"$channel\"}[5m])), 0.000001)",
           "legendFormat": "{{site}} / {{channel_name}} (#{{channel_id}})",
           "refId": "A"
         }
@@ -426,7 +426,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (site, channel_id, channel_name, model_name) (increase(newapi_channel_model_requests_total{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\", model_name=~\"${model:regex}\"}[$__rate_interval]))",
+          "expr": "sum by (site, channel_id, channel_name, model_name) (increase(newapi_channel_model_requests_total{site=~\"$site\", channel_name=~\"$channel\", model_name=~\"$model\"}[$__rate_interval]))",
           "legendFormat": "{{site}} / {{channel_name}} / {{model_name}}",
           "refId": "A"
         }
@@ -464,7 +464,7 @@
       },
       "targets": [
         {
-          "expr": "100 * sum by (site, channel_id, channel_name, model_name) (increase(newapi_channel_model_requests_total{site=~\"${site:regex}\", result=\"success\", channel_name=~\"${channel:regex}\", model_name=~\"${model:regex}\"}[$__rate_interval])) / clamp_min(sum by (site, channel_id, channel_name, model_name) (increase(newapi_channel_model_requests_total{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\", model_name=~\"${model:regex}\"}[$__rate_interval])), 1)",
+          "expr": "100 * sum by (site, channel_id, channel_name, model_name) (increase(newapi_channel_model_requests_total{site=~\"$site\", result=\"success\", channel_name=~\"$channel\", model_name=~\"$model\"}[$__rate_interval])) / clamp_min(sum by (site, channel_id, channel_name, model_name) (increase(newapi_channel_model_requests_total{site=~\"$site\", channel_name=~\"$channel\", model_name=~\"$model\"}[$__rate_interval])), 1)",
           "legendFormat": "{{site}} / {{channel_name}} / {{model_name}}",
           "refId": "A"
         }
@@ -541,11 +541,11 @@
         "multi": true,
         "name": "channel",
         "options": [],
-        "query": "query_result(sum by (site, channel_name) (newapi_channel_requests_total{site=~\"${site:regex}\"}))",
+        "query": "query_result(sum by (site, channel_name) (newapi_channel_requests_total{site=~\"$site\"}))",
         "skipUrlSync": false,
         "sort": 1,
         "type": "query",
-        "definition": "query_result(sum by (site, channel_name) (newapi_channel_requests_total{site=~\"${site:regex}\"}))",
+        "definition": "query_result(sum by (site, channel_name) (newapi_channel_requests_total{site=~\"$site\"}))",
         "regex": "/channel_name=\"([^\"]+)\"/",
         "refresh": 1
       },
@@ -566,11 +566,11 @@
         "multi": true,
         "name": "model",
         "options": [],
-        "query": "query_result(sum by (site, channel_name, model_name) (newapi_channel_model_requests_total{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\"}))",
+        "query": "query_result(sum by (site, channel_name, model_name) (newapi_channel_model_requests_total{site=~\"$site\", channel_name=~\"$channel\"}))",
         "skipUrlSync": false,
         "sort": 1,
         "type": "query",
-        "definition": "query_result(sum by (site, channel_name, model_name) (newapi_channel_model_requests_total{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\"}))",
+        "definition": "query_result(sum by (site, channel_name, model_name) (newapi_channel_model_requests_total{site=~\"$site\", channel_name=~\"$channel\"}))",
         "regex": "/model_name=\"([^\"]+)\"/",
         "refresh": 1
       }

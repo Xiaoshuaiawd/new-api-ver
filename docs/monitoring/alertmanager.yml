@@ -2,14 +2,18 @@ global:
   resolve_timeout: 5m
 
 route:
-  group_by: ["alertname", "channel_id", "channel_name"]
-  group_wait: 15s
-  group_interval: 1m
-  repeat_interval: 30m
-  receiver: default-webhook
+  group_by: ["alertname", "site", "severity"]
+  group_wait: 1m
+  group_interval: 10m
+  repeat_interval: 2h
+  receiver: feishu-adapter
 
 receivers:
-  - name: default-webhook
+  - name: feishu-adapter
     webhook_configs:
-      - url: http://your-alert-webhook-endpoint.example.com/alertmanager
-        send_resolved: true
+      - url: http://feishu-alert-adapter:9098/alertmanager/feishu
+        send_resolved: false
+        http_config:
+          authorization:
+            type: Bearer
+            credentials: "__REPLACE_WITH_ALERTMANAGER_FEISHU_ADAPTER_BEARER_TOKEN__"

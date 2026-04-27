@@ -10,14 +10,14 @@ groups:
           summary: "new-api site {{ $labels.site }} GC P99 pause too high"
           description: "Site {{ $labels.site }} GC 99th percentile pause is above 200ms for 5 minutes."
 
-      - alert: NewAPIRelayP99TooHigh
-        expr: histogram_quantile(0.99, sum by (site, le) (rate(newapi_http_request_duration_seconds_bucket{route_tag="relay"}[5m]))) > 10
+      - alert: NewAPIChannelAvgTotalDurationTooHigh
+        expr: (sum by (site, channel_id, channel_name, channel_type) (rate(newapi_channel_attempt_duration_seconds_sum{result="success"}[5m])) / clamp_min(sum by (site, channel_id, channel_name, channel_type) (rate(newapi_channel_attempt_duration_seconds_count{result="success"}[5m])), 0.000001)) > 40
         for: 5m
         labels:
           severity: critical
         annotations:
-          summary: "new-api site {{ $labels.site }} relay P99 latency too high"
-          description: "Site {{ $labels.site }} relay-side P99 request duration is above 10 seconds for 5 minutes."
+          summary: "Site {{ $labels.site }} channel {{ $labels.channel_name }} average total duration too high"
+          description: "Site {{ $labels.site }} channel {{ $labels.channel_name }} ({{ $labels.channel_id }}) average total duration over 5 minutes is above 40 seconds."
 
       - alert: NewAPIHTTPInflightTooHigh
         expr: max by (site) (max_over_time(newapi_http_inflight_requests{route_tag="relay"}[10m])) > 200
@@ -39,23 +39,23 @@ groups:
 
   - name: newapi-channel
     rules:
-      - alert: NewAPIChannelLatencyP95TooHigh
-        expr: histogram_quantile(0.95, sum by (site, le, channel_id, channel_name, channel_type) (rate(newapi_channel_upstream_latency_seconds_bucket[5m]))) > 8
+      - alert: NewAPIChannelAvgFirstResponseDurationTooHigh
+        expr: (sum by (site, channel_id, channel_name, channel_type) (rate(newapi_channel_first_response_duration_seconds_sum[5m])) / clamp_min(sum by (site, channel_id, channel_name, channel_type) (rate(newapi_channel_first_response_duration_seconds_count[5m])), 0.000001)) > 10
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "Site {{ $labels.site }} channel {{ $labels.channel_name }} latency too high"
-          description: "Site {{ $labels.site }} channel {{ $labels.channel_name }} ({{ $labels.channel_id }}) upstream P95 latency is above 8 seconds."
+          summary: "Site {{ $labels.site }} channel {{ $labels.channel_name }} average first response duration too high"
+          description: "Site {{ $labels.site }} channel {{ $labels.channel_name }} ({{ $labels.channel_id }}) average first response duration over 5 minutes is above 10 seconds."
 
       - alert: NewAPIChannelHasErrors
-        expr: sum by (site, channel_id, channel_name, channel_type) (increase(newapi_channel_errors_total[1m])) > 0
+        expr: sum by (site, channel_id, channel_name, channel_type) (increase(newapi_channel_errors_total[5m])) >= 3 and sum by (site, channel_id, channel_name, channel_type) (increase(newapi_channel_requests_total[5m])) >= 10
         for: 0m
         labels:
           severity: critical
         annotations:
           summary: "Site {{ $labels.site }} channel {{ $labels.channel_name }} has errors"
-          description: "Site {{ $labels.site }} channel {{ $labels.channel_name }} ({{ $labels.channel_id }}) produced upstream errors during the last minute."
+          description: "Site {{ $labels.site }} channel {{ $labels.channel_name }} ({{ $labels.channel_id }}) produced at least 3 upstream errors within the last 5 minutes while handling at least 10 requests."
 
       - alert: NewAPIChannelSuccessRateTooLow
         expr: (sum by (site, channel_id, channel_name, channel_type) (increase(newapi_channel_requests_total{result="success"}[5m])) / clamp_min(sum by (site, channel_id, channel_name, channel_type) (increase(newapi_channel_requests_total[5m])), 1)) < 0.95 and sum by (site, channel_id, channel_name, channel_type) (increase(newapi_channel_requests_total[5m])) > 20
