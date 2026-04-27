@@ -148,6 +148,12 @@ func InitEnv() {
 	ChatLogStreamMaxLen = int64(GetEnvOrDefault("CHAT_LOG_STREAM_MAX_LEN", 0))
 	ChatLogDLQMaxLen = int64(GetEnvOrDefault("CHAT_LOG_DLQ_MAX_LEN", 0))
 	ChatLogPayloadInlineMaxBytes = GetEnvOrDefault("CHAT_LOG_PAYLOAD_INLINE_MAX_BYTES", 1024*1024)
+
+	SetPrometheusConfig(PrometheusConfig{
+		Enabled:     GetEnvOrDefaultBool("PROMETHEUS_ENABLED", false),
+		Path:        GetEnvOrDefaultString("PROMETHEUS_PATH", defaultPrometheusPath),
+		BearerToken: GetEnvOrDefaultString("PROMETHEUS_BEARER_TOKEN", ""),
+	})
 	initConstantEnv()
 }
 

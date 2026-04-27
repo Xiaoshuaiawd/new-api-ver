@@ -210,6 +210,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
+		requestKind := common.MetricsRequestKindFromPath(c.Request.URL.Path)
+		attemptObserver := common.BeginChannelAttempt(c, requestKind)
 
 		switch relayFormat {
 		case types.RelayFormatOpenAIRealtime:
@@ -223,9 +225,28 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		if newAPIError == nil {
+			statusCode := c.Writer.Status()
+			if statusCode <= 0 {
+				statusCode = http.StatusOK
+			}
+			if relayInfo.HasSendResponse() {
+				common.ObserveChannelFirstResponseDuration(c, requestKind, relayInfo.FirstResponseTime.Sub(relayInfo.StartTime))
+			}
+			attemptObserver.Done(common.ChannelAttemptResult{
+				Result:     common.ChannelRequestResultSuccess,
+				StatusCode: statusCode,
+			})
 			relayInfo.LastError = nil
 			return
 		}
+		if relayInfo.HasSendResponse() {
+			common.ObserveChannelFirstResponseDuration(c, requestKind, relayInfo.FirstResponseTime.Sub(relayInfo.StartTime))
+		}
+		attemptObserver.Done(common.ChannelAttemptResult{
+			Result:     common.ChannelRequestResultError,
+			StatusCode: newAPIError.StatusCode,
+			ErrorCode:  string(newAPIError.GetErrorCode()),
+		})
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
@@ -352,6 +373,13 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, err.Error()))
+	common.ObserveChannelLastError(c, common.MetricsRequestKindFromPath(c.Request.URL.Path), common.ChannelErrorDetail{
+		ModelName:    c.GetString("original_model"),
+		ErrorType:    string(err.GetErrorType()),
+		ErrorCode:    string(err.GetErrorCode()),
+		StatusCode:   err.StatusCode,
+		ErrorMessage: err.MaskSensitiveError(),
+	})
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
 	if service.ShouldDisableChannel(err) && channelError.AutoBan {
@@ -436,6 +464,13 @@ func RelayMidjourney(c *gin.Context) {
 			"code":        mjErr.Code,
 		})
 		channelId := c.GetInt("channel_id")
+		common.ObserveChannelLastError(c, common.MetricsRequestKindFromPath(c.Request.URL.Path), common.ChannelErrorDetail{
+			ModelName:    c.GetString("original_model"),
+			ErrorType:    string(types.ErrorTypeMidjourneyError),
+			ErrorCode:    fmt.Sprintf("midjourney_code_%d", mjErr.Code),
+			StatusCode:   statusCode,
+			ErrorMessage: strings.TrimSpace(fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result)),
+		})
 		logger.LogError(c, fmt.Sprintf("relay error (channel #%d, status code %d): %s", channelId, statusCode, fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result)))
 	}
 }
@@ -542,11 +577,32 @@ func RelayTask(c *gin.Context) {
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
+		requestKind := common.MetricsRequestKindFromPath(c.Request.URL.Path)
+		attemptObserver := common.BeginChannelAttempt(c, requestKind)
 
 		result, taskErr = relay.RelayTaskSubmit(c, relayInfo)
 		if taskErr == nil {
+			statusCode := c.Writer.Status()
+			if statusCode <= 0 {
+				statusCode = http.StatusOK
+			}
+			if relayInfo.HasSendResponse() {
+				common.ObserveChannelFirstResponseDuration(c, requestKind, relayInfo.FirstResponseTime.Sub(relayInfo.StartTime))
+			}
+			attemptObserver.Done(common.ChannelAttemptResult{
+				Result:     common.ChannelRequestResultSuccess,
+				StatusCode: statusCode,
+			})
 			break
 		}
+		if relayInfo.HasSendResponse() {
+			common.ObserveChannelFirstResponseDuration(c, requestKind, relayInfo.FirstResponseTime.Sub(relayInfo.StartTime))
+		}
+		attemptObserver.Done(common.ChannelAttemptResult{
+			Result:     common.ChannelRequestResultError,
+			StatusCode: taskErr.StatusCode,
+			ErrorCode:  taskErr.Code,
+		})
 
 		if !taskErr.LocalError {
 			processChannelError(c,

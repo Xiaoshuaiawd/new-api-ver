@@ -1,0 +1,41 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/prometheus-rules.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+scrape_configs:
+  # Use one scrape job per site so each site can keep its own bearer token
+  # and expose a stable `site` label for Grafana and alert routing.
+  - job_name: new-api-site-a
+    metrics_path: /metrics
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    authorization:
+      type: Bearer
+      credentials: "__REPLACE_WITH_SITE_A_PROMETHEUS_BEARER_TOKEN__"
+    static_configs:
+      - targets:
+          - site-a-new-api:3000
+        labels:
+          site: "site-a"
+
+  - job_name: new-api-site-b
+    metrics_path: /metrics
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    authorization:
+      type: Bearer
+      credentials: "__REPLACE_WITH_SITE_B_PROMETHEUS_BEARER_TOKEN__"
+    static_configs:
+      - targets:
+          - site-b-new-api:3000
+        labels:
+          site: "site-b"

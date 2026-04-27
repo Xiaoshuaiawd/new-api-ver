@@ -523,11 +523,26 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		}
 	}
 
+	attemptObserver := common.BeginChannelAttempt(c, common.MetricsRequestKindFromPath(c.Request.URL.Path))
+	attemptResult := common.ChannelAttemptResult{
+		Result:     common.ChannelRequestResultError,
+		StatusCode: http.StatusInternalServerError,
+		ErrorCode:  "midjourney_submit_failed",
+	}
+	defer attemptObserver.Done(attemptResult)
+
 	midjResponseWithStatus, responseBody, err := service.DoMidjourneyHttpRequest(c, time.Second*60, fullRequestURL)
 	if err != nil {
+		if midjResponseWithStatus != nil {
+			attemptResult.StatusCode = midjResponseWithStatus.StatusCode
+			if strings.TrimSpace(midjResponseWithStatus.Response.Description) != "" {
+				attemptResult.ErrorCode = midjResponseWithStatus.Response.Description
+			}
+		}
 		return &midjResponseWithStatus.Response
 	}
 	midjResponse := &midjResponseWithStatus.Response
+	attemptResult.StatusCode = midjResponseWithStatus.StatusCode
 
 	defer func() {
 		if consumeQuota && midjResponseWithStatus.StatusCode == 200 {
@@ -593,6 +608,7 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		//非1-提交成功,21-任务已存在和22-排队中，则记录错误原因
 		midjourneyTask.FailReason = midjResponse.Description
 		consumeQuota = false
+		attemptResult.ErrorCode = fmt.Sprintf("midjourney_code_%d", midjResponse.Code)
 	}
 
 	if midjResponse.Code == 21 { //21-任务已存在（处理中或者有结果了）
@@ -634,6 +650,12 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		//修改返回值
 		newBody := strings.Replace(string(responseBody), `"code":22`, `"code":1`, -1)
 		responseBody = []byte(newBody)
+	}
+	if midjResponse.Code == 1 || midjResponse.Code == 21 || midjResponse.Code == 22 {
+		attemptResult = common.ChannelAttemptResult{
+			Result:     common.ChannelRequestResultSuccess,
+			StatusCode: midjResponseWithStatus.StatusCode,
+		}
 	}
 	//resp.Body = io.NopCloser(bytes.NewBuffer(responseBody))
 	bodyReader := io.NopCloser(bytes.NewBuffer(responseBody))
