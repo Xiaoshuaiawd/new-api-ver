@@ -66,4 +66,9 @@ const (
 	// ContextKeyLanguage stores the user's language preference for i18n
 	ContextKeyLanguage ContextKey = "language"
 	ContextKeyIsStream ContextKey = "is_stream"
+
+	// Chat log capture keys
+	ContextKeyChatLogRawRequest  ContextKey = "chat_log_raw_request"
+	ContextKeyChatLogRawResponse ContextKey = "chat_log_raw_response"
+	ContextKeyChatLogWriter      ContextKey = "chat_log_capture_writer"
 )

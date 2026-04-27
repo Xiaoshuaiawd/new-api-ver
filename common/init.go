@@ -55,7 +55,10 @@ func InitEnv() {
 		} else {
 			SessionSecret = ss
 		}
+	} else {
+		log.Println("WARNING: SESSION_SECRET is not set; a random value was generated for this process. Sessions will not survive restarts or work across multiple nodes unless you configure a shared SESSION_SECRET.")
 	}
+	SessionCookieName = BuildSessionCookieName(SessionSecret, os.Getenv("SESSION_COOKIE_NAME"))
 	if os.Getenv("CRYPTO_SECRET") != "" {
 		CryptoSecret = os.Getenv("CRYPTO_SECRET")
 	} else {
@@ -125,6 +128,26 @@ func InitEnv() {
 	SearchRateLimitEnable = GetEnvOrDefaultBool("SEARCH_RATE_LIMIT_ENABLE", true)
 	SearchRateLimitNum = GetEnvOrDefault("SEARCH_RATE_LIMIT", 10)
 	SearchRateLimitDuration = int64(GetEnvOrDefault("SEARCH_RATE_LIMIT_DURATION", 60))
+
+	// Chat log async storage
+	ChatLogEnabled = GetEnvOrDefaultBool("CHAT_LOG_ENABLED", false)
+	chatLogTZ := GetEnvOrDefaultString("CHAT_LOG_TIMEZONE", "Asia/Shanghai")
+	if chatLogTZ != "" && chatLogTZ != "Asia/Shanghai" {
+		SysLog(fmt.Sprintf("CHAT_LOG_TIMEZONE=%s is not allowed, force to Asia/Shanghai", chatLogTZ))
+		chatLogTZ = "Asia/Shanghai"
+	}
+	ChatLogTimeZone = chatLogTZ
+	ChatLogStreamKey = GetEnvOrDefaultString("CHAT_LOG_STREAM_KEY", "chat_log_events")
+	ChatLogDLQKey = GetEnvOrDefaultString("CHAT_LOG_DLQ_KEY", "chat_log_events_dlq")
+	ChatLogConsumerGroup = GetEnvOrDefaultString("CHAT_LOG_CONSUMER_GROUP", "chat_log_cg")
+	ChatLogConsumerStartID = GetEnvOrDefaultString("CHAT_LOG_CONSUMER_START_ID", "0")
+	ChatLogMaxRetry = GetEnvOrDefault("CHAT_LOG_MAX_RETRY", 8)
+	ChatLogMaxBatch = GetEnvOrDefault("CHAT_LOG_MAX_BATCH", 100)
+	ChatLogConsumerWorkers = GetEnvOrDefault("CHAT_LOG_CONSUMER_WORKERS", 8)
+	ChatLogLocalWorkers = GetEnvOrDefault("CHAT_LOG_LOCAL_WORKERS", 2)
+	ChatLogStreamMaxLen = int64(GetEnvOrDefault("CHAT_LOG_STREAM_MAX_LEN", 0))
+	ChatLogDLQMaxLen = int64(GetEnvOrDefault("CHAT_LOG_DLQ_MAX_LEN", 0))
+	ChatLogPayloadInlineMaxBytes = GetEnvOrDefault("CHAT_LOG_PAYLOAD_INLINE_MAX_BYTES", 1024*1024)
 	initConstantEnv()
 }
 

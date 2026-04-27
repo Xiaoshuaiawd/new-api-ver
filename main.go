@@ -177,7 +177,7 @@ func main() {
 		Secure:   false,
 		SameSite: http.SameSiteStrictMode,
 	})
-	server.Use(sessions.Sessions("session", store))
+	server.Use(sessions.Sessions(common.SessionCookieName, store))
 
 	InjectUmamiAnalytics()
 	InjectGoogleAnalytics()
@@ -285,11 +285,19 @@ func InitResources() error {
 		return err
 	}
 
+	err = model.InitChatLogDB()
+	if err != nil {
+		return err
+	}
+
 	// Initialize Redis
 	err = common.InitRedisClient()
 	if err != nil {
 		return err
 	}
+
+	// Initialize async chat log pipeline (Redis Stream + consumer + partition precreate)
+	service.StartChatLogPipeline()
 
 	// 启动系统监控
 	common.StartSystemMonitor()

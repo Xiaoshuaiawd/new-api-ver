@@ -254,6 +254,8 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		Group:            relayInfo.UsingGroup,
 		Other:            other,
 	})
+
+	EmitChatLogSuccess(ctx, relayInfo, usage.InputTokens, usage.OutputTokens, usage.TotalTokens)
 }
 
 func CalcOpenRouterCacheCreateTokens(usage dto.Usage, priceData types.PriceData) int {
@@ -375,6 +377,8 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		Group:            relayInfo.UsingGroup,
 		Other:            other,
 	})
+
+	EmitChatLogSuccess(ctx, relayInfo, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
 }
 
 func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {

@@ -471,4 +471,6 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		Group:            relayInfo.UsingGroup,
 		Other:            other,
 	})
+
+	EmitChatLogSuccess(ctx, relayInfo, summary.PromptTokens, summary.CompletionTokens, summary.TotalTokens)
 }

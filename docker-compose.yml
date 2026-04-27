@@ -16,7 +16,8 @@ version: '3.4' # For compatibility with older Docker versions
 
 services:
   new-api:
-    image: calciumion/new-api:latest
+    #image: calciumion/new-api:latest
+    build: .
     container_name: new-api
     restart: always
     command: --log-dir /app/logs
@@ -27,15 +28,33 @@ services:
       - ./logs:/app/logs
     environment:
       - SQL_DSN=postgresql://root:123456@postgres:5432/new-api # ⚠️ IMPORTANT: Change the password in production!
+      - LOG_SQL_DSN=postgresql://root:123456@postgres:5432/new-api # 常规 logs 表数据库
+      - MES_SQL_DSN=postgresql://root:123456@postgres:5432/new-api # 聊天数据 chat_log_* 分表数据库
 #      - SQL_DSN=root:123456@tcp(mysql:3306)/new-api  # Point to the mysql service, uncomment if using MySQL
+#      - LOG_SQL_DSN=root:123456@tcp(mysql:3306)/new-api  # logs 表 MySQL DSN
+#      - MES_SQL_DSN=root:123456@tcp(mysql:3306)/new-api  # chat_log_* 分表 MySQL DSN
       - REDIS_CONN_STRING=redis://:123456@redis:6379 # ⚠️ IMPORTANT: Change the password in production!
+      - REDIS_POOL_SIZE=128 # Redis 连接池大小（高并发聊天日志建议 >= 64）
       - TZ=Asia/Shanghai
+      - CHAT_LOG_ENABLED=true  # 是否启用聊天日志记录 (Whether to enable chat log recording)
+      - CHAT_LOG_TIMEZONE=Asia/Shanghai # 聊天日志统一时区（固定上海时区）
+      - CHAT_LOG_STREAM_KEY=chat_log_events # Redis Stream 主队列
+      - CHAT_LOG_DLQ_KEY=chat_log_events_dlq # Redis Stream 死信队列
+      - CHAT_LOG_CONSUMER_GROUP=chat_log_cg # Redis 消费者组
+      - CHAT_LOG_CONSUMER_START_ID=0 # 新建消费组起始位点：0=消费历史，$=仅新消息
+      - CHAT_LOG_MAX_RETRY=3 # 入库失败最大重试次数
+      - CHAT_LOG_MAX_BATCH=10 # 每批消费条数（高吞吐建议 300~1000）
+      - CHAT_LOG_CONSUMER_WORKERS=32 # Redis Stream 消费协程数
+      - CHAT_LOG_LOCAL_WORKERS=4 # 本地降级队列消费协程数
+      - CHAT_LOG_STREAM_MAX_LEN=20000000 # Redis 主队列最大长度（近似裁剪）
+      - CHAT_LOG_DLQ_MAX_LEN=500000 # Redis 死信队列最大长度（近似裁剪）
+      - CHAT_LOG_PAYLOAD_INLINE_MAX_BYTES=1000000 # 超过该大小可走对象存储引用
       - ERROR_LOG_ENABLED=true # 是否启用错误日志记录 (Whether to enable error log recording)
       - BATCH_UPDATE_ENABLED=true  # 是否启用批量更新 (Whether to enable batch update)
       - NODE_NAME=new-api-node-1  # 节点名称，用于审计日志中标识节点身份；多节点/容器部署时建议设置 (Node name used in audit logs; recommended when running multiple instances or in containers)
 #      - STREAMING_TIMEOUT=300  # 流模式无响应超时时间，单位秒，默认120秒，如果出现空补全可以尝试改为更大值 （Streaming timeout in seconds, default is 120s. Increase if experiencing empty completions）
 #      - SESSION_SECRET=random_string  # 多机部署时设置，必须修改这个随机字符串！！ （multi-node deployment, set this to a random string!!!!!!!）
-#      - SYNC_FREQUENCY=60  # Uncomment if regular database syncing is needed
+      - SYNC_FREQUENCY=60  # Uncomment if regular database syncing is needed
 #      - GOOGLE_ANALYTICS_ID=G-XXXXXXXXXX  # Google Analytics 的测量 ID (Google Analytics Measurement ID)
 #      - UMAMI_WEBSITE_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx  # Umami 网站 ID (Umami Website ID)
 #      - UMAMI_SCRIPT_URL=https://analytics.umami.is/script.js  # Umami 脚本 URL，默认为官方地址 (Umami Script URL, defaults to official URL)
@@ -72,8 +91,8 @@ services:
       - pg_data:/var/lib/postgresql/data
     networks:
       - new-api-network
-#    ports:
-#      - "5432:5432"  # Uncomment if you need to access PostgreSQL from outside Docker
+    ports:
+      - "5432:5432"  # Uncomment if you need to access PostgreSQL from outside Docker
 
 #  mysql:
 #    image: mysql:8.2
