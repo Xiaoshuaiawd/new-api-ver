@@ -515,7 +515,9 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		}
 	}
 
+	startedAt := time.Now()
 	resp, err := client.Do(req)
+	common2.ObserveChannelUpstreamLatency(c, common2.MetricsRequestKindFromPath(c.Request.URL.Path), time.Since(startedAt))
 	if err != nil {
 		logger.LogError(c, "do request failed: "+err.Error())
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))

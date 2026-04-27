@@ -1,0 +1,587 @@
+{
+  "__requires": [
+    {
+      "type": "grafana",
+      "id": "grafana",
+      "name": "Grafana",
+      "version": "10.0.0"
+    },
+    {
+      "type": "datasource",
+      "id": "prometheus",
+      "name": "Prometheus",
+      "version": "1.0.0"
+    },
+    {
+      "type": "panel",
+      "id": "timeseries",
+      "name": "Time series",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "bargauge",
+      "name": "Bar gauge",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "table",
+      "name": "Table",
+      "version": ""
+    }
+  ],
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (site, le) (rate(go_gc_duration_seconds_bucket{site=~\"${site:regex}\"}[$__rate_interval])))",
+          "legendFormat": "{{site}} / GC P99",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (site) (go_goroutines{site=~\"${site:regex}\"})",
+          "legendFormat": "{{site}} / Goroutines",
+          "refId": "B"
+        }
+      ],
+      "title": "GC 暂停与 Goroutine",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (site, channel_id, channel_name) (increase(newapi_channel_requests_total{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\"}[$__rate_interval]))",
+          "legendFormat": "{{site}} / {{channel_name}} (#{{channel_id}})",
+          "refId": "A"
+        }
+      ],
+      "title": "所选渠道请求流量",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "rpm"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (site, channel_id, channel_name) (newapi_channel_success_rpm_last_1m{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\"})",
+          "legendFormat": "{{site}} / {{channel_name}} (#{{channel_id}})",
+          "refId": "A"
+        }
+      ],
+      "title": "所选渠道 RPM（最近 1 分钟）",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (site, channel_id, channel_name) (increase(newapi_channel_errors_total{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\"}[$__rate_interval]))",
+          "legendFormat": "{{site}} / {{channel_name}} (#{{channel_id}})",
+          "refId": "A"
+        }
+      ],
+      "title": "所选渠道报错次数",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "100 * sum by (site, channel_id, channel_name) (increase(newapi_channel_requests_total{site=~\"${site:regex}\", result=\"success\", channel_name=~\"${channel:regex}\"}[$__rate_interval])) / clamp_min(sum by (site, channel_id, channel_name) (increase(newapi_channel_requests_total{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\"}[$__rate_interval])), 1)",
+          "legendFormat": "{{site}} / {{channel_name}} (#{{channel_id}})",
+          "refId": "A"
+        }
+      ],
+      "title": "所选渠道成功率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              },
+              {
+                "id": "displayName",
+                "value": "Error Time"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "id": 8,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ]
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Error Time"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "sort_desc(newapi_channel_last_error_timestamp_seconds{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\", model_name=~\"${model:regex}\"} >= (${__from} / 1000)) * 1000",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true,
+              "channel_type": true,
+              "request_kind": true,
+              "error_code": true
+            },
+            "indexByName": {
+              "Value": 0,
+              "site": 1,
+              "channel_name": 2,
+              "model_name": 3,
+              "status_code": 4,
+              "error_message": 5,
+              "error_type": 6,
+              "channel_id": 7
+            },
+            "renameByName": {
+              "Value": "Error Time",
+              "site": "Site",
+              "channel_name": "Channel Name",
+              "model_name": "Model",
+              "status_code": "Status Code",
+              "error_message": "Error Message",
+              "error_type": "Error Type",
+              "channel_id": "Channel ID"
+            }
+          }
+        }
+      ],
+      "title": "所选渠道最近错误明细",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 26
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (site, channel_id, channel_name) (rate(newapi_channel_attempt_duration_seconds_sum{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\", result=\"success\"}[5m])) / clamp_min(sum by (site, channel_id, channel_name) (rate(newapi_channel_attempt_duration_seconds_count{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\", result=\"success\"}[5m])), 0.000001)",
+          "legendFormat": "{{site}} / {{channel_name}} (#{{channel_id}})",
+          "refId": "A"
+        }
+      ],
+      "title": "所选渠道平均总用时（5 分钟）",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (site, channel_id, channel_name) (rate(newapi_channel_first_response_duration_seconds_sum{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\"}[5m])) / clamp_min(sum by (site, channel_id, channel_name) (rate(newapi_channel_first_response_duration_seconds_count{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\"}[5m])), 0.000001)",
+          "legendFormat": "{{site}} / {{channel_name}} (#{{channel_id}})",
+          "refId": "A"
+        }
+      ],
+      "title": "所选渠道平均首字用时（5 分钟）",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 34
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (site, channel_id, channel_name, model_name) (increase(newapi_channel_model_requests_total{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\", model_name=~\"${model:regex}\"}[$__rate_interval]))",
+          "legendFormat": "{{site}} / {{channel_name}} / {{model_name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "所选渠道模型流量分布",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 34
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "100 * sum by (site, channel_id, channel_name, model_name) (increase(newapi_channel_model_requests_total{site=~\"${site:regex}\", result=\"success\", channel_name=~\"${channel:regex}\", model_name=~\"${model:regex}\"}[$__rate_interval])) / clamp_min(sum by (site, channel_id, channel_name, model_name) (increase(newapi_channel_model_requests_total{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\", model_name=~\"${model:regex}\"}[$__rate_interval])), 1)",
+          "legendFormat": "{{site}} / {{channel_name}} / {{model_name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "所选渠道模型成功率",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": [
+    "new-api",
+    "prometheus"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "数据源",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$datasource"
+        },
+        "hide": 0,
+        "allValue": ".*",
+        "includeAll": true,
+        "label": "站点",
+        "multi": true,
+        "name": "site",
+        "options": [],
+        "query": "query_result(sum by (site) (go_goroutines))",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query",
+        "definition": "query_result(sum by (site) (go_goroutines))",
+        "regex": "/site=\"([^\"]+)\"/",
+        "refresh": 1
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$datasource"
+        },
+        "hide": 0,
+        "allValue": ".*",
+        "includeAll": true,
+        "label": "渠道",
+        "multi": true,
+        "name": "channel",
+        "options": [],
+        "query": "query_result(sum by (site, channel_name) (newapi_channel_requests_total{site=~\"${site:regex}\"}))",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query",
+        "definition": "query_result(sum by (site, channel_name) (newapi_channel_requests_total{site=~\"${site:regex}\"}))",
+        "regex": "/channel_name=\"([^\"]+)\"/",
+        "refresh": 1
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$datasource"
+        },
+        "hide": 0,
+        "allValue": ".*",
+        "includeAll": true,
+        "label": "模型",
+        "multi": true,
+        "name": "model",
+        "options": [],
+        "query": "query_result(sum by (site, channel_name, model_name) (newapi_channel_model_requests_total{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\"}))",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query",
+        "definition": "query_result(sum by (site, channel_name, model_name) (newapi_channel_model_requests_total{site=~\"${site:regex}\", channel_name=~\"${channel:regex}\"}))",
+        "regex": "/model_name=\"([^\"]+)\"/",
+        "refresh": 1
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timezone": "Asia/Shanghai",
+  "title": "new-api Prometheus 监控看板",
+  "uid": "newapi-prometheus",
+  "version": 1
+}

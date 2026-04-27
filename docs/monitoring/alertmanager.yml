@@ -1,0 +1,15 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ["alertname", "channel_id", "channel_name"]
+  group_wait: 15s
+  group_interval: 1m
+  repeat_interval: 30m
+  receiver: default-webhook
+
+receivers:
+  - name: default-webhook
+    webhook_configs:
+      - url: http://your-alert-webhook-endpoint.example.com/alertmanager
+        send_resolved: true

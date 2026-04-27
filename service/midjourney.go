@@ -211,7 +211,9 @@ func DoMidjourneyHttpRequest(c *gin.Context, timeout time.Duration, fullRequestU
 		req.Header.Set("mj-api-secret", auth)
 	}
 	defer cancel()
+	startedAt := time.Now()
 	resp, err := GetHttpClient().Do(req)
+	common.ObserveChannelUpstreamLatency(c, common.MetricsRequestKindFromPath(c.Request.URL.Path), time.Since(startedAt))
 	if err != nil {
 		common.SysLog("do request failed: " + err.Error())
 		return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "do_request_failed", http.StatusInternalServerError), nullBytes, err
