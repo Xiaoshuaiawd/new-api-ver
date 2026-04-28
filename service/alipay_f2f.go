@@ -286,13 +286,18 @@ func (c *AlipayF2FClient) parseResponse(body []byte, method string) ([]byte, err
 }
 
 func (c *AlipayF2FClient) Precreate(ctx context.Context, req *AlipayF2FPrecreateRequest) (*AlipayF2FPrecreateResponse, error) {
-	values, err := c.buildRequestValues("alipay.trade.precreate", map[string]any{
+	bizContent := map[string]any{
 		"out_trade_no":    req.OutTradeNo,
 		"total_amount":    req.TotalAmount,
 		"subject":         req.Subject,
 		"timeout_express": req.TimeoutExpress,
 		"product_code":    "FACE_TO_FACE_PAYMENT",
-	})
+	}
+	if c.sellerID != "" {
+		bizContent["seller_id"] = c.sellerID
+	}
+
+	values, err := c.buildRequestValues("alipay.trade.precreate", bizContent)
 	if err != nil {
 		return nil, err
 	}
@@ -325,9 +330,14 @@ func (c *AlipayF2FClient) Precreate(ctx context.Context, req *AlipayF2FPrecreate
 }
 
 func (c *AlipayF2FClient) Query(ctx context.Context, outTradeNo string) (*AlipayF2FTradeQueryResponse, error) {
-	values, err := c.buildRequestValues("alipay.trade.query", map[string]any{
+	bizContent := map[string]any{
 		"out_trade_no": outTradeNo,
-	})
+	}
+	if c.sellerID != "" {
+		bizContent["seller_id"] = c.sellerID
+	}
+
+	values, err := c.buildRequestValues("alipay.trade.query", bizContent)
 	if err != nil {
 		return nil, err
 	}
@@ -353,9 +363,14 @@ func (c *AlipayF2FClient) Query(ctx context.Context, outTradeNo string) (*Alipay
 }
 
 func (c *AlipayF2FClient) Close(ctx context.Context, outTradeNo string) (*AlipayF2FTradeCloseResponse, error) {
-	values, err := c.buildRequestValues("alipay.trade.close", map[string]any{
+	bizContent := map[string]any{
 		"out_trade_no": outTradeNo,
-	})
+	}
+	if c.sellerID != "" {
+		bizContent["seller_id"] = c.sellerID
+	}
+
+	values, err := c.buildRequestValues("alipay.trade.close", bizContent)
 	if err != nil {
 		return nil, err
 	}

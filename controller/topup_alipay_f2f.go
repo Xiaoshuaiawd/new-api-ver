@@ -74,6 +74,17 @@ func buildAlipayF2FSubject(amount int64) string {
 	return fmt.Sprintf("%s Recharge %d", subjectPrefix, amount)
 }
 
+func buildAlipayF2FErrorMessage(c *gin.Context, prefix string, err error) string {
+	if err == nil {
+		return prefix
+	}
+	role := c.GetInt("role")
+	if role >= common.RoleAdminUser {
+		return fmt.Sprintf("%s：%s", prefix, err.Error())
+	}
+	return prefix
+}
+
 func getAlipayF2FUserGroup(userID int) (string, error) {
 	user, err := model.GetUserById(userID, false)
 	if err != nil {
@@ -166,7 +177,7 @@ func RequestAlipayF2FPay(c *gin.Context) {
 	})
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("支付宝当面付 下单失败 user_id=%d trade_no=%s amount=%d error=%q", id, tradeNo, req.Amount, err.Error()))
-		common.ApiErrorMsg(c, "拉起支付失败")
+		common.ApiErrorMsg(c, buildAlipayF2FErrorMessage(c, "拉起支付失败", err))
 		return
 	}
 	if strings.TrimSpace(precreateResp.QRCode) == "" {
