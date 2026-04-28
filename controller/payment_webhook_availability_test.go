@@ -164,3 +164,38 @@ func TestEpayWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 	operation_setting.PayMethods = nil
 	require.False(t, isEpayWebhookEnabled())
 }
+
+func TestAlipayF2FWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
+	originalEnabled := setting.AlipayF2FEnabled
+	originalAppID := setting.AlipayF2FAppID
+	originalSellerID := setting.AlipayF2FSellerID
+	originalPrivateKey := setting.AlipayF2FPrivateKey
+	originalPublicKey := setting.AlipayF2FPublicKey
+	originalMinTopUp := setting.AlipayF2FMinTopUp
+	t.Cleanup(func() {
+		setting.AlipayF2FEnabled = originalEnabled
+		setting.AlipayF2FAppID = originalAppID
+		setting.AlipayF2FSellerID = originalSellerID
+		setting.AlipayF2FPrivateKey = originalPrivateKey
+		setting.AlipayF2FPublicKey = originalPublicKey
+		setting.AlipayF2FMinTopUp = originalMinTopUp
+	})
+
+	setting.AlipayF2FEnabled = true
+	setting.AlipayF2FAppID = "2026000000000000"
+	setting.AlipayF2FSellerID = "2088000000000000"
+	setting.AlipayF2FPrivateKey = "merchant-private-key"
+	setting.AlipayF2FPublicKey = ""
+	setting.AlipayF2FMinTopUp = 1
+	require.False(t, isAlipayF2FWebhookEnabled())
+
+	setting.AlipayF2FPublicKey = "alipay-public-key"
+	require.True(t, isAlipayF2FWebhookEnabled())
+
+	setting.AlipayF2FEnabled = false
+	require.False(t, isAlipayF2FWebhookEnabled())
+
+	setting.AlipayF2FEnabled = true
+	setting.AlipayF2FMinTopUp = 0
+	require.False(t, isAlipayF2FWebhookEnabled())
+}

@@ -90,6 +90,15 @@ func InitOptionMap() {
 	common.OptionMap["CreemProducts"] = setting.CreemProducts
 	common.OptionMap["CreemTestMode"] = strconv.FormatBool(setting.CreemTestMode)
 	common.OptionMap["CreemWebhookSecret"] = setting.CreemWebhookSecret
+	common.OptionMap["AlipayF2FEnabled"] = strconv.FormatBool(setting.AlipayF2FEnabled)
+	common.OptionMap["AlipayF2FAppID"] = setting.AlipayF2FAppID
+	common.OptionMap["AlipayF2FSellerID"] = setting.AlipayF2FSellerID
+	common.OptionMap["AlipayF2FPrivateKey"] = setting.AlipayF2FPrivateKey
+	common.OptionMap["AlipayF2FPublicKey"] = setting.AlipayF2FPublicKey
+	common.OptionMap["AlipayF2FGateway"] = setting.AlipayF2FGateway
+	common.OptionMap["AlipayF2FMinTopUp"] = strconv.Itoa(setting.AlipayF2FMinTopUp)
+	common.OptionMap["AlipayF2FOrderTimeout"] = strconv.Itoa(setting.AlipayF2FOrderTimeout)
+	common.OptionMap["AlipayF2FSubjectPrefix"] = setting.AlipayF2FSubjectPrefix
 	common.OptionMap["WaffoEnabled"] = strconv.FormatBool(setting.WaffoEnabled)
 	common.OptionMap["WaffoApiKey"] = setting.WaffoApiKey
 	common.OptionMap["WaffoPrivateKey"] = setting.WaffoPrivateKey
@@ -389,6 +398,24 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.CreemTestMode = value == "true"
 	case "CreemWebhookSecret":
 		setting.CreemWebhookSecret = value
+	case "AlipayF2FEnabled":
+		setting.AlipayF2FEnabled = value == "true"
+	case "AlipayF2FAppID":
+		setting.AlipayF2FAppID = value
+	case "AlipayF2FSellerID":
+		setting.AlipayF2FSellerID = value
+	case "AlipayF2FPrivateKey":
+		setting.AlipayF2FPrivateKey = value
+	case "AlipayF2FPublicKey":
+		setting.AlipayF2FPublicKey = value
+	case "AlipayF2FGateway":
+		setting.AlipayF2FGateway = value
+	case "AlipayF2FMinTopUp":
+		setting.AlipayF2FMinTopUp, _ = strconv.Atoi(value)
+	case "AlipayF2FOrderTimeout":
+		setting.AlipayF2FOrderTimeout, _ = strconv.Atoi(value)
+	case "AlipayF2FSubjectPrefix":
+		setting.AlipayF2FSubjectPrefix = value
 	case "WaffoEnabled":
 		setting.WaffoEnabled = value == "true"
 	case "WaffoApiKey":

@@ -21,6 +21,7 @@ import React, { useEffect, useState } from 'react';
 import { Card, Spin, Tabs } from '@douyinfe/semi-ui';
 import SettingsGeneralPayment from '../../pages/Setting/Payment/SettingsGeneralPayment';
 import SettingsPaymentGateway from '../../pages/Setting/Payment/SettingsPaymentGateway';
+import SettingsPaymentGatewayAlipayF2F from '../../pages/Setting/Payment/SettingsPaymentGatewayAlipayF2F';
 import SettingsPaymentGatewayStripe from '../../pages/Setting/Payment/SettingsPaymentGatewayStripe';
 import SettingsPaymentGatewayCreem from '../../pages/Setting/Payment/SettingsPaymentGatewayCreem';
 import SettingsPaymentGatewayWaffo from '../../pages/Setting/Payment/SettingsPaymentGatewayWaffo';
@@ -42,6 +43,16 @@ const PaymentSetting = () => {
     PayMethods: '',
     AmountOptions: '',
     AmountDiscount: '',
+
+    AlipayF2FEnabled: false,
+    AlipayF2FAppID: '',
+    AlipayF2FSellerID: '',
+    AlipayF2FPrivateKey: '',
+    AlipayF2FPublicKey: '',
+    AlipayF2FGateway: 'https://openapi.alipay.com/gateway.do',
+    AlipayF2FMinTopUp: 1,
+    AlipayF2FOrderTimeout: 30,
+    AlipayF2FSubjectPrefix: 'new-api',
 
     StripeApiSecret: '',
     StripeWebhookSecret: '',
@@ -108,6 +119,8 @@ const PaymentSetting = () => {
           case 'MinTopUp':
           case 'StripeUnitPrice':
           case 'StripeMinTopUp':
+          case 'AlipayF2FMinTopUp':
+          case 'AlipayF2FOrderTimeout':
           case 'WaffoPancakeUnitPrice':
           case 'WaffoPancakeMinTopUp':
             newInputs[item.key] = parseFloat(item.value);
@@ -172,6 +185,13 @@ const PaymentSetting = () => {
             </Tabs.TabPane>
             <Tabs.TabPane tab={t('易支付设置')} itemKey='epay'>
               <SettingsPaymentGateway
+                options={inputs}
+                refresh={onRefresh}
+                hideSectionTitle
+              />
+            </Tabs.TabPane>
+            <Tabs.TabPane tab={t('支付宝当面付')} itemKey='alipay-f2f'>
+              <SettingsPaymentGatewayAlipayF2F
                 options={inputs}
                 refresh={onRefresh}
                 hideSectionTitle

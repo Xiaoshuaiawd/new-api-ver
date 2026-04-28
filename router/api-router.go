@@ -48,6 +48,7 @@ func SetApiRouter(router *gin.Engine) {
 
 		apiRouter.POST("/stripe/webhook", controller.StripeWebhook)
 		apiRouter.POST("/creem/webhook", controller.CreemWebhook)
+		apiRouter.POST("/alipay-f2f/notify", controller.AlipayF2FNotify)
 		apiRouter.POST("/waffo/webhook", controller.WaffoWebhook)
 		//apiRouter.POST("/waffo-pancake/webhook", controller.WaffoPancakeWebhook)
 
@@ -88,6 +89,9 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.POST("/topup", middleware.CriticalRateLimit(), controller.TopUp)
 				selfRoute.POST("/pay", middleware.CriticalRateLimit(), controller.RequestEpay)
 				selfRoute.POST("/amount", controller.RequestAmount)
+				selfRoute.POST("/alipay-f2f/pay", middleware.CriticalRateLimit(), controller.RequestAlipayF2FPay)
+				selfRoute.POST("/alipay-f2f/amount", controller.RequestAlipayF2FAmount)
+				selfRoute.GET("/alipay-f2f/topup/:tradeNo/status", controller.GetAlipayF2FTopUpStatus)
 				selfRoute.POST("/stripe/pay", middleware.CriticalRateLimit(), controller.RequestStripePay)
 				selfRoute.POST("/stripe/amount", controller.RequestStripeAmount)
 				selfRoute.POST("/creem/pay", middleware.CriticalRateLimit(), controller.RequestCreemPay)

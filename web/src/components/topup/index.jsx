@@ -38,6 +38,7 @@ import RechargeCard from './RechargeCard';
 import InvitationCard from './InvitationCard';
 import TransferModal from './modals/TransferModal';
 import PaymentConfirmModal from './modals/PaymentConfirmModal';
+import AlipayF2FModal from './modals/AlipayF2FModal';
 import TopupHistoryModal from './modals/TopupHistoryModal';
 
 const TopUp = () => {
@@ -63,6 +64,8 @@ const TopUp = () => {
   const [enableStripeTopUp, setEnableStripeTopUp] = useState(
     statusState?.status?.enable_stripe_topup || false,
   );
+  const [enableAlipayF2FTopUp, setEnableAlipayF2FTopUp] = useState(false);
+  const [alipayF2FMinTopUp, setAlipayF2FMinTopUp] = useState(1);
   const [statusLoading, setStatusLoading] = useState(true);
 
   // Creem 相关状态
@@ -85,6 +88,15 @@ const TopUp = () => {
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [payMethods, setPayMethods] = useState([]);
+  const [alipayF2FModalOpen, setAlipayF2FModalOpen] = useState(false);
+  const [alipayF2FOrder, setAlipayF2FOrder] = useState({
+    tradeNo: '',
+    qrCode: '',
+    status: 'pending',
+    tradeStatus: '',
+    payMoney: '',
+  });
+  const alipayF2FPollRef = useRef(null);
 
   const affFetchedRef = useRef(false);
 
@@ -135,6 +147,9 @@ const TopUp = () => {
   };
 
   const requestAmountByPayment = async (payment, value) => {
+    if (payment === 'alipay_f2f') {
+      return getAlipayF2FAmount(value);
+    }
     if (payment === 'stripe') {
       return getStripeAmount(value);
     }
@@ -145,6 +160,54 @@ const TopUp = () => {
       return getWaffoAmount(value);
     }
     return getAmount(value);
+  };
+
+  const clearAlipayF2FPolling = () => {
+    if (alipayF2FPollRef.current) {
+      clearInterval(alipayF2FPollRef.current);
+      alipayF2FPollRef.current = null;
+    }
+  };
+
+  const refreshAlipayF2FStatus = async (tradeNo) => {
+    try {
+      const res = await API.get(`/api/user/alipay-f2f/topup/${tradeNo}/status`);
+      if (!res.data?.success) {
+        return;
+      }
+
+      const data = res.data.data || {};
+      setAlipayF2FOrder((prev) => ({
+        ...prev,
+        tradeNo,
+        status: data.status || prev.status,
+        tradeStatus: data.trade_status || prev.tradeStatus,
+      }));
+
+      if (data.status === 'success') {
+        clearAlipayF2FPolling();
+        showSuccess(t('支付成功，额度已到账'));
+        setAlipayF2FModalOpen(false);
+        setOpenHistory(true);
+        getUserQuota().then();
+      } else if (data.status === 'expired') {
+        clearAlipayF2FPolling();
+        showInfo(t('订单已过期，请重新发起支付'));
+      } else if (data.status === 'failed') {
+        clearAlipayF2FPolling();
+        showError(t('支付失败，请稍后重试'));
+      }
+    } catch (error) {
+      // ignore polling failures
+    }
+  };
+
+  const startAlipayF2FPolling = (tradeNo) => {
+    clearAlipayF2FPolling();
+    refreshAlipayF2FStatus(tradeNo).then();
+    alipayF2FPollRef.current = window.setInterval(() => {
+      refreshAlipayF2FStatus(tradeNo).then();
+    }, 3000);
   };
 
   const topUp = async () => {
@@ -192,7 +255,12 @@ const TopUp = () => {
   };
 
   const preTopUp = async (payment) => {
-    if (payment === 'stripe') {
+    if (payment === 'alipay_f2f') {
+      if (!enableAlipayF2FTopUp) {
+        showError(t('管理员未开启支付宝当面付充值！'));
+        return;
+      }
+    } else if (payment === 'stripe') {
       if (!enableStripeTopUp) {
         showError(t('管理员未开启Stripe充值！'));
         return;
@@ -233,6 +301,17 @@ const TopUp = () => {
   };
 
   const onlineTopUp = async () => {
+    if (payWay === 'alipay_f2f') {
+      setConfirmLoading(true);
+      try {
+        await alipayF2FTopUp();
+      } finally {
+        setOpen(false);
+        setConfirmLoading(false);
+      }
+      return;
+    }
+
     if (payWay === 'waffo_pancake') {
       setConfirmLoading(true);
       try {
@@ -332,6 +411,63 @@ const TopUp = () => {
     } finally {
       setOpen(false);
       setConfirmLoading(false);
+    }
+  };
+
+  const getAlipayF2FAmount = async (value) => {
+    if (value === undefined) {
+      value = topUpCount;
+    }
+    setAmountLoading(true);
+    try {
+      const res = await API.post('/api/user/alipay-f2f/amount', {
+        amount: parseInt(value),
+      });
+      if (res?.data?.success) {
+        setAmount(parseFloat(res.data.data));
+      } else {
+        setAmount(0);
+      }
+    } catch (err) {
+      setAmount(0);
+    } finally {
+      setAmountLoading(false);
+    }
+  };
+
+  const alipayF2FTopUp = async () => {
+    if (topUpCount < alipayF2FMinTopUp) {
+      showError(t('充值数量不能小于') + alipayF2FMinTopUp);
+      return;
+    }
+
+    setPaymentLoading(true);
+    try {
+      const res = await API.post('/api/user/alipay-f2f/pay', {
+        amount: parseInt(topUpCount),
+        payment_method: 'alipay_f2f',
+      });
+
+      if (res?.data?.success) {
+        const data = res.data.data || {};
+        setAlipayF2FOrder({
+          tradeNo: data.trade_no || '',
+          qrCode: data.qr_code || '',
+          status: data.status || 'pending',
+          tradeStatus: '',
+          payMoney: data.pay_money || '',
+        });
+        setAlipayF2FModalOpen(true);
+        if (data.trade_no) {
+          startAlipayF2FPolling(data.trade_no);
+        }
+      } else {
+        showError(res?.data?.message || t('支付请求失败'));
+      }
+    } catch (error) {
+      showError(t('支付请求失败'));
+    } finally {
+      setPaymentLoading(false);
     }
   };
 
@@ -613,7 +749,7 @@ const TopUp = () => {
               }
 
               if (!method.color) {
-                if (method.type === 'alipay') {
+                if (method.type === 'alipay' || method.type === 'alipay_f2f') {
                   method.color = 'rgba(var(--semi-blue-5), 1)';
                 } else if (method.type === 'wxpay') {
                   method.color = 'rgba(var(--semi-green-5), 1)';
@@ -633,6 +769,7 @@ const TopUp = () => {
           // 这个逻辑现在由后端处理，如果 Stripe 启用，后端会在 pay_methods 中包含它
 
           setPayMethods(payMethods);
+          const enableAlipayF2FTopUp = data.enable_alipay_f2f_topup || false;
           const enableStripeTopUp = data.enable_stripe_topup || false;
           const enableOnlineTopUp = data.enable_online_topup || false;
           const enableCreemTopUp = data.enable_creem_topup || false;
@@ -641,16 +778,20 @@ const TopUp = () => {
             data.enable_waffo_pancake_topup || false;
           const minTopUpValue = enableOnlineTopUp
             ? data.min_topup
-            : enableStripeTopUp
-              ? data.stripe_min_topup
-              : enableWaffoTopUp
-                ? data.waffo_min_topup
-                : enableWaffoPancakeTopUp
-                  ? data.waffo_pancake_min_topup
-                : 1;
+            : enableAlipayF2FTopUp
+              ? data.alipay_f2f_min_topup
+              : enableStripeTopUp
+                ? data.stripe_min_topup
+                : enableWaffoTopUp
+                  ? data.waffo_min_topup
+                  : enableWaffoPancakeTopUp
+                    ? data.waffo_pancake_min_topup
+                    : 1;
           setEnableOnlineTopUp(enableOnlineTopUp);
+          setEnableAlipayF2FTopUp(enableAlipayF2FTopUp);
           setEnableStripeTopUp(enableStripeTopUp);
           setEnableCreemTopUp(enableCreemTopUp);
+          setAlipayF2FMinTopUp(data.alipay_f2f_min_topup || 1);
           setEnableWaffoTopUp(enableWaffoTopUp);
           setWaffoPayMethods(data.waffo_pay_methods || []);
           setWaffoMinTopUp(data.waffo_min_topup || 1);
@@ -760,6 +901,12 @@ const TopUp = () => {
   }, []);
 
   useEffect(() => {
+    return () => {
+      clearAlipayF2FPolling();
+    };
+  }, []);
+
+  useEffect(() => {
     if (statusState?.status) {
       // const minTopUpValue = statusState.status.min_topup || 1;
       // setMinTopUp(minTopUpValue);
@@ -830,6 +977,11 @@ const TopUp = () => {
 
   const handleCancel = () => {
     setOpen(false);
+  };
+
+  const handleAlipayF2FModalCancel = () => {
+    clearAlipayF2FPolling();
+    setAlipayF2FModalOpen(false);
   };
 
   const handleTransferCancel = () => {
@@ -905,6 +1057,17 @@ const TopUp = () => {
         discountRate={topupInfo?.discount?.[topUpCount] || 1.0}
       />
 
+      <AlipayF2FModal
+        t={t}
+        visible={alipayF2FModalOpen}
+        onCancel={handleAlipayF2FModalCancel}
+        qrCode={alipayF2FOrder.qrCode}
+        tradeNo={alipayF2FOrder.tradeNo}
+        status={alipayF2FOrder.status}
+        tradeStatus={alipayF2FOrder.tradeStatus}
+        payMoney={alipayF2FOrder.payMoney}
+      />
+
       {/* 充值账单模态框 */}
       <TopupHistoryModal
         visible={openHistory}
@@ -945,6 +1108,7 @@ const TopUp = () => {
         <RechargeCard
           t={t}
           enableOnlineTopUp={enableOnlineTopUp}
+          enableAlipayF2FTopUp={enableAlipayF2FTopUp}
           enableStripeTopUp={enableStripeTopUp}
           enableCreemTopUp={enableCreemTopUp}
           creemProducts={creemProducts}

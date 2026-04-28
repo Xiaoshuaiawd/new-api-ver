@@ -55,6 +55,7 @@ const { Text } = Typography;
 const RechargeCard = ({
   t,
   enableOnlineTopUp,
+  enableAlipayF2FTopUp,
   enableStripeTopUp,
   enableCreemTopUp,
   creemProducts,
@@ -310,6 +311,7 @@ const RechargeCard = ({
                           {regularPayMethods.map((payMethod) => {
                             const minTopupVal =
                               Number(payMethod.min_topup) || 0;
+                            const isAlipayF2F = payMethod.type === 'alipay_f2f';
                             const isStripe = payMethod.type === 'stripe';
                             const isWaffo =
                               typeof payMethod.type === 'string' &&
@@ -318,9 +320,11 @@ const RechargeCard = ({
                               payMethod.type === 'waffo_pancake';
                             const disabled =
                               (!enableOnlineTopUp &&
+                                !isAlipayF2F &&
                                 !isStripe &&
                                 !isWaffo &&
                                 !isWaffoPancake) ||
+                              (!enableAlipayF2FTopUp && isAlipayF2F) ||
                               (!enableStripeTopUp && isStripe) ||
                               (!enableWaffoTopUp && isWaffo) ||
                               (!enableWaffoPancakeTopUp && isWaffoPancake) ||
@@ -337,7 +341,8 @@ const RechargeCard = ({
                                   paymentLoading && payWay === payMethod.type
                                 }
                                 icon={
-                                  payMethod.type === 'alipay' ? (
+                                  payMethod.type === 'alipay' ||
+                                  payMethod.type === 'alipay_f2f' ? (
                                     <SiAlipay size={18} color='#1677FF' />
                                   ) : payMethod.type === 'wxpay' ? (
                                     <SiWechat size={18} color='#07C160' />
@@ -399,7 +404,11 @@ const RechargeCard = ({
                 </Row>
               )}
 
-              {(enableOnlineTopUp || enableStripeTopUp || enableWaffoTopUp) && (
+              {(enableOnlineTopUp ||
+                enableAlipayF2FTopUp ||
+                enableStripeTopUp ||
+                enableWaffoTopUp ||
+                enableWaffoPancakeTopUp) && (
                 <Form.Slot
                   label={
                     <div className='flex items-center gap-2'>

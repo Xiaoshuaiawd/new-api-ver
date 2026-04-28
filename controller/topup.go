@@ -90,8 +90,29 @@ func GetTopUpInfo(c *gin.Context) {
 		}
 	}
 
+	enableAlipayF2F := isAlipayF2FTopUpEnabled()
+	if enableAlipayF2F {
+		hasAlipayF2F := false
+		for _, method := range payMethods {
+			if method["type"] == model.PaymentMethodAlipayF2F {
+				hasAlipayF2F = true
+				break
+			}
+		}
+
+		if !hasAlipayF2F {
+			payMethods = append(payMethods, map[string]string{
+				"name":      "Alipay Face-to-Face",
+				"type":      model.PaymentMethodAlipayF2F,
+				"color":     "rgba(var(--semi-blue-5), 1)",
+				"min_topup": strconv.Itoa(setting.AlipayF2FMinTopUp),
+			})
+		}
+	}
+
 	data := gin.H{
 		"enable_online_topup":        isEpayTopUpEnabled(),
+		"enable_alipay_f2f_topup":    enableAlipayF2F,
 		"enable_stripe_topup":        isStripeTopUpEnabled(),
 		"enable_creem_topup":         isCreemTopUpEnabled(),
 		"enable_waffo_topup":         enableWaffo,
@@ -105,6 +126,7 @@ func GetTopUpInfo(c *gin.Context) {
 		"creem_products":          setting.CreemProducts,
 		"pay_methods":             payMethods,
 		"min_topup":               operation_setting.MinTopUp,
+		"alipay_f2f_min_topup":    setting.AlipayF2FMinTopUp,
 		"stripe_min_topup":        setting.StripeMinTopUp,
 		"waffo_min_topup":         setting.WaffoMinTopUp,
 		"waffo_pancake_min_topup": setting.WaffoPancakeMinTopUp,
