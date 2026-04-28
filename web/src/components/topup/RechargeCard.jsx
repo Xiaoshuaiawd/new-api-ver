@@ -229,6 +229,7 @@ const RechargeCard = ({
             <Spin size='large' />
           </div>
         ) : enableOnlineTopUp ||
+          enableAlipayF2FTopUp ||
           enableStripeTopUp ||
           enableCreemTopUp ||
           enableWaffoTopUp ||
@@ -239,6 +240,7 @@ const RechargeCard = ({
           >
             <div className='space-y-6'>
               {(enableOnlineTopUp ||
+                enableAlipayF2FTopUp ||
                 enableStripeTopUp ||
                 enableWaffoTopUp ||
                 enableWaffoPancakeTopUp) && (
@@ -249,6 +251,7 @@ const RechargeCard = ({
                       label={t('充值数量')}
                       disabled={
                         !enableOnlineTopUp &&
+                        !enableAlipayF2FTopUp &&
                         !enableStripeTopUp &&
                         !enableWaffoTopUp &&
                         !enableWaffoPancakeTopUp

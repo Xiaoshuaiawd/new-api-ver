@@ -215,8 +215,11 @@ export default function SettingsPaymentGatewayAlipayF2F(props) {
             <Col xs={24} sm={24} md={8} lg={8} xl={8}>
               <Form.Input
                 field='AlipayF2FSellerID'
-                label={t('商户 PID / Seller ID')}
-                placeholder={t('例如：2088xxxxxxxxxxxx')}
+                label={t('商户 PID / Seller ID（可选）')}
+                placeholder={t('例如：2088xxxxxxxxxxxx，可留空')}
+                extraText={t(
+                  '当前版本可留空；如后续你拿到 PID，再补上可额外增强回调校验。',
+                )}
               />
             </Col>
           </Row>

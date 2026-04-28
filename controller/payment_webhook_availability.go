@@ -102,7 +102,6 @@ func isEpayWebhookEnabled() bool {
 func isAlipayF2FTopUpEnabled() bool {
 	return setting.AlipayF2FEnabled &&
 		strings.TrimSpace(setting.AlipayF2FAppID) != "" &&
-		strings.TrimSpace(setting.AlipayF2FSellerID) != "" &&
 		strings.TrimSpace(setting.AlipayF2FPrivateKey) != "" &&
 		strings.TrimSpace(setting.AlipayF2FPublicKey) != "" &&
 		setting.AlipayF2FMinTopUp > 0

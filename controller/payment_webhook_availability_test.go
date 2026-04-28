@@ -183,7 +183,7 @@ func TestAlipayF2FWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 
 	setting.AlipayF2FEnabled = true
 	setting.AlipayF2FAppID = "2026000000000000"
-	setting.AlipayF2FSellerID = "2088000000000000"
+	setting.AlipayF2FSellerID = ""
 	setting.AlipayF2FPrivateKey = "merchant-private-key"
 	setting.AlipayF2FPublicKey = ""
 	setting.AlipayF2FMinTopUp = 1
