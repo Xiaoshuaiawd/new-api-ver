@@ -182,7 +182,27 @@ func (c *AlipayF2FClient) buildRequestValues(method string, bizContent any) (url
 	return values, nil
 }
 
-func buildAlipayF2FSignContent(values url.Values) string {
+func buildAlipayF2FRequestSignContent(values url.Values) string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		if key == "sign" {
+			continue
+		}
+		if strings.TrimSpace(values.Get(key)) == "" {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, key+"="+values.Get(key))
+	}
+	return strings.Join(parts, "&")
+}
+
+func buildAlipayF2FNotificationSignContent(values url.Values) string {
 	keys := make([]string, 0, len(values))
 	for key := range values {
 		if key == "sign" || key == "sign_type" {
@@ -204,7 +224,7 @@ func buildAlipayF2FSignContent(values url.Values) string {
 
 func (c *AlipayF2FClient) applySignature(values url.Values) error {
 	values.Del("sign")
-	signature, err := c.signContent(buildAlipayF2FSignContent(values))
+	signature, err := c.signContent(buildAlipayF2FRequestSignContent(values))
 	if err != nil {
 		return err
 	}
@@ -408,7 +428,7 @@ func (c *AlipayF2FClient) VerifyNotification(params map[string]string) (*AlipayF
 	for key, value := range params {
 		values.Set(key, value)
 	}
-	if err := c.verifyContent(buildAlipayF2FSignContent(values), signature); err != nil {
+	if err := c.verifyContent(buildAlipayF2FNotificationSignContent(values), signature); err != nil {
 		return nil, err
 	}
 

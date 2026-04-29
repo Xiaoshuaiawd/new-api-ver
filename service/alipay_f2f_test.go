@@ -93,7 +93,7 @@ func TestAlipayF2FBuildSignedValues(t *testing.T) {
 	require.NotEmpty(t, values.Get("biz_content"))
 	require.NotEmpty(t, values.Get("sign"))
 
-	content := buildAlipayF2FSignContent(values)
+	content := buildAlipayF2FRequestSignContent(values)
 	verifyAlipayF2FSignatureForTest(t, &merchantPrivateKey.PublicKey, content, values.Get("sign"))
 }
 
@@ -122,7 +122,11 @@ func TestAlipayF2FVerifyNotification(t *testing.T) {
 		"sign_type":        "RSA2",
 		"buyer_pay_amount": "12.34",
 	}
-	params["sign"] = signAlipayF2FContentForTest(t, alipayPrivateKey, buildAlipayF2FSignContentFromMap(params))
+	params["sign"] = signAlipayF2FContentForTest(
+		t,
+		alipayPrivateKey,
+		buildAlipayF2FNotificationSignContentFromMap(params),
+	)
 
 	verified, err := client.VerifyNotification(params)
 	require.NoError(t, err)
@@ -153,7 +157,7 @@ func TestAlipayF2FPrecreateParsesSignedResponse(t *testing.T) {
 			}
 		}
 		copied.Del("sign")
-		verifyAlipayF2FSignatureForTest(t, &merchantPrivateKey.PublicKey, buildAlipayF2FSignContent(copied), signature)
+		verifyAlipayF2FSignatureForTest(t, &merchantPrivateKey.PublicKey, buildAlipayF2FRequestSignContent(copied), signature)
 
 		responseNode := map[string]any{
 			"code":         "10000",
@@ -262,15 +266,23 @@ func TestAlipayF2FQueryAndCloseUseExpectedMethods(t *testing.T) {
 	require.Equal(t, "trade-close", closeResp.OutTradeNo)
 }
 
-func buildAlipayF2FSignContentFromMap(params map[string]string) string {
+func buildAlipayF2FRequestSignContentFromMap(params map[string]string) string {
 	values := url.Values{}
 	for key, value := range params {
 		values.Set(key, value)
 	}
-	return buildAlipayF2FSignContent(values)
+	return buildAlipayF2FRequestSignContent(values)
 }
 
-func TestBuildAlipayF2FSignContentSkipsEmptyAndSignatureFields(t *testing.T) {
+func buildAlipayF2FNotificationSignContentFromMap(params map[string]string) string {
+	values := url.Values{}
+	for key, value := range params {
+		values.Set(key, value)
+	}
+	return buildAlipayF2FNotificationSignContent(values)
+}
+
+func TestBuildAlipayF2FRequestSignContentKeepsSignType(t *testing.T) {
 	values := url.Values{}
 	values.Set("b", "2")
 	values.Set("a", "1")
@@ -278,7 +290,18 @@ func TestBuildAlipayF2FSignContentSkipsEmptyAndSignatureFields(t *testing.T) {
 	values.Set("empty", "")
 	values.Set("sign_type", "RSA2")
 
-	require.Equal(t, "a=1&b=2", buildAlipayF2FSignContent(values))
+	require.Equal(t, "a=1&b=2&sign_type=RSA2", buildAlipayF2FRequestSignContent(values))
+}
+
+func TestBuildAlipayF2FNotificationSignContentSkipsSignType(t *testing.T) {
+	values := url.Values{}
+	values.Set("b", "2")
+	values.Set("a", "1")
+	values.Set("sign", "should-skip")
+	values.Set("empty", "")
+	values.Set("sign_type", "RSA2")
+
+	require.Equal(t, "a=1&b=2", buildAlipayF2FNotificationSignContent(values))
 }
 
 func TestNormalizeAlipayF2FGatewayUsesProductionDefault(t *testing.T) {
