@@ -538,6 +538,11 @@ PRIMARY KEY (` + "`id`" + `)
 // migrateTokenModelLimitsToText migrates model_limits column from varchar(1024) to text
 // This is safe to run multiple times - it checks the column type first
 func migrateTokenModelLimitsToText() error {
+	if common.GetEnvOrDefaultBool("SKIP_TOKEN_MODEL_LIMITS_TEXT_MIGRATION", false) {
+		common.SysLog("skip tokens.model_limits text migration because SKIP_TOKEN_MODEL_LIMITS_TEXT_MIGRATION=true")
+		return nil
+	}
+
 	// SQLite uses type affinity, so TEXT and VARCHAR are effectively the same — no migration needed
 	if common.UsingSQLite {
 		return nil

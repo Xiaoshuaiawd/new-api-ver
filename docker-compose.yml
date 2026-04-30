@@ -28,6 +28,7 @@ services:
       - ./logs:/app/logs
     environment:
       - SQL_DSN=postgresql://root:123456@postgres:5432/new-api # ⚠️ IMPORTANT: Change the password in production!
+      - SKIP_TOKEN_MODEL_LIMITS_TEXT_MIGRATION=false # 磁盘不足导致 tokens.model_limits 迁移失败时可临时改为 true
       - LOG_SQL_DSN=postgresql://root:123456@postgres:5432/new-api # 常规 logs 表数据库
       - MES_SQL_DSN=postgresql://root:123456@postgres:5432/new-api # 聊天数据 chat_log_* 分表数据库
 #      - SQL_DSN=root:123456@tcp(mysql:3306)/new-api  # Point to the mysql service, uncomment if using MySQL
