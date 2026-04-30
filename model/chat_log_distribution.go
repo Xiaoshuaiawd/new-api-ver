@@ -221,7 +221,7 @@ func GetChatLogDistribution(startTime, endTime time.Time, status string) (*ChatL
 				Status: "ok",
 			})
 
-			where := chatLogDB.Table(tableName).Where("created_at >= ? AND created_at <= ?", start, end)
+			where := chatLogDB.Table(tableName).Where("created_at >= ? AND created_at <= ?", chatLogDBTimeString(start), chatLogDBTimeString(end))
 
 			var summary chatLogSummaryRow
 			if err := where.

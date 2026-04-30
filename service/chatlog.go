@@ -81,8 +81,10 @@ func chatLogPartitionPrecreateLoop() {
 	if err := model.EnsureChatLogTablesByTime(now); err != nil {
 		common.SysError("ensure chat log partition failed: " + err.Error())
 	}
-	if err := model.EnsureChatLogTablesByTime(now.Add(24 * time.Hour)); err != nil {
-		common.SysError("ensure next-day chat log partition failed: " + err.Error())
+	if shouldPrecreateNextChatLogDay(now) {
+		if err := model.EnsureChatLogTablesByTime(now.Add(24 * time.Hour)); err != nil {
+			common.SysError("ensure next-day chat log partition failed: " + err.Error())
+		}
 	}
 
 	ticker := time.NewTicker(30 * time.Minute)
@@ -92,10 +94,16 @@ func chatLogPartitionPrecreateLoop() {
 		if err := model.EnsureChatLogTablesByTime(n); err != nil {
 			common.SysError("ensure chat log partition failed: " + err.Error())
 		}
-		if err := model.EnsureChatLogTablesByTime(n.Add(24 * time.Hour)); err != nil {
-			common.SysError("ensure next-day chat log partition failed: " + err.Error())
+		if shouldPrecreateNextChatLogDay(n) {
+			if err := model.EnsureChatLogTablesByTime(n.Add(24 * time.Hour)); err != nil {
+				common.SysError("ensure next-day chat log partition failed: " + err.Error())
+			}
 		}
 	}
+}
+
+func shouldPrecreateNextChatLogDay(now time.Time) bool {
+	return now.In(getChatLogLocation()).Hour() >= 23
 }
 
 func EmitChatLogSuccess(c *gin.Context, relayInfo *relaycommon.RelayInfo, promptTokens, completionTokens, totalTokens int) {
@@ -1238,7 +1246,8 @@ func claimPendingChatLogMessages(ctx context.Context, stream, group, consumer st
 			return
 		}
 		for _, msg := range msgs {
-			handleChatLogRedisMessage(ctx, stream, group, msg)
+			deliveryCount := getChatLogPendingDeliveryCount(ctx, stream, group, msg.ID)
+			handleChatLogRedisMessageWithDeliveryCount(ctx, stream, group, msg, deliveryCount)
 		}
 		if nextStart == "0-0" || nextStart == start {
 			return
@@ -1251,6 +1260,13 @@ func claimPendingChatLogMessages(ctx context.Context, stream, group, consumer st
 }
 
 func handleChatLogRedisMessage(ctx context.Context, stream, group string, msg redis.XMessage) {
+	handleChatLogRedisMessageWithDeliveryCount(ctx, stream, group, msg, 1)
+}
+
+func handleChatLogRedisMessageWithDeliveryCount(ctx context.Context, stream, group string, msg redis.XMessage, deliveryCount int64) {
+	if common.RDB == nil {
+		return
+	}
 	ackAndDel := func() {
 		_, _ = common.RDB.XAck(ctx, stream, group, msg.ID).Result()
 		_, _ = common.RDB.XDel(ctx, stream, msg.ID).Result()
@@ -1264,20 +1280,72 @@ func handleChatLogRedisMessage(ctx context.Context, stream, group string, msg re
 	}
 
 	if upsertErr := model.UpsertChatLogEvent(event); upsertErr != nil {
-		event.Retry++
-		if event.Retry <= common.ChatLogMaxRetry {
-			if pubErr := publishChatLogEventToRedis(event); pubErr != nil {
-				publishChatLogDLQ(msg.Values, "retry_publish_failed: "+pubErr.Error())
-			}
-		} else {
-			payload, _ := common.Marshal(event)
-			publishChatLogDLQ(map[string]interface{}{"event": string(payload)}, "upsert_failed: "+upsertErr.Error())
+		ack, dlq, reason := decideChatLogFailureAction(event, deliveryCount, upsertErr)
+		if dlq {
+			publishChatLogDLQ(msg.Values, reason)
 		}
-		ackAndDel()
+		if ack {
+			ackAndDel()
+			return
+		}
+		common.SysError(fmt.Sprintf("chat log upsert failed, keep pending for retry: request_id=%s delivery_count=%d error=%s",
+			event.RequestID, deliveryCount, upsertErr.Error()))
 		return
 	}
 
 	ackAndDel()
+}
+
+func decideChatLogFailureAction(event *dto.ChatLogEvent, deliveryCount int64, upsertErr error) (ack bool, dlq bool, reason string) {
+	if upsertErr == nil {
+		return true, false, ""
+	}
+	maxRetry := common.ChatLogMaxRetry
+	if maxRetry <= 0 {
+		maxRetry = 1
+	}
+	if deliveryCount <= int64(maxRetry) {
+		return false, false, ""
+	}
+	requestID := ""
+	if event != nil {
+		requestID = event.RequestID
+	}
+	return true, true, fmt.Sprintf("upsert_failed after %d deliveries request_id=%s: %s", deliveryCount, requestID, upsertErr.Error())
+}
+
+func getChatLogPendingDeliveryCount(ctx context.Context, stream, group, id string) int64 {
+	if common.RDB == nil || strings.TrimSpace(id) == "" {
+		return 1
+	}
+	rows, err := common.RDB.XPendingExt(ctx, &redis.XPendingExtArgs{
+		Stream: stream,
+		Group:  group,
+		Start:  id,
+		End:    id,
+		Count:  1,
+	}).Result()
+	if err != nil || len(rows) == 0 {
+		if err != nil && err != redis.Nil {
+			common.SysError("chat log XPENDING failed: " + err.Error())
+		}
+		return 1
+	}
+	if rows[0].RetryCount <= 0 {
+		return 1
+	}
+	return rows[0].RetryCount
+}
+
+func chatLogRetryDelay(deliveryCount int64) time.Duration {
+	if deliveryCount <= 0 {
+		deliveryCount = 1
+	}
+	delay := time.Duration(deliveryCount) * time.Second
+	if delay > 30*time.Second {
+		return 30 * time.Second
+	}
+	return delay
 }
 
 func decodeChatLogEvent(values map[string]interface{}) (*dto.ChatLogEvent, error) {

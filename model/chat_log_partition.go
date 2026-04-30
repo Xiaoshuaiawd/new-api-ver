@@ -33,9 +33,9 @@ type ChatLogRecord struct {
 
 	UserID string `gorm:"column:user_id"`
 
-	CreatedAt   time.Time `gorm:"column:created_at"`
-	CreatedDate string    `gorm:"column:created_date"`
-	TimeZone    string    `gorm:"column:time_zone"`
+	CreatedAt   string `gorm:"column:created_at"`
+	CreatedDate string `gorm:"column:created_date"`
+	TimeZone    string `gorm:"column:time_zone"`
 
 	ConversationID string `gorm:"column:conversation_id"`
 	ModelName      string `gorm:"column:model_name"`
@@ -120,6 +120,14 @@ func ChatLogTableName(success bool, ts time.Time) string {
 		return chatLogSuccessPrefix + suffix
 	}
 	return chatLogFailPrefix + suffix
+}
+
+func chatLogDBTimeString(ts time.Time) string {
+	return ts.In(getChatLogLocation()).Format("2006-01-02 15:04:05.000")
+}
+
+func chatLogDBDateString(ts time.Time) string {
+	return ts.In(getChatLogLocation()).Format("2006-01-02")
 }
 
 func EnsureChatLogTablesByTime(ts time.Time) error {
@@ -424,10 +432,8 @@ func UpsertChatLogEvent(event *dto.ChatLogEvent) error {
 	} else {
 		createdAt = createdAt.In(loc)
 	}
-	createdDate := event.CreatedDate
-	if createdDate == "" {
-		createdDate = createdAt.Format("2006-01-02")
-	}
+	createdAtStr := chatLogDBTimeString(createdAt)
+	createdDate := chatLogDBDateString(createdAt)
 	if event.TimeZone == "" {
 		event.TimeZone = common.ChatLogTimeZone
 	}
@@ -438,7 +444,7 @@ func UpsertChatLogEvent(event *dto.ChatLogEvent) error {
 
 	rec := &ChatLogRecord{
 		UserID:             event.UserID,
-		CreatedAt:          createdAt,
+		CreatedAt:          createdAtStr,
 		CreatedDate:        createdDate,
 		TimeZone:           event.TimeZone,
 		ConversationID:     event.ConversationID,
