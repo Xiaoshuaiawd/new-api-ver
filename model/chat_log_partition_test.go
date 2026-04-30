@@ -19,6 +19,15 @@ func TestChatLogTableNameShanghaiBoundary(t *testing.T) {
 	require.Equal(t, "chat_log_fail_20260414", ChatLogTableName(false, utcAfterDayChange))
 }
 
+func TestChatLogTimestampStringUsesShanghaiWallTime(t *testing.T) {
+	common.ChatLogTimeZone = "Asia/Shanghai"
+
+	utcTime := time.Date(2026, 4, 13, 15, 0, 0, 123456000, time.UTC) // 2026-04-13 23:00:00.123 +08
+
+	require.Equal(t, "2026-04-13 23:00:00.123", chatLogDBTimeString(utcTime))
+	require.Equal(t, "2026-04-13", chatLogDBDateString(utcTime))
+}
+
 func TestUpsertChatLogEventIdempotent(t *testing.T) {
 	common.ChatLogTimeZone = "Asia/Shanghai"
 
@@ -70,17 +79,19 @@ func TestUpsertChatLogEventIdempotent(t *testing.T) {
 		FinalMergedJSON  string `gorm:"column:final_merged_json"`
 		CompletionTokens int    `gorm:"column:completion_tokens"`
 		TotalTokens      int    `gorm:"column:total_tokens"`
+		CreatedAt        string `gorm:"column:created_at"`
 		CreatedDate      string `gorm:"column:created_date"`
 		TimeZone         string `gorm:"column:time_zone"`
 	}
 	require.NoError(t, LOG_DB.Table(tableName).
-		Select("final_answer_text, final_merged_json, completion_tokens, total_tokens, created_date, time_zone").
+		Select("final_answer_text, final_merged_json, completion_tokens, total_tokens, created_at, created_date, time_zone").
 		Where("request_id = ?", requestID).
 		Take(&row).Error)
 	require.Equal(t, "hello-updated", row.FinalAnswerText)
 	require.NotEmpty(t, row.FinalMergedJSON)
 	require.Equal(t, 30, row.CompletionTokens)
 	require.Equal(t, 41, row.TotalTokens)
+	require.Contains(t, row.CreatedAt, "2026-04-13 23:00:00")
 	require.Equal(t, "2026-04-13", row.CreatedDate)
 	require.Equal(t, "Asia/Shanghai", row.TimeZone)
 }

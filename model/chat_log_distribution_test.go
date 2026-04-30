@@ -39,7 +39,7 @@ func TestGetChatLogDistributionAll(t *testing.T) {
 
 	insertChatLogTestRow(t, succDay1, map[string]any{
 		"user_id":             "1",
-		"created_at":          day1.Add(2 * time.Hour),
+		"created_at":          "2026-04-14 02:00:00.000",
 		"created_date":        "2026-04-14",
 		"time_zone":           "Asia/Shanghai",
 		"conversation_id":     "conv_1",
@@ -60,7 +60,7 @@ func TestGetChatLogDistributionAll(t *testing.T) {
 	})
 	insertChatLogTestRow(t, succDay1, map[string]any{
 		"user_id":             "1",
-		"created_at":          day1.Add(3 * time.Hour),
+		"created_at":          "2026-04-14 03:00:00.000",
 		"created_date":        "2026-04-14",
 		"time_zone":           "Asia/Shanghai",
 		"conversation_id":     "conv_2",
@@ -81,7 +81,7 @@ func TestGetChatLogDistributionAll(t *testing.T) {
 	})
 	insertChatLogTestRow(t, failDay1, map[string]any{
 		"user_id":             "2",
-		"created_at":          day1.Add(4 * time.Hour),
+		"created_at":          "2026-04-14 04:00:00.000",
 		"created_date":        "2026-04-14",
 		"time_zone":           "Asia/Shanghai",
 		"conversation_id":     "conv_3",
@@ -102,7 +102,7 @@ func TestGetChatLogDistributionAll(t *testing.T) {
 	})
 	insertChatLogTestRow(t, succDay2, map[string]any{
 		"user_id":             "3",
-		"created_at":          day2.Add(1 * time.Hour),
+		"created_at":          "2026-04-15 01:00:00.000",
 		"created_date":        "2026-04-15",
 		"time_zone":           "Asia/Shanghai",
 		"conversation_id":     "conv_4",
@@ -178,7 +178,7 @@ func TestGetChatLogDistributionStatusFilter(t *testing.T) {
 
 	insertChatLogTestRow(t, succ, map[string]any{
 		"user_id":             "1",
-		"created_at":          day.Add(time.Hour),
+		"created_at":          "2026-04-16 01:00:00.000",
 		"created_date":        "2026-04-16",
 		"time_zone":           "Asia/Shanghai",
 		"conversation_id":     "conv_s",
@@ -199,7 +199,7 @@ func TestGetChatLogDistributionStatusFilter(t *testing.T) {
 	})
 	insertChatLogTestRow(t, fail, map[string]any{
 		"user_id":             "1",
-		"created_at":          day.Add(2 * time.Hour),
+		"created_at":          "2026-04-16 02:00:00.000",
 		"created_date":        "2026-04-16",
 		"time_zone":           "Asia/Shanghai",
 		"conversation_id":     "conv_f",
