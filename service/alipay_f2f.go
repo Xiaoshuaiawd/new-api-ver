@@ -69,6 +69,14 @@ type AlipayF2FPrecreateResponse struct {
 	QRCode     string `json:"qr_code"`
 }
 
+type AlipayF2FDebugPrecreateResult struct {
+	RequestValues  map[string]string
+	SignContent    string
+	RawRequestBody string
+	RawResponseBody string
+	Response       *AlipayF2FPrecreateResponse
+}
+
 type AlipayF2FTradeQueryResponse struct {
 	Code           string `json:"code"`
 	Msg            string `json:"msg"`
@@ -306,6 +314,67 @@ func (c *AlipayF2FClient) parseResponse(body []byte, method string) ([]byte, err
 }
 
 func (c *AlipayF2FClient) Precreate(ctx context.Context, req *AlipayF2FPrecreateRequest) (*AlipayF2FPrecreateResponse, error) {
+	values, err := c.buildPrecreateValues(req)
+	if err != nil {
+		return nil, err
+	}
+
+	body, err := c.doGatewayRequest(ctx, values)
+	if err != nil {
+		return nil, err
+	}
+
+	rawResponse, err := c.parseResponse(body, "alipay.trade.precreate")
+	if err != nil {
+		return nil, err
+	}
+
+	resp := &AlipayF2FPrecreateResponse{}
+	if err := common.Unmarshal(rawResponse, resp); err != nil {
+		return nil, err
+	}
+	if resp.Code != "10000" {
+		return nil, formatAlipayF2FAPIError(resp.Code, resp.Msg, resp.SubCode, resp.SubMsg)
+	}
+	return resp, nil
+}
+
+func (c *AlipayF2FClient) DebugPrecreate(ctx context.Context, req *AlipayF2FPrecreateRequest) (*AlipayF2FDebugPrecreateResult, error) {
+	values, err := c.buildPrecreateValues(req)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &AlipayF2FDebugPrecreateResult{
+		RequestValues:   flattenAlipayF2FValues(values),
+		SignContent:     buildAlipayF2FRequestSignContent(values),
+		RawRequestBody:  values.Encode(),
+		RawResponseBody: "",
+	}
+
+	body, err := c.doGatewayRequest(ctx, values)
+	if err != nil {
+		return result, err
+	}
+	result.RawResponseBody = string(body)
+
+	rawResponse, err := c.parseResponse(body, "alipay.trade.precreate")
+	if err != nil {
+		return result, err
+	}
+
+	resp := &AlipayF2FPrecreateResponse{}
+	if err := common.Unmarshal(rawResponse, resp); err != nil {
+		return result, err
+	}
+	result.Response = resp
+	if resp.Code != "10000" {
+		return result, formatAlipayF2FAPIError(resp.Code, resp.Msg, resp.SubCode, resp.SubMsg)
+	}
+	return result, nil
+}
+
+func (c *AlipayF2FClient) buildPrecreateValues(req *AlipayF2FPrecreateRequest) (url.Values, error) {
 	bizContent := map[string]any{
 		"out_trade_no":    req.OutTradeNo,
 		"total_amount":    req.TotalAmount,
@@ -329,24 +398,7 @@ func (c *AlipayF2FClient) Precreate(ctx context.Context, req *AlipayF2FPrecreate
 		}
 	}
 
-	body, err := c.doGatewayRequest(ctx, values)
-	if err != nil {
-		return nil, err
-	}
-
-	rawResponse, err := c.parseResponse(body, "alipay.trade.precreate")
-	if err != nil {
-		return nil, err
-	}
-
-	resp := &AlipayF2FPrecreateResponse{}
-	if err := common.Unmarshal(rawResponse, resp); err != nil {
-		return nil, err
-	}
-	if resp.Code != "10000" {
-		return nil, formatAlipayF2FAPIError(resp.Code, resp.Msg, resp.SubCode, resp.SubMsg)
-	}
-	return resp, nil
+	return values, nil
 }
 
 func (c *AlipayF2FClient) Query(ctx context.Context, outTradeNo string) (*AlipayF2FTradeQueryResponse, error) {
@@ -460,6 +512,14 @@ func formatAlipayF2FAPIError(code string, msg string, subCode string, subMsg str
 		return fmt.Errorf("alipay api error code=%s msg=%s sub_code=%s sub_msg=%s", code, msg, subCode, subMsg)
 	}
 	return fmt.Errorf("alipay api error code=%s msg=%s", code, msg)
+}
+
+func flattenAlipayF2FValues(values url.Values) map[string]string {
+	result := make(map[string]string, len(values))
+	for key := range values {
+		result[key] = values.Get(key)
+	}
+	return result
 }
 
 func parseAlipayF2FPrivateKey(raw string) (*rsa.PrivateKey, error) {

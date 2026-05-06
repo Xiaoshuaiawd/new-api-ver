@@ -203,6 +203,68 @@ func TestAlipayF2FPrecreateParsesSignedResponse(t *testing.T) {
 
 }
 
+func TestAlipayF2FDebugPrecreateReturnsTraceData(t *testing.T) {
+	merchantPrivateKeyPEM, _ := generateRSAPrivateKeyPEMForAlipayF2FTest(t)
+	_, alipayPrivateKey := generateRSAPrivateKeyPEMForAlipayF2FTest(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		require.Equal(t, "alipay.trade.precreate", r.Form.Get("method"))
+		require.Equal(t, "https://example.com/notify", r.Form.Get("notify_url"))
+
+		responseNode := map[string]any{
+			"code":         "40002",
+			"msg":          "Invalid Arguments",
+			"sub_code":     "isv.invalid-signature",
+			"sub_msg":      "验签出错",
+			"out_trade_no": "trade-debug",
+		}
+		responseNodeBytes, err := common.Marshal(responseNode)
+		require.NoError(t, err)
+		response := map[string]any{
+			"alipay_trade_precreate_response": responseNode,
+			"sign": signAlipayF2FContentForTest(
+				t,
+				alipayPrivateKey,
+				string(responseNodeBytes),
+			),
+		}
+		body, err := common.Marshal(response)
+		require.NoError(t, err)
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	client, err := NewAlipayF2FClient(AlipayF2FConfig{
+		AppID:      "2026000000000000",
+		SellerID:   "2088000000000000",
+		Gateway:    server.URL,
+		PrivateKey: merchantPrivateKeyPEM,
+		PublicKey:  generateRSAPublicKeyPEMForAlipayF2FTest(t, alipayPrivateKey),
+	})
+	require.NoError(t, err)
+
+	result, err := client.DebugPrecreate(context.Background(), &AlipayF2FPrecreateRequest{
+		OutTradeNo:     "trade-debug",
+		TotalAmount:    "12.34",
+		Subject:        "new-api Recharge 12",
+		TimeoutExpress: "30m",
+		NotifyURL:      "https://example.com/notify",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "isv.invalid-signature")
+	require.NotNil(t, result)
+	require.Equal(t, "alipay.trade.precreate", result.RequestValues["method"])
+	require.Equal(t, "https://example.com/notify", result.RequestValues["notify_url"])
+	require.Contains(t, result.SignContent, "notify_url=https://example.com/notify")
+	require.Contains(t, result.SignContent, "sign_type=RSA2")
+	require.Contains(t, result.RawRequestBody, "notify_url=https%3A%2F%2Fexample.com%2Fnotify")
+	require.Contains(t, result.RawResponseBody, `"sub_code":"isv.invalid-signature"`)
+	require.NotNil(t, result.Response)
+	require.Equal(t, "40002", result.Response.Code)
+	require.Equal(t, "isv.invalid-signature", result.Response.SubCode)
+}
+
 func TestAlipayF2FQueryAndCloseUseExpectedMethods(t *testing.T) {
 	merchantPrivateKeyPEM, _ := generateRSAPrivateKeyPEMForAlipayF2FTest(t)
 	_, alipayPrivateKey := generateRSAPrivateKeyPEMForAlipayF2FTest(t)
