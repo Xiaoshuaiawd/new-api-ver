@@ -681,8 +681,11 @@ const SubscriptionPlansCard = ({
                           <Text
                             type='tertiary'
                             size='small'
-                            ellipsis={{ rows: 1, showTooltip: true }}
-                            style={{ display: 'block' }}
+                            style={{
+                              display: 'block',
+                              whiteSpace: 'normal',
+                              wordBreak: 'break-word',
+                            }}
                           >
                             {plan.subtitle}
                           </Text>
