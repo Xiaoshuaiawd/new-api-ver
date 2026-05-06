@@ -674,6 +674,7 @@ const RechargeCard = ({
                 plans={subscriptionPlans}
                 payMethods={payMethods}
                 enableOnlineTopUp={enableOnlineTopUp}
+                enableAlipayF2FTopUp={enableAlipayF2FTopUp}
                 enableStripeTopUp={enableStripeTopUp}
                 enableCreemTopUp={enableCreemTopUp}
                 billingPreference={billingPreference}

@@ -759,6 +759,12 @@ const TopUp = () => {
                   method.color = 'rgba(var(--semi-primary-5), 1)';
                 }
               }
+              if (
+                method.type === 'alipay_f2f' &&
+                (!method.name || method.name.trim() === '')
+              ) {
+                method.name = '支付宝当面付';
+              }
               return method;
             });
           } else {

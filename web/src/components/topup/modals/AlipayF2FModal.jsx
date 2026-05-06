@@ -40,13 +40,21 @@ export default function AlipayF2FModal({
   status,
   tradeStatus,
   payMoney,
+  titleText,
+  instructionText,
+  completionText,
 }) {
+  const modalTitle = titleText || t('支付宝当面付');
+  const modalInstruction = instructionText || t('请使用支付宝扫一扫完成付款');
+  const modalCompletionText =
+    completionText || t('支付完成后会自动刷新订单状态并入账');
+
   return (
     <Modal
       title={
         <div className='flex items-center gap-2'>
           <SiAlipay size={18} color='#1677FF' />
-          {t('支付宝当面付')}
+          {modalTitle}
         </div>
       }
       visible={visible}
@@ -56,7 +64,7 @@ export default function AlipayF2FModal({
       maskClosable={false}
     >
       <Space vertical align='center' style={{ width: '100%' }}>
-        <Text strong>{t('请使用支付宝扫一扫完成付款')}</Text>
+        <Text strong>{modalInstruction}</Text>
         {qrCode ? (
           <div className='rounded-2xl bg-white p-4 shadow-sm'>
             <QRCodeSVG value={qrCode} size={220} />
@@ -89,7 +97,7 @@ export default function AlipayF2FModal({
             {t('支付状态')}：{tradeStatus}
           </Text>
         ) : null}
-        <Text type='secondary'>{t('支付完成后会自动刷新订单状态并入账')}</Text>
+        <Text type='secondary'>{modalCompletionText}</Text>
       </Space>
     </Modal>
   );

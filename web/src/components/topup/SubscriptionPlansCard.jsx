@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Badge,
   Button,
@@ -30,9 +30,16 @@ import {
   Tooltip,
   Typography,
 } from '@douyinfe/semi-ui';
-import { API, showError, showSuccess, renderQuota } from '../../helpers';
+import {
+  API,
+  showError,
+  showInfo,
+  showSuccess,
+  renderQuota,
+} from '../../helpers';
 import { getCurrencyConfig } from '../../helpers/render';
 import { RefreshCw, Sparkles } from 'lucide-react';
+import AlipayF2FModal from './modals/AlipayF2FModal';
 import SubscriptionPurchaseModal from './modals/SubscriptionPurchaseModal';
 import {
   formatSubscriptionDuration,
@@ -44,7 +51,11 @@ const { Text } = Typography;
 // 过滤易支付方式
 function getEpayMethods(payMethods = []) {
   return (payMethods || []).filter(
-    (m) => m?.type && m.type !== 'stripe' && m.type !== 'creem',
+    (m) =>
+      m?.type &&
+      m.type !== 'stripe' &&
+      m.type !== 'creem' &&
+      m.type !== 'alipay_f2f',
   );
 }
 
@@ -75,6 +86,7 @@ const SubscriptionPlansCard = ({
   plans = [],
   payMethods = [],
   enableOnlineTopUp = false,
+  enableAlipayF2FTopUp = false,
   enableStripeTopUp = false,
   enableCreemTopUp = false,
   billingPreference,
@@ -89,8 +101,30 @@ const SubscriptionPlansCard = ({
   const [paying, setPaying] = useState(false);
   const [selectedEpayMethod, setSelectedEpayMethod] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [alipayF2FModalOpen, setAlipayF2FModalOpen] = useState(false);
+  const [alipayF2FOrder, setAlipayF2FOrder] = useState({
+    tradeNo: '',
+    qrCode: '',
+    status: 'pending',
+    tradeStatus: '',
+    payMoney: '',
+  });
+  const alipayF2FPollRef = useRef(null);
 
   const epayMethods = useMemo(() => getEpayMethods(payMethods), [payMethods]);
+  const alipayF2FMethod = useMemo(
+    () => (payMethods || []).find((method) => method?.type === 'alipay_f2f'),
+    [payMethods],
+  );
+
+  const clearAlipayF2FPolling = () => {
+    if (alipayF2FPollRef.current) {
+      clearInterval(alipayF2FPollRef.current);
+      alipayF2FPollRef.current = null;
+    }
+  };
+
+  useEffect(() => () => clearAlipayF2FPolling(), []);
 
   const openBuy = (p) => {
     setSelectedPlan(p);
@@ -104,6 +138,11 @@ const SubscriptionPlansCard = ({
     setPaying(false);
   };
 
+  const handleAlipayF2FModalCancel = () => {
+    clearAlipayF2FPolling();
+    setAlipayF2FModalOpen(false);
+  };
+
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
@@ -111,6 +150,48 @@ const SubscriptionPlansCard = ({
     } finally {
       setRefreshing(false);
     }
+  };
+
+  const refreshAlipayF2FStatus = async (tradeNo) => {
+    try {
+      const res = await API.get(
+        `/api/subscription/alipay-f2f/order/${tradeNo}/status`,
+      );
+      if (!res.data?.success) {
+        return;
+      }
+
+      const data = res.data.data || {};
+      setAlipayF2FOrder((prev) => ({
+        ...prev,
+        tradeNo,
+        status: data.status || prev.status,
+        tradeStatus: data.trade_status || prev.tradeStatus,
+      }));
+
+      if (data.status === 'success') {
+        clearAlipayF2FPolling();
+        setAlipayF2FModalOpen(false);
+        showSuccess(t('支付成功，订阅已开通'));
+        await reloadSubscriptionSelf?.();
+      } else if (data.status === 'expired') {
+        clearAlipayF2FPolling();
+        showInfo(t('订单已过期，请重新发起支付'));
+      } else if (data.status === 'failed') {
+        clearAlipayF2FPolling();
+        showError(t('支付失败，请稍后重试'));
+      }
+    } catch (error) {
+      // ignore polling failures
+    }
+  };
+
+  const startAlipayF2FPolling = (tradeNo) => {
+    clearAlipayF2FPolling();
+    refreshAlipayF2FStatus(tradeNo).then();
+    alipayF2FPollRef.current = window.setInterval(() => {
+      refreshAlipayF2FStatus(tradeNo).then();
+    }, 3000);
   };
 
   const payStripe = async () => {
@@ -184,6 +265,50 @@ const SubscriptionPlansCard = ({
         submitEpayForm({ url: res.data.url, params: res.data.data });
         showSuccess(t('已发起支付'));
         closeBuy();
+      } else {
+        const errorMsg =
+          typeof res.data?.data === 'string'
+            ? res.data.data
+            : res.data?.message || t('支付失败');
+        showError(errorMsg);
+      }
+    } catch (e) {
+      showError(t('支付请求失败'));
+    } finally {
+      setPaying(false);
+    }
+  };
+
+  const payAlipayF2F = async () => {
+    if (!selectedPlan?.plan?.id) {
+      showError(t('套餐信息无效'));
+      return;
+    }
+    if (!enableAlipayF2FTopUp) {
+      showError(t('管理员未开启支付宝当面付支付'));
+      return;
+    }
+
+    setPaying(true);
+    try {
+      const res = await API.post('/api/subscription/alipay-f2f/pay', {
+        plan_id: selectedPlan.plan.id,
+        payment_method: 'alipay_f2f',
+      });
+      if (res.data?.success) {
+        const data = res.data.data || {};
+        setAlipayF2FOrder({
+          tradeNo: data.trade_no || '',
+          qrCode: data.qr_code || '',
+          status: data.status || 'pending',
+          tradeStatus: data.trade_status || '',
+          payMoney: data.pay_money || '',
+        });
+        setAlipayF2FModalOpen(true);
+        closeBuy();
+        if (data.trade_no) {
+          startAlipayF2FPolling(data.trade_no);
+        }
       } else {
         const errorMsg =
           typeof res.data?.data === 'string'
@@ -671,8 +796,10 @@ const SubscriptionPlansCard = ({
         setSelectedEpayMethod={setSelectedEpayMethod}
         epayMethods={epayMethods}
         enableOnlineTopUp={enableOnlineTopUp}
+        enableAlipayF2FTopUp={enableAlipayF2FTopUp}
         enableStripeTopUp={enableStripeTopUp}
         enableCreemTopUp={enableCreemTopUp}
+        alipayF2FMethod={alipayF2FMethod}
         purchaseLimitInfo={
           selectedPlan?.plan?.id
             ? {
@@ -681,9 +808,24 @@ const SubscriptionPlansCard = ({
               }
             : null
         }
+        onPayAlipayF2F={payAlipayF2F}
         onPayStripe={payStripe}
         onPayCreem={payCreem}
         onPayEpay={payEpay}
+      />
+
+      <AlipayF2FModal
+        t={t}
+        visible={alipayF2FModalOpen}
+        onCancel={handleAlipayF2FModalCancel}
+        qrCode={alipayF2FOrder.qrCode}
+        tradeNo={alipayF2FOrder.tradeNo}
+        status={alipayF2FOrder.status}
+        tradeStatus={alipayF2FOrder.tradeStatus}
+        payMoney={alipayF2FOrder.payMoney}
+        titleText={alipayF2FMethod?.name || t('支付宝当面付')}
+        instructionText={t('请使用支付宝扫一扫完成订阅付款')}
+        completionText={t('支付完成后会自动刷新订单状态并开通订阅')}
       />
     </>
   );

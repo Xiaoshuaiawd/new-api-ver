@@ -42,6 +42,7 @@ export default function SettingsPaymentGatewayAlipayF2F(props) {
     AlipayF2FPrivateKey: '',
     AlipayF2FPublicKey: '',
     AlipayF2FGateway: 'https://openapi.alipay.com/gateway.do',
+    AlipayF2FDisplayName: '支付宝当面付',
     AlipayF2FMinTopUp: 1,
     AlipayF2FOrderTimeout: 30,
     AlipayF2FSubjectPrefix: 'new-api',
@@ -59,6 +60,8 @@ export default function SettingsPaymentGatewayAlipayF2F(props) {
         AlipayF2FGateway:
           props.options.AlipayF2FGateway ||
           'https://openapi.alipay.com/gateway.do',
+        AlipayF2FDisplayName:
+          props.options.AlipayF2FDisplayName || '支付宝当面付',
         AlipayF2FMinTopUp:
           props.options.AlipayF2FMinTopUp !== undefined
             ? parseFloat(props.options.AlipayF2FMinTopUp)
@@ -107,6 +110,10 @@ export default function SettingsPaymentGatewayAlipayF2F(props) {
         {
           key: 'AlipayF2FGateway',
           value: removeTrailingSlash(inputs.AlipayF2FGateway || ''),
+        },
+        {
+          key: 'AlipayF2FDisplayName',
+          value: inputs.AlipayF2FDisplayName || '支付宝当面付',
         },
         {
           key: 'AlipayF2FMinTopUp',
@@ -220,6 +227,13 @@ export default function SettingsPaymentGatewayAlipayF2F(props) {
                 extraText={t(
                   '当前版本可留空；如后续你拿到 PID，再补上可额外增强回调校验。',
                 )}
+              />
+            </Col>
+            <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+              <Form.Input
+                field='AlipayF2FDisplayName'
+                label={t('前台显示名称')}
+                placeholder={t('例如：支付宝扫码 / 扫码支付')}
               />
             </Col>
           </Row>

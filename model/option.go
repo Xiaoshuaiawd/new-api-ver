@@ -96,6 +96,7 @@ func InitOptionMap() {
 	common.OptionMap["AlipayF2FPrivateKey"] = setting.AlipayF2FPrivateKey
 	common.OptionMap["AlipayF2FPublicKey"] = setting.AlipayF2FPublicKey
 	common.OptionMap["AlipayF2FGateway"] = setting.AlipayF2FGateway
+	common.OptionMap["AlipayF2FDisplayName"] = setting.AlipayF2FDisplayName
 	common.OptionMap["AlipayF2FMinTopUp"] = strconv.Itoa(setting.AlipayF2FMinTopUp)
 	common.OptionMap["AlipayF2FOrderTimeout"] = strconv.Itoa(setting.AlipayF2FOrderTimeout)
 	common.OptionMap["AlipayF2FSubjectPrefix"] = setting.AlipayF2FSubjectPrefix
@@ -410,6 +411,8 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.AlipayF2FPublicKey = value
 	case "AlipayF2FGateway":
 		setting.AlipayF2FGateway = value
+	case "AlipayF2FDisplayName":
+		setting.AlipayF2FDisplayName = value
 	case "AlipayF2FMinTopUp":
 		setting.AlipayF2FMinTopUp, _ = strconv.Atoi(value)
 	case "AlipayF2FOrderTimeout":

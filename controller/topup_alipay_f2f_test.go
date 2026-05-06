@@ -53,7 +53,14 @@ func setupAlipayF2FControllerTestDB(t *testing.T) {
 	t.Helper()
 
 	db := openTokenControllerTestDB(t)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.TopUp{}, &model.Log{}))
+	require.NoError(t, db.AutoMigrate(
+		&model.User{},
+		&model.TopUp{},
+		&model.Log{},
+		&model.SubscriptionPlan{},
+		&model.SubscriptionOrder{},
+		&model.UserSubscription{},
+	))
 }
 
 func seedAlipayF2FControllerUser(t *testing.T, userID int) {
@@ -266,4 +273,49 @@ func TestRequestAlipayF2FAmountHonorsProviderMinimum(t *testing.T) {
 	RequestAlipayF2FAmount(ctx)
 	response := decodeAlipayF2FControllerResponse(t, recorder)
 	require.False(t, response.Success)
+}
+
+func TestGetTopUpInfoUsesConfiguredAlipayF2FDisplayName(t *testing.T) {
+	originalEnabled := setting.AlipayF2FEnabled
+	originalAppID := setting.AlipayF2FAppID
+	originalPrivateKey := setting.AlipayF2FPrivateKey
+	originalPublicKey := setting.AlipayF2FPublicKey
+	originalMinTopUp := setting.AlipayF2FMinTopUp
+	originalDisplayName := setting.AlipayF2FDisplayName
+	originalPayMethods := operation_setting.PayMethods
+	t.Cleanup(func() {
+		setting.AlipayF2FEnabled = originalEnabled
+		setting.AlipayF2FAppID = originalAppID
+		setting.AlipayF2FPrivateKey = originalPrivateKey
+		setting.AlipayF2FPublicKey = originalPublicKey
+		setting.AlipayF2FMinTopUp = originalMinTopUp
+		setting.AlipayF2FDisplayName = originalDisplayName
+		operation_setting.PayMethods = originalPayMethods
+	})
+
+	setting.AlipayF2FEnabled = true
+	setting.AlipayF2FAppID = "2026000000000000"
+	setting.AlipayF2FPrivateKey = "merchant-private-key"
+	setting.AlipayF2FPublicKey = "alipay-public-key"
+	setting.AlipayF2FMinTopUp = 1
+	setting.AlipayF2FDisplayName = "扫码支付宝"
+	operation_setting.PayMethods = []map[string]string{}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/user/topup/info", nil)
+
+	GetTopUpInfo(ctx)
+
+	response := decodeAlipayF2FControllerResponse(t, recorder)
+	require.True(t, response.Success)
+
+	rawMethods, ok := response.Data["pay_methods"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, rawMethods, 1)
+
+	method, ok := rawMethods[0].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, model.PaymentMethodAlipayF2F, method["type"])
+	require.Equal(t, "扫码支付宝", method["name"])
 }

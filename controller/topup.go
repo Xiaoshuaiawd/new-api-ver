@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -101,8 +102,12 @@ func GetTopUpInfo(c *gin.Context) {
 		}
 
 		if !hasAlipayF2F {
+			displayName := strings.TrimSpace(setting.AlipayF2FDisplayName)
+			if displayName == "" {
+				displayName = "支付宝当面付"
+			}
 			payMethods = append(payMethods, map[string]string{
-				"name":      "Alipay Face-to-Face",
+				"name":      displayName,
 				"type":      model.PaymentMethodAlipayF2F,
 				"color":     "rgba(var(--semi-blue-5), 1)",
 				"min_topup": strconv.Itoa(setting.AlipayF2FMinTopUp),

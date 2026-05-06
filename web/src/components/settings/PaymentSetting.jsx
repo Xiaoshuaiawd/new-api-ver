@@ -50,6 +50,7 @@ const PaymentSetting = () => {
     AlipayF2FPrivateKey: '',
     AlipayF2FPublicKey: '',
     AlipayF2FGateway: 'https://openapi.alipay.com/gateway.do',
+    AlipayF2FDisplayName: '支付宝当面付',
     AlipayF2FMinTopUp: 1,
     AlipayF2FOrderTimeout: 30,
     AlipayF2FSubjectPrefix: 'new-api',
