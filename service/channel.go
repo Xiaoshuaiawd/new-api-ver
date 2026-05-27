@@ -42,6 +42,16 @@ func EnableChannel(channelId int, usingKey string, channelName string) {
 	}
 }
 
+func DisableChannelUntil(channelError types.ChannelError, reason string, disabledUntil int64) {
+	common.SysLog(fmt.Sprintf("通道「%s」（#%d）上游Key达到本地限制，临时禁用到 %d，原因：%s", channelError.ChannelName, channelError.ChannelId, disabledUntil, common.LocalLogPreview(reason)))
+	success := model.UpdateChannelStatusUntil(channelError.ChannelId, channelError.UsingKey, common.ChannelStatusAutoDisabled, reason, disabledUntil)
+	if success {
+		subject := fmt.Sprintf("通道「%s」（#%d）Key已临时限流", channelError.ChannelName, channelError.ChannelId)
+		content := fmt.Sprintf("通道「%s」（#%d）Key已临时禁用到 %d，原因：%s", channelError.ChannelName, channelError.ChannelId, disabledUntil, reason)
+		NotifyRootUser(formatNotifyType(channelError.ChannelId, common.ChannelStatusAutoDisabled), subject, content)
+	}
+}
+
 func ShouldDisableChannel(err *types.NewAPIError) bool {
 	if !common.AutomaticDisableChannelEnabled {
 		return false

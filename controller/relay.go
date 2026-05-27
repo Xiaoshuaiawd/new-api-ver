@@ -170,6 +170,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	defer func() {
 		// Only return quota if downstream failed and quota was actually pre-consumed
 		if newAPIError != nil {
+			service.ReleaseOpenAIUpstreamKeyLimitReservationFromContext(c)
 			newAPIError = service.NormalizeViolationFeeError(newAPIError)
 			if relayInfo.Billing != nil {
 				relayInfo.Billing.Refund(c)
@@ -290,35 +291,132 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 }
 
 func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
-	if info.ChannelMeta == nil {
-		autoBan := c.GetBool("auto_ban")
-		autoBanInt := 1
-		if !autoBan {
-			autoBanInt = 0
+	var lastLimitError *types.NewAPIError
+	maxLocalSkips := 128
+	for localSkip := 0; localSkip < maxLocalSkips; localSkip++ {
+		channel, selectGroup, err := currentOrRetryChannel(c, info, retryParam, localSkip == 0)
+
+		info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
+
+		if err != nil {
+			if lastLimitError != nil {
+				setOpenAIKeyLimitRetryAfterHeader(c, lastLimitError)
+				return nil, lastLimitError
+			}
+			return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, info.OriginModelName, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 		}
-		return &model.Channel{
-			Id:      c.GetInt("channel_id"),
-			Type:    c.GetInt("channel_type"),
-			Name:    c.GetString("channel_name"),
-			AutoBan: &autoBanInt,
-		}, nil
-	}
-	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
+		if channel == nil {
+			if lastLimitError != nil {
+				setOpenAIKeyLimitRetryAfterHeader(c, lastLimitError)
+				return nil, lastLimitError
+			}
+			return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（retry）", selectGroup, info.OriginModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		}
 
-	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
+		newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
+		if newAPIError != nil {
+			return nil, newAPIError
+		}
 
-	if err != nil {
-		return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, info.OriginModelName, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
-	}
-	if channel == nil {
-		return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（retry）", selectGroup, info.OriginModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
-	}
+		estimatedTokens := service.EstimateOpenAIUpstreamTotalTokens(info.GetEstimatePromptTokens(), maxOutputTokensForOpenAIKeyLimit(info.Request))
+		result, limitError := service.ReserveOpenAIUpstreamKeyLimit(channel, common.GetContextKeyString(c, constant.ContextKeyChannelKey), estimatedTokens)
+		if limitError == nil {
+			if result.ReservationID != "" {
+				common.SetContextKey(c, constant.ContextKeyOpenAIKeyLimitReservation, result.ReservationID)
+			}
+			return channel, nil
+		}
 
-	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
-	if newAPIError != nil {
-		return nil, newAPIError
+		lastLimitError = limitError
+		reason := limitError.Error()
+		if !result.RetryAt.IsZero() {
+			reason = fmt.Sprintf("%s, disabled_until=%d", reason, result.RetryAt.Unix())
+		}
+		service.DisableChannelUntil(*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), true), reason, result.RetryAt.Unix())
 	}
-	return channel, nil
+	if lastLimitError != nil {
+		setOpenAIKeyLimitRetryAfterHeader(c, lastLimitError)
+		return nil, lastLimitError
+	}
+	return nil, types.NewError(fmt.Errorf("OpenAI upstream key local skip limit exceeded"), types.ErrorCodeOpenAIUpstreamKeyRateLimited, types.ErrOptionWithStatusCode(http.StatusTooManyRequests))
+}
+
+func setOpenAIKeyLimitRetryAfterHeader(c *gin.Context, err *types.NewAPIError) {
+	retryAfter := retryAfterSecondsFromOpenAIKeyLimitError(err)
+	if retryAfter > 0 && c.Writer != nil {
+		c.Header("Retry-After", fmt.Sprintf("%d", retryAfter))
+	}
+}
+
+func currentOrRetryChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam, firstTry bool) (*model.Channel, string, error) {
+	if firstTry {
+		current := currentContextChannel(c)
+		if current != nil {
+			return current, common.GetContextKeyString(c, constant.ContextKeyUsingGroup), nil
+		}
+	}
+	return service.CacheGetRandomSatisfiedChannel(retryParam)
+}
+
+func currentContextChannel(c *gin.Context) *model.Channel {
+	channelID := common.GetContextKeyInt(c, constant.ContextKeyChannelId)
+	if channelID == 0 {
+		return nil
+	}
+	autoBan := common.GetContextKeyBool(c, constant.ContextKeyChannelAutoBan)
+	autoBanInt := 1
+	if !autoBan {
+		autoBanInt = 0
+	}
+	return &model.Channel{
+		Id:      channelID,
+		Type:    common.GetContextKeyInt(c, constant.ContextKeyChannelType),
+		Name:    common.GetContextKeyString(c, constant.ContextKeyChannelName),
+		BaseURL: common.GetPointer(common.GetContextKeyString(c, constant.ContextKeyChannelBaseUrl)),
+		AutoBan: &autoBanInt,
+		ChannelInfo: model.ChannelInfo{
+			IsMultiKey: common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey),
+		},
+	}
+}
+
+func retryAfterSecondsFromOpenAIKeyLimitError(err *types.NewAPIError) int64 {
+	if err == nil {
+		return 0
+	}
+	message := err.Error()
+	idx := strings.LastIndex(message, "retry after ")
+	if idx < 0 {
+		return 0
+	}
+	value := strings.TrimSpace(strings.TrimPrefix(message[idx:], "retry after "))
+	retryAt, parseErr := time.Parse(time.RFC3339, value)
+	if parseErr != nil {
+		return 0
+	}
+	seconds := int64(time.Until(retryAt).Seconds())
+	if seconds < 1 {
+		return 1
+	}
+	return seconds
+}
+
+func maxOutputTokensForOpenAIKeyLimit(request dto.Request) int {
+	if request == nil {
+		return 0
+	}
+	switch r := request.(type) {
+	case *dto.GeneralOpenAIRequest:
+		return int(r.GetMaxTokens())
+	case *dto.OpenAIResponsesRequest:
+		return int(lo.FromPtrOr(r.MaxOutputTokens, uint(0)))
+	case *dto.OpenAIResponsesCompactionRequest:
+		return 0
+	case *dto.ClaudeRequest:
+		return int(lo.FromPtr(r.MaxTokens))
+	default:
+		return 0
+	}
 }
 
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {

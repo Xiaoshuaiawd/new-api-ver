@@ -137,6 +137,7 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 	}
 
 	quota := calculateAudioQuota(quotaInfo)
+	commitOpenAIUpstreamKeyLimitFromContext(ctx, usage.TotalTokens)
 
 	if userQuota < quota {
 		return fmt.Errorf("user quota is not enough, user quota: %s, need quota: %s", logger.FormatQuota(userQuota), logger.FormatQuota(quota))
@@ -205,6 +206,7 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 	}
 
 	totalTokens := usage.TotalTokens
+	commitOpenAIUpstreamKeyLimitFromContext(ctx, totalTokens)
 	var logContent string
 	if !usePrice {
 		logContent = fmt.Sprintf("模型倍率 %.2f，补全倍率 %.2f，音频倍率 %.2f，音频补全倍率 %.2f，分组倍率 %.2f",
@@ -326,6 +328,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	}
 
 	totalTokens := usage.TotalTokens
+	commitOpenAIUpstreamKeyLimitFromContext(ctx, totalTokens)
 	var logContent string
 	if !usePrice {
 		logContent = fmt.Sprintf("模型倍率 %.2f，补全倍率 %.2f，音频倍率 %.2f，音频补全倍率 %.2f，分组倍率 %.2f",

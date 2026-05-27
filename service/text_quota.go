@@ -330,6 +330,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 
 	adminRejectReason := common.GetContextKeyString(ctx, constant.ContextKeyAdminRejectReason)
 	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+	commitOpenAIUpstreamKeyLimitFromContext(ctx, summary.TotalTokens)
 
 	var tieredResult *billingexpr.TieredResult
 	tieredBillingApplied := false
@@ -476,4 +477,18 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	gopool.Go(func() {
 		perfmetrics.RecordRelaySample(relayInfo, true, int64(summary.CompletionTokens))
 	})
+}
+
+func commitOpenAIUpstreamKeyLimitFromContext(ctx *gin.Context, actualTokens int) {
+	reservationID := common.GetContextKeyString(ctx, constant.ContextKeyOpenAIKeyLimitReservation)
+	if reservationID == "" {
+		return
+	}
+	if err := CommitOpenAIUpstreamKeyLimitReservation(reservationID, actualTokens); err != nil {
+		common.SysLog("failed to commit OpenAI upstream key limit reservation: " + err.Error())
+	}
+}
+
+func ReleaseOpenAIUpstreamKeyLimitReservationFromContext(ctx *gin.Context) {
+	commitOpenAIUpstreamKeyLimitFromContext(ctx, 0)
 }
