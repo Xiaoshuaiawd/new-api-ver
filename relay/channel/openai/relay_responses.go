@@ -39,6 +39,9 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		c.Set("image_generation_call_quality", responsesResponse.GetQuality())
 		c.Set("image_generation_call_size", responsesResponse.GetSize())
 	}
+	if mappedResponseBody, ok := restoreResponsesModelInBody(responseBody, info); ok {
+		responseBody = mappedResponseBody
+	}
 
 	// 写入新的 response body
 	service.IOCopyBytesGracefully(c, resp, responseBody)
@@ -88,7 +91,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Error(err)
 			return
 		}
-		sendResponsesStreamData(c, streamResponse, data)
+		sendResponsesStreamData(c, streamResponse, restoreResponsesModelInStreamData(data, info))
 		switch streamResponse.Type {
 		case "response.completed":
 			if streamResponse.Response != nil {
@@ -147,4 +150,55 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 
 	return usage, nil
+}
+
+func responseModelNameForClient(info *relaycommon.RelayInfo) string {
+	if info == nil || info.ChannelMeta == nil || !info.IsModelMapped || strings.TrimSpace(info.OriginModelName) == "" {
+		return ""
+	}
+	return info.OriginModelName
+}
+
+func restoreResponsesModelInBody(responseBody []byte, info *relaycommon.RelayInfo) ([]byte, bool) {
+	modelName := responseModelNameForClient(info)
+	if modelName == "" {
+		return responseBody, false
+	}
+	var payload map[string]any
+	if err := common.Unmarshal(responseBody, &payload); err != nil {
+		return responseBody, false
+	}
+	if _, ok := payload["model"]; !ok {
+		return responseBody, false
+	}
+	payload["model"] = modelName
+	mappedBody, err := common.Marshal(payload)
+	if err != nil {
+		return responseBody, false
+	}
+	return mappedBody, true
+}
+
+func restoreResponsesModelInStreamData(data string, info *relaycommon.RelayInfo) string {
+	modelName := responseModelNameForClient(info)
+	if modelName == "" {
+		return data
+	}
+	var payload map[string]any
+	if err := common.UnmarshalJsonStr(data, &payload); err != nil {
+		return data
+	}
+	response, ok := payload["response"].(map[string]any)
+	if !ok {
+		return data
+	}
+	if _, ok := response["model"]; !ok {
+		return data
+	}
+	response["model"] = modelName
+	mappedData, err := common.Marshal(payload)
+	if err != nil {
+		return data
+	}
+	return string(mappedData)
 }
