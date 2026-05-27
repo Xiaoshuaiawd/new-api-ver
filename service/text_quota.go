@@ -484,6 +484,7 @@ func commitOpenAIUpstreamKeyLimitFromContext(ctx *gin.Context, actualTokens int)
 	if reservationID == "" {
 		return
 	}
+	defer common.SetContextKey(ctx, constant.ContextKeyOpenAIKeyLimitReservation, "")
 	if err := CommitOpenAIUpstreamKeyLimitReservation(reservationID, actualTokens); err != nil {
 		common.SysLog("failed to commit OpenAI upstream key limit reservation: " + err.Error())
 	}

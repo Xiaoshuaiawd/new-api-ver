@@ -189,3 +189,55 @@ func TestGetChannelAppliesOpenAIKeyLimitToInitiallyDistributedChannel(t *testing
 	require.NotNil(t, apiErr)
 	require.Equal(t, types.ErrorCodeOpenAIUpstreamKeyRateLimited, apiErr.GetErrorCode())
 }
+
+func TestGetChannelPreservesInitiallyDistributedMultiKeyContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	common.SetContextKey(ctx, constant.ContextKeyChannelId, 7)
+	common.SetContextKey(ctx, constant.ContextKeyChannelType, constant.ChannelTypeOpenAI)
+	common.SetContextKey(ctx, constant.ContextKeyChannelName, "official-multi")
+	common.SetContextKey(ctx, constant.ContextKeyChannelBaseUrl, constant.ChannelBaseURLs[constant.ChannelTypeOpenAI])
+	common.SetContextKey(ctx, constant.ContextKeyChannelKey, "sk-a")
+	common.SetContextKey(ctx, constant.ContextKeyChannelAutoBan, true)
+	common.SetContextKey(ctx, constant.ContextKeyChannelIsMultiKey, true)
+	common.SetContextKey(ctx, constant.ContextKeyChannelMultiKeyIndex, 0)
+	common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "default")
+
+	oldEnabled := setting.OpenAIUpstreamKeyLimitEnabled
+	oldConfig := setting.OpenAIUpstreamKeyLimitConfigValue
+	oldRedis := common.RedisEnabled
+	oldLimiter := service.GetOpenAIUpstreamKeyLimiterForTest()
+	t.Cleanup(func() {
+		setting.OpenAIUpstreamKeyLimitEnabled = oldEnabled
+		setting.OpenAIUpstreamKeyLimitConfigValue = oldConfig
+		common.RedisEnabled = oldRedis
+		service.SetOpenAIUpstreamKeyLimiterForTest(oldLimiter)
+	})
+
+	setting.OpenAIUpstreamKeyLimitEnabled = true
+	setting.OpenAIUpstreamKeyLimitConfigValue = setting.DefaultOpenAIUpstreamKeyLimitConfig()
+	common.RedisEnabled = false
+	service.SetOpenAIUpstreamKeyLimiterForTest(service.NewMemoryOpenAIUpstreamKeyLimiter(time.Unix(2000, 0)))
+
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-4o-mini",
+		TokenGroup:      "default",
+		Request:         &dto.GeneralOpenAIRequest{},
+	}
+	info.SetEstimatePromptTokens(1)
+	retryParam := &service.RetryParam{
+		Ctx:        ctx,
+		TokenGroup: "default",
+		ModelName:  "gpt-4o-mini",
+		Retry:      common.GetPointer(0),
+	}
+
+	channel, apiErr := getChannel(ctx, info, retryParam)
+
+	require.Nil(t, apiErr)
+	require.Equal(t, 7, channel.Id)
+	require.True(t, channel.ChannelInfo.IsMultiKey)
+	require.Equal(t, "sk-a", common.GetContextKeyString(ctx, constant.ContextKeyChannelKey))
+	require.True(t, common.GetContextKeyBool(ctx, constant.ContextKeyChannelIsMultiKey))
+	require.Equal(t, 0, common.GetContextKeyInt(ctx, constant.ContextKeyChannelMultiKeyIndex))
+}

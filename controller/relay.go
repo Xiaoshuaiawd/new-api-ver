@@ -226,6 +226,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			return
 		}
 
+		service.ReleaseOpenAIUpstreamKeyLimitReservationFromContext(c)
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 
@@ -294,7 +295,7 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 	var lastLimitError *types.NewAPIError
 	maxLocalSkips := 128
 	for localSkip := 0; localSkip < maxLocalSkips; localSkip++ {
-		channel, selectGroup, err := currentOrRetryChannel(c, info, retryParam, localSkip == 0)
+		channel, selectGroup, contextAlreadySetup, err := currentOrRetryChannel(c, info, retryParam, localSkip == 0)
 
 		info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
 
@@ -313,9 +314,11 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 			return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（retry）", selectGroup, info.OriginModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 		}
 
-		newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
-		if newAPIError != nil {
-			return nil, newAPIError
+		if !contextAlreadySetup {
+			newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
+			if newAPIError != nil {
+				return nil, newAPIError
+			}
 		}
 
 		estimatedTokens := service.EstimateOpenAIUpstreamTotalTokens(info.GetEstimatePromptTokens(), maxOutputTokensForOpenAIKeyLimit(info.Request))
@@ -348,14 +351,15 @@ func setOpenAIKeyLimitRetryAfterHeader(c *gin.Context, err *types.NewAPIError) {
 	}
 }
 
-func currentOrRetryChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam, firstTry bool) (*model.Channel, string, error) {
-	if firstTry {
+func currentOrRetryChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam, firstTry bool) (*model.Channel, string, bool, error) {
+	if firstTry && info.ChannelMeta == nil {
 		current := currentContextChannel(c)
 		if current != nil {
-			return current, common.GetContextKeyString(c, constant.ContextKeyUsingGroup), nil
+			return current, common.GetContextKeyString(c, constant.ContextKeyUsingGroup), true, nil
 		}
 	}
-	return service.CacheGetRandomSatisfiedChannel(retryParam)
+	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
+	return channel, selectGroup, false, err
 }
 
 func currentContextChannel(c *gin.Context) *model.Channel {
