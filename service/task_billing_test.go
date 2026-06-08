@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -431,6 +432,34 @@ func TestRecalculate_Subscription_NegativeDelta(t *testing.T) {
 	log := getLastLog(t)
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeRefund, log.Type)
+}
+
+func TestRecalculateTaskQuotaByTokens_UsesModelFromTaskDataFallback(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 31, 31, 31
+	const initQuota, preConsumed = 10000, 100
+	const tokenRemain = 10000
+
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-task-data-model", tokenRemain)
+	seedChannel(t, channelID)
+	previousModelRatio := ratio_setting.ModelRatio2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(previousModelRatio))
+	})
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"test-model":1}`))
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.Properties.OriginModelName = ""
+	task.PrivateData.BillingContext = nil
+	task.Data = json.RawMessage(`{"model":"test-model"}`)
+
+	RecalculateTaskQuotaByTokens(ctx, task, 200)
+
+	assert.Equal(t, 200, task.Quota)
+	assert.Equal(t, initQuota-(200-preConsumed), getUserQuota(t, userID))
 }
 
 // ===========================================================================

@@ -280,6 +280,35 @@ func TestNewBillingSession_UsesSubscriptionWhenGroupMatchesRegardlessOfWalletPre
 	}
 }
 
+func TestNewBillingSession_PreservesSubscriptionPricedQuotaWhenGroupMatches(t *testing.T) {
+	truncate(t)
+
+	userId := 7204
+	tokenId := 8204
+	subId := 9306
+	planId := 9406
+	subscriptionPricedQuota := 140
+	allowedGroup := "vip"
+	tokenKey := "billing-group-subscription-priced-quota"
+	seedUser(t, userId, 1000)
+	seedUnlimitedTokenForBillingGroupTest(t, tokenId, userId, tokenKey, 1000)
+	seedSubscriptionPlanForBillingGroupTest(t, planId, allowedGroup)
+	seedUserSubscriptionForBillingGroupTest(t, subId, userId, planId, allowedGroup)
+
+	ctx := &gin.Context{}
+	ctx.Set("token_quota", 1000)
+	relayInfo := makeBillingGroupRelayInfo(userId, tokenId, tokenKey, allowedGroup, "wallet_first")
+
+	session, apiErr := NewBillingSession(ctx, relayInfo, subscriptionPricedQuota)
+
+	require.Nil(t, apiErr)
+	require.NotNil(t, session)
+	assert.Equal(t, BillingSourceSubscription, relayInfo.BillingSource)
+	assert.Equal(t, subscriptionPricedQuota, relayInfo.FinalPreConsumedQuota)
+	assert.Equal(t, int64(subscriptionPricedQuota), getSubscriptionUsedForBillingGroupTest(t, subId))
+	assert.Equal(t, 1000, getWalletQuotaForBillingGroupTest(t, userId))
+}
+
 func TestNewBillingSession_UsesSubscriptionWhenAnyAvailableGroupMatches(t *testing.T) {
 	truncate(t)
 

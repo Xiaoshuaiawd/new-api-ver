@@ -61,6 +61,7 @@ import { GroupSpecialUsableRulesEditor } from './group-special-usable-editor'
 
 type GroupFormValues = {
   GroupRatio: string
+  SubscriptionGroupRatio: string
   TopupGroupRatio: string
   UserUsableGroups: string
   GroupGroupRatio: string
@@ -137,6 +138,7 @@ export const GroupRatioForm = memo(function GroupRatioForm({
           <div className='space-y-6'>
             <GroupRatioVisualEditor
               groupRatio={form.watch('GroupRatio')}
+              subscriptionGroupRatio={form.watch('SubscriptionGroupRatio')}
               topupGroupRatio={form.watch('TopupGroupRatio')}
               userUsableGroups={form.watch('UserUsableGroups')}
               groupGroupRatio={form.watch('GroupGroupRatio')}
@@ -190,6 +192,25 @@ export const GroupRatioForm = memo(function GroupRatioForm({
                   <FormDescription>
                     {t(
                       'JSON map of group → ratio applied when the user selects the group explicitly.'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='SubscriptionGroupRatio'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Subscription group ratios')}</FormLabel>
+                  <FormControl>
+                    <Textarea rows={6} {...field} />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'JSON map of group → ratio applied when the request is billed from subscription quota.'
                     )}
                   </FormDescription>
                   <FormMessage />
@@ -418,6 +439,28 @@ vip          0.5     ${t('No')}                ${t('Assigned by administrator on
                     'Users only see groups marked as user selectable. Non-selectable groups can still be assigned by administrators.'
                   )}
                 </p>
+              </AccordionContent>
+            </AccordionItem>
+
+            <AccordionItem value='subscription-ratio'>
+              <AccordionTrigger>
+                {t('Subscription group ratio example')}
+              </AccordionTrigger>
+              <AccordionContent className='space-y-3'>
+                <p className='text-muted-foreground text-sm leading-6'>
+                  {t(
+                    'Subscription group ratios only apply when the request consumes subscription quota. Requests billed from the wallet continue using the normal group ratio.'
+                  )}
+                </p>
+                <GuideCodeBlock>{`GroupRatio:
+{
+  "vip": 0.13
+}
+
+SubscriptionGroupRatio:
+{
+  "vip": 0.7
+}`}</GuideCodeBlock>
               </AccordionContent>
             </AccordionItem>
 

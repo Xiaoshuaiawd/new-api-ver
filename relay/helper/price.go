@@ -35,11 +35,42 @@ func modelPriceNotConfiguredError(modelName string, userId int) error {
 // https://docs.claude.com/en/docs/build-with-claude/prompt-caching#1-hour-cache-duration
 const claudeCacheCreation1hMultiplier = 6 / 3.75
 
+const (
+	billingSourceWallet       = "wallet"
+	billingSourceSubscription = "subscription"
+)
+
+func resolveBillingSourceForGroup(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) string {
+	if relayInfo == nil {
+		return billingSourceWallet
+	}
+	if relayInfo.BillingSource == billingSourceSubscription {
+		return billingSourceSubscription
+	}
+	if relayInfo.BillingSource == billingSourceWallet {
+		return billingSourceWallet
+	}
+	if relayInfo.UserId == 0 || relayInfo.UsingGroup == "" {
+		return billingSourceWallet
+	}
+
+	hasGroupSubscription, err := model.HasActiveUserSubscriptionForGroup(relayInfo.UserId, relayInfo.UsingGroup)
+	if err != nil {
+		logger.LogError(ctx, fmt.Sprintf("failed to resolve billing source for group %s: %s", relayInfo.UsingGroup, err.Error()))
+		return billingSourceWallet
+	}
+	if hasGroupSubscription {
+		return billingSourceSubscription
+	}
+	return billingSourceWallet
+}
+
 // HandleGroupRatio checks for "auto_group" in the context and updates the group ratio and relayInfo.UsingGroup if present
 func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.GroupRatioInfo {
 	groupRatioInfo := types.GroupRatioInfo{
 		GroupRatio:        1.0, // default ratio
 		GroupSpecialRatio: -1,
+		BillingSource:     billingSourceWallet,
 	}
 
 	// check auto group
@@ -47,6 +78,15 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 	if exists {
 		logger.LogDebug(ctx, "final group: %s", autoGroup)
 		relayInfo.UsingGroup = autoGroup.(string)
+	}
+
+	groupRatioInfo.BillingSource = resolveBillingSourceForGroup(ctx, relayInfo)
+	if groupRatioInfo.BillingSource == billingSourceSubscription {
+		if subscriptionGroupRatio, ok := ratio_setting.GetSubscriptionGroupRatio(relayInfo.UsingGroup); ok {
+			groupRatioInfo.GroupRatio = subscriptionGroupRatio
+			groupRatioInfo.HasSubscriptionGroupRatio = true
+			return groupRatioInfo
+		}
 	}
 
 	// check user group special ratio

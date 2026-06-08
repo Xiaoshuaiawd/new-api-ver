@@ -152,6 +152,7 @@ func InitOptionMap() {
 	common.OptionMap["CacheRatio"] = ratio_setting.CacheRatio2JSONString()
 	common.OptionMap["CreateCacheRatio"] = ratio_setting.CreateCacheRatio2JSONString()
 	common.OptionMap["GroupRatio"] = ratio_setting.GroupRatio2JSONString()
+	common.OptionMap["SubscriptionGroupRatio"] = ratio_setting.SubscriptionGroupRatio2JSONString()
 	common.OptionMap["GroupGroupRatio"] = ratio_setting.GroupGroupRatio2JSONString()
 	common.OptionMap["UserUsableGroups"] = setting.UserUsableGroups2JSONString()
 	common.OptionMap["CompletionRatio"] = ratio_setting.CompletionRatio2JSONString()
@@ -552,6 +553,9 @@ func updateOptionMap(key string, value string) (err error) {
 		err = ratio_setting.UpdateModelRatioByJSONString(value)
 	case "GroupRatio":
 		err = ratio_setting.UpdateGroupRatioByJSONString(value)
+	case "SubscriptionGroupRatio":
+		err = ratio_setting.UpdateSubscriptionGroupRatioByJSONString(value)
+		common.OptionMap["group_ratio_setting.subscription_group_ratio"] = value
 	case "GroupGroupRatio":
 		err = ratio_setting.UpdateGroupGroupRatioByJSONString(value)
 	case "UserUsableGroups":
@@ -629,6 +633,11 @@ func handleConfigUpdate(key, value string) bool {
 		operation_setting.RebuildToolPriceIndex()
 	} else if configName == "billing_setting" {
 		InvalidatePricingCache()
+		ratio_setting.InvalidateExposedDataCache()
+	} else if configName == "group_ratio_setting" {
+		if configKey == "subscription_group_ratio" {
+			common.OptionMap["SubscriptionGroupRatio"] = value
+		}
 		ratio_setting.InvalidateExposedDataCache()
 	} else if configName == "theme" {
 		system_setting.UpdateAndSyncTheme()

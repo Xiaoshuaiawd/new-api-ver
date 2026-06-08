@@ -3828,6 +3828,11 @@
     "运营和收费行为产生的法律责任": "operation and charging behavior",
     "，": ", ",
     "、": ", ",
-    "仅当请求使用这些分组之一时才会消耗订阅额度。其他分组会使用钱包余额。": "Subscription quota is used only when the request uses one of these groups. Other groups use wallet balance."
+    "仅当请求使用这些分组之一时才会消耗订阅额度。其他分组会使用钱包余额。": "Subscription quota is used only when the request uses one of these groups. Other groups use wallet balance.",
+    "订阅分组倍率": "Subscription group ratios",
+    "当请求扣除订阅额度时使用这里的倍率；未配置的分组会回退到普通分组倍率，钱包扣费仍使用普通分组倍率。": "These ratios are used when a request consumes subscription quota. Unconfigured groups fall back to the normal group ratio, and wallet billing still uses the normal group ratio.",
+    "订阅分组倍率仅在请求扣除订阅额度时生效。例如：{\"vip\": 0.7}。如果同一请求改为钱包扣费，则仍使用普通分组倍率。": "Subscription group ratios only apply when requests consume subscription quota. Example: {\"vip\": 0.7}. If the same request is billed from the wallet, the normal group ratio is still used.",
+    "订阅扣费时使用的分组倍率": "Group ratios used for subscription billing",
+    "同一个分组可以同时配置普通分组倍率和订阅分组倍率。请求扣订阅额度时使用订阅分组倍率，扣钱包额度时使用普通分组倍率。": "The same group can have both a normal group ratio and a subscription group ratio. Subscription quota billing uses the subscription ratio; wallet billing uses the normal ratio."
   }
 }

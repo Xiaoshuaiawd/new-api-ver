@@ -4216,6 +4216,11 @@
     "运营和收费行为产生的法律责任": "operation and charging behavior",
     "，": ", ",
     "、": ", ",
-    "仅当请求使用这些分组之一时才会消耗订阅额度。其他分组会使用钱包余额。": "Quota đăng ký chỉ được dùng khi yêu cầu sử dụng một trong các nhóm này. Các nhóm khác sẽ dùng số dư ví."
+    "仅当请求使用这些分组之一时才会消耗订阅额度。其他分组会使用钱包余额。": "Quota đăng ký chỉ được dùng khi yêu cầu sử dụng một trong các nhóm này. Các nhóm khác sẽ dùng số dư ví.",
+    "订阅分组倍率": "Tỷ lệ nhóm cho gói đăng ký",
+    "当请求扣除订阅额度时使用这里的倍率；未配置的分组会回退到普通分组倍率，钱包扣费仍使用普通分组倍率。": "Các tỷ lệ này được dùng khi yêu cầu tiêu thụ hạn mức đăng ký. Nhóm chưa cấu hình sẽ dùng lại tỷ lệ nhóm thông thường, còn trừ ví vẫn dùng tỷ lệ nhóm thông thường.",
+    "订阅分组倍率仅在请求扣除订阅额度时生效。例如：{\"vip\": 0.7}。如果同一请求改为钱包扣费，则仍使用普通分组倍率。": "Tỷ lệ nhóm đăng ký chỉ có hiệu lực khi yêu cầu tiêu thụ hạn mức đăng ký. Ví dụ: {\"vip\": 0.7}. Nếu cùng yêu cầu được trừ ví, hệ thống vẫn dùng tỷ lệ nhóm thông thường.",
+    "订阅扣费时使用的分组倍率": "Tỷ lệ nhóm dùng khi trừ gói đăng ký",
+    "同一个分组可以同时配置普通分组倍率和订阅分组倍率。请求扣订阅额度时使用订阅分组倍率，扣钱包额度时使用普通分组倍率。": "Cùng một nhóm có thể cấu hình cả tỷ lệ thông thường và tỷ lệ đăng ký. Khi trừ hạn mức đăng ký sẽ dùng tỷ lệ đăng ký; khi trừ ví sẽ dùng tỷ lệ thông thường."
   }
 }

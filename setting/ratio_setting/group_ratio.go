@@ -1,7 +1,6 @@
 package ratio_setting
 
 import (
-	"encoding/json"
 	"errors"
 
 	"github.com/QuantumNous/new-api/common"
@@ -16,6 +15,7 @@ var defaultGroupRatio = map[string]float64{
 }
 
 var groupRatioMap = types.NewRWMap[string, float64]()
+var subscriptionGroupRatioMap = types.NewRWMap[string, float64]()
 
 var defaultGroupGroupRatio = map[string]map[string]float64{
 	"vip": {
@@ -34,6 +34,7 @@ var defaultGroupSpecialUsableGroup = map[string]map[string]string{
 
 type GroupRatioSetting struct {
 	GroupRatio              *types.RWMap[string, float64]            `json:"group_ratio"`
+	SubscriptionGroupRatio  *types.RWMap[string, float64]            `json:"subscription_group_ratio"`
 	GroupGroupRatio         *types.RWMap[string, map[string]float64] `json:"group_group_ratio"`
 	GroupSpecialUsableGroup *types.RWMap[string, map[string]string]  `json:"group_special_usable_group"`
 }
@@ -50,6 +51,7 @@ func init() {
 	groupRatioSetting = GroupRatioSetting{
 		GroupSpecialUsableGroup: groupSpecialUsableGroup,
 		GroupRatio:              groupRatioMap,
+		SubscriptionGroupRatio:  subscriptionGroupRatioMap,
 		GroupGroupRatio:         groupGroupRatioMap,
 	}
 
@@ -60,6 +62,9 @@ func GetGroupRatioSetting() *GroupRatioSetting {
 	if groupRatioSetting.GroupSpecialUsableGroup == nil {
 		groupRatioSetting.GroupSpecialUsableGroup = types.NewRWMap[string, map[string]string]()
 		groupRatioSetting.GroupSpecialUsableGroup.AddAll(defaultGroupSpecialUsableGroup)
+	}
+	if groupRatioSetting.SubscriptionGroupRatio == nil {
+		groupRatioSetting.SubscriptionGroupRatio = subscriptionGroupRatioMap
 	}
 	return &groupRatioSetting
 }
@@ -79,6 +84,18 @@ func GroupRatio2JSONString() string {
 
 func UpdateGroupRatioByJSONString(jsonStr string) error {
 	return types.LoadFromJsonString(groupRatioMap, jsonStr)
+}
+
+func SubscriptionGroupRatio2JSONString() string {
+	return subscriptionGroupRatioMap.MarshalJSONString()
+}
+
+func UpdateSubscriptionGroupRatioByJSONString(jsonStr string) error {
+	return types.LoadFromJsonString(subscriptionGroupRatioMap, jsonStr)
+}
+
+func GetSubscriptionGroupRatio(name string) (float64, bool) {
+	return subscriptionGroupRatioMap.Get(name)
 }
 
 func GetGroupRatio(name string) float64 {
@@ -112,7 +129,7 @@ func UpdateGroupGroupRatioByJSONString(jsonStr string) error {
 
 func CheckGroupRatio(jsonStr string) error {
 	checkGroupRatio := make(map[string]float64)
-	err := json.Unmarshal([]byte(jsonStr), &checkGroupRatio)
+	err := common.UnmarshalJsonStr(jsonStr, &checkGroupRatio)
 	if err != nil {
 		return err
 	}

@@ -3,9 +3,11 @@ package types
 import "fmt"
 
 type GroupRatioInfo struct {
-	GroupRatio        float64
-	GroupSpecialRatio float64
-	HasSpecialRatio   bool
+	GroupRatio                float64
+	GroupSpecialRatio         float64
+	HasSpecialRatio           bool
+	BillingSource             string
+	HasSubscriptionGroupRatio bool
 }
 
 type PriceData struct {

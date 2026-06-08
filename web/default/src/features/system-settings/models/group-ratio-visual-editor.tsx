@@ -48,6 +48,7 @@ import { safeJsonParse } from '../utils/json-parser'
 
 type GroupRatioVisualEditorProps = {
   groupRatio: string
+  subscriptionGroupRatio: string
   topupGroupRatio: string
   userUsableGroups: string
   groupGroupRatio: string
@@ -76,6 +77,10 @@ type GroupOverride = {
 const sectionCardClassName =
   'relative shadow-sm ring-0 before:pointer-events-none before:absolute before:inset-0 before:rounded-xl before:border before:border-border/90'
 const sectionHeaderClassName = 'border-b bg-muted/20'
+type SimpleRatioType =
+  | 'groupRatio'
+  | 'subscriptionGroupRatio'
+  | 'topupGroupRatio'
 
 let groupPricingIdCounter = 0
 function createGroupPricingId() {
@@ -159,6 +164,7 @@ function sourceGroupPricingSignature(
 
 export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   groupRatio,
+  subscriptionGroupRatio,
   topupGroupRatio,
   userUsableGroups,
   groupGroupRatio,
@@ -167,9 +173,8 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
 }: GroupRatioVisualEditorProps) {
   const { t } = useTranslation()
   const [simpleDialogOpen, setSimpleDialogOpen] = useState(false)
-  const [simpleDialogType, setSimpleDialogType] = useState<
-    'groupRatio' | 'topupGroupRatio' | null
-  >(null)
+  const [simpleDialogType, setSimpleDialogType] =
+    useState<SimpleRatioType | null>(null)
   const [simpleEditData, setSimpleEditData] = useState<SimpleGroup | null>(null)
 
   const [autoGroupDialogOpen, setAutoGroupDialogOpen] = useState(false)
@@ -197,6 +202,17 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
     }))
   }, [topupGroupRatio])
 
+  const subscriptionRatioList = useMemo(() => {
+    const map = safeJsonParse<Record<string, number>>(subscriptionGroupRatio, {
+      fallback: {},
+      context: 'subscription group ratios',
+    })
+    return Object.entries(map).map(([name, value]) => ({
+      name,
+      value: String(value),
+    }))
+  }, [subscriptionGroupRatio])
+
   // Parse auto groups
   const autoGroupsList = useMemo(() => {
     return safeJsonParse<string[]>(autoGroups, {
@@ -223,15 +239,15 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
     }))
   }, [groupGroupRatio])
 
-  // Simple group handlers (for groupRatio and topupGroupRatio)
-  const handleSimpleAdd = (type: 'groupRatio' | 'topupGroupRatio') => {
+  // Simple group handlers (for subscriptionGroupRatio and topupGroupRatio)
+  const handleSimpleAdd = (type: SimpleRatioType) => {
     setSimpleDialogType(type)
     setSimpleEditData(null)
     setSimpleDialogOpen(true)
   }
 
   const handleSimpleEdit = (
-    type: 'groupRatio' | 'topupGroupRatio',
+    type: SimpleRatioType,
     group: SimpleGroup
   ) => {
     setSimpleDialogType(type)
@@ -243,7 +259,11 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
     if (!simpleDialogType) return
 
     const fieldName =
-      simpleDialogType === 'groupRatio' ? groupRatio : topupGroupRatio
+      simpleDialogType === 'groupRatio'
+        ? groupRatio
+        : simpleDialogType === 'subscriptionGroupRatio'
+          ? subscriptionGroupRatio
+          : topupGroupRatio
     const map = safeJsonParse<Record<string, number>>(fieldName, {
       fallback: {},
       silent: true,
@@ -256,23 +276,37 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
     map[name] = parseFloat(value)
 
     const field =
-      simpleDialogType === 'groupRatio' ? 'GroupRatio' : 'TopupGroupRatio'
+      simpleDialogType === 'groupRatio'
+        ? 'GroupRatio'
+        : simpleDialogType === 'subscriptionGroupRatio'
+          ? 'SubscriptionGroupRatio'
+          : 'TopupGroupRatio'
     onChange(field, JSON.stringify(map, null, 2))
     setSimpleDialogOpen(false)
   }
 
   const handleSimpleDelete = (
-    type: 'groupRatio' | 'topupGroupRatio',
+    type: SimpleRatioType,
     name: string
   ) => {
-    const fieldName = type === 'groupRatio' ? groupRatio : topupGroupRatio
+    const fieldName =
+      type === 'groupRatio'
+        ? groupRatio
+        : type === 'subscriptionGroupRatio'
+          ? subscriptionGroupRatio
+          : topupGroupRatio
     const map = safeJsonParse<Record<string, number>>(fieldName, {
       fallback: {},
       silent: true,
     })
     delete map[name]
 
-    const field = type === 'groupRatio' ? 'GroupRatio' : 'TopupGroupRatio'
+    const field =
+      type === 'groupRatio'
+        ? 'GroupRatio'
+        : type === 'subscriptionGroupRatio'
+          ? 'SubscriptionGroupRatio'
+          : 'TopupGroupRatio'
     onChange(field, JSON.stringify(map, null, 2))
   }
 
@@ -409,76 +443,27 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
         onChange={onChange}
       />
 
-      {/* Topup Group Ratios */}
-      <Card className={sectionCardClassName}>
-        <CardHeader className={sectionHeaderClassName}>
-          <CardTitle>{t('Top-up group ratios')}</CardTitle>
-          <CardDescription>
-            {t('Multipliers for recharge pricing based on user groups.')}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className='space-y-4'>
-            <Button
-              onClick={() => handleSimpleAdd('topupGroupRatio')}
-              size='sm'
-            >
-              <Plus className='mr-2 h-4 w-4' />
-              {t('Add group')}
-            </Button>
-            {topupRatioList.length > 0 && (
-              <div className='rounded-md border'>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t('Group name')}</TableHead>
-                      <TableHead>{t('Multiplier')}</TableHead>
-                      <TableHead className='text-right'>
-                        {t('Actions')}
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {topupRatioList.map((group) => (
-                      <TableRow key={group.name}>
-                        <TableCell className='font-medium'>
-                          {group.name}
-                        </TableCell>
-                        <TableCell>{group.value}</TableCell>
-                        <TableCell className='text-right'>
-                          <div className='flex justify-end gap-2'>
-                            <Button
-                              variant='ghost'
-                              size='sm'
-                              onClick={() =>
-                                handleSimpleEdit('topupGroupRatio', group)
-                              }
-                            >
-                              <Pencil className='h-4 w-4' />
-                            </Button>
-                            <Button
-                              variant='ghost'
-                              size='sm'
-                              onClick={() =>
-                                handleSimpleDelete(
-                                  'topupGroupRatio',
-                                  group.name
-                                )
-                              }
-                            >
-                              <Trash2 className='h-4 w-4' />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+      <SimpleRatioTable
+        title={t('Subscription group ratios')}
+        description={t(
+          'Multipliers used when requests consume subscription quota. Unset groups fall back to the normal group ratio.'
+        )}
+        groups={subscriptionRatioList}
+        type='subscriptionGroupRatio'
+        onAdd={handleSimpleAdd}
+        onEdit={handleSimpleEdit}
+        onDelete={handleSimpleDelete}
+      />
+
+      <SimpleRatioTable
+        title={t('Top-up group ratios')}
+        description={t('Multipliers for recharge pricing based on user groups.')}
+        groups={topupRatioList}
+        type='topupGroupRatio'
+        onAdd={handleSimpleAdd}
+        onEdit={handleSimpleEdit}
+        onDelete={handleSimpleDelete}
+      />
 
       {/* Inter-group ratio overrides */}
       <Card className={sectionCardClassName}>
@@ -753,6 +738,86 @@ type GroupPricingTableProps = {
   onChange: (field: string, value: string) => void
 }
 
+type SimpleRatioTableProps = {
+  title: string
+  description: string
+  groups: SimpleGroup[]
+  type: SimpleRatioType
+  onAdd: (type: SimpleRatioType) => void
+  onEdit: (type: SimpleRatioType, group: SimpleGroup) => void
+  onDelete: (type: SimpleRatioType, name: string) => void
+}
+
+function SimpleRatioTable({
+  title,
+  description,
+  groups,
+  type,
+  onAdd,
+  onEdit,
+  onDelete,
+}: SimpleRatioTableProps) {
+  const { t } = useTranslation()
+
+  return (
+    <Card className={sectionCardClassName}>
+      <CardHeader className={sectionHeaderClassName}>
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className='space-y-4'>
+          <Button onClick={() => onAdd(type)} size='sm'>
+            <Plus className='mr-2 h-4 w-4' />
+            {t('Add group')}
+          </Button>
+          {groups.length > 0 && (
+            <div className='rounded-md border'>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t('Group name')}</TableHead>
+                    <TableHead>{t('Multiplier')}</TableHead>
+                    <TableHead className='text-right'>{t('Actions')}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {groups.map((group) => (
+                    <TableRow key={group.name}>
+                      <TableCell className='font-medium'>
+                        {group.name}
+                      </TableCell>
+                      <TableCell>{group.value}</TableCell>
+                      <TableCell className='text-right'>
+                        <div className='flex justify-end gap-2'>
+                          <Button
+                            variant='ghost'
+                            size='sm'
+                            onClick={() => onEdit(type, group)}
+                          >
+                            <Pencil className='h-4 w-4' />
+                          </Button>
+                          <Button
+                            variant='ghost'
+                            size='sm'
+                            onClick={() => onDelete(type, group.name)}
+                          >
+                            <Trash2 className='h-4 w-4' />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 function GroupPricingTable({
   groupRatio,
   userUsableGroups,
@@ -978,7 +1043,7 @@ type SimpleGroupDialogProps = {
   onOpenChange: (open: boolean) => void
   onSave: (name: string, value: string) => void
   editData: SimpleGroup | null
-  type: 'groupRatio' | 'topupGroupRatio' | null
+  type: SimpleRatioType | null
 }
 
 function SimpleGroupDialog({
@@ -992,7 +1057,12 @@ function SimpleGroupDialog({
   const [name, setName] = useState('')
   const [value, setValue] = useState('')
 
-  const title = type === 'groupRatio' ? t('group ratio') : t('top-up ratio')
+  const title =
+    type === 'groupRatio'
+      ? t('group ratio')
+      : type === 'subscriptionGroupRatio'
+        ? t('subscription group ratio')
+        : t('top-up ratio')
 
   useEffect(() => {
     if (!open) {

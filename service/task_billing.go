@@ -43,6 +43,9 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 		other["model_ratio"] = info.PriceData.ModelRatio
 	}
 	other["group_ratio"] = info.PriceData.GroupRatioInfo.GroupRatio
+	if info.PriceData.GroupRatioInfo.BillingSource != "" {
+		other["billing_source"] = info.PriceData.GroupRatioInfo.BillingSource
+	}
 	if info.PriceData.GroupRatioInfo.HasSpecialRatio {
 		other["user_group_ratio"] = info.PriceData.GroupRatioInfo.GroupSpecialRatio
 	}
@@ -125,6 +128,9 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 			other["model_ratio"] = bc.ModelRatio
 		}
 		other["group_ratio"] = bc.GroupRatio
+		if bc.BillingSource != "" {
+			other["billing_source"] = bc.BillingSource
+		}
 		if len(bc.OtherRatios) > 0 {
 			for k, v := range bc.OtherRatios {
 				other[k] = v
@@ -143,6 +149,17 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 func taskModelName(task *model.Task) string {
 	if bc := task.PrivateData.BillingContext; bc != nil && bc.OriginModelName != "" {
 		return bc.OriginModelName
+	}
+	if task.Properties.OriginModelName != "" {
+		return task.Properties.OriginModelName
+	}
+	if len(task.Data) > 0 {
+		var taskData map[string]interface{}
+		if err := common.Unmarshal(task.Data, &taskData); err == nil {
+			if modelName, ok := taskData["model"].(string); ok && modelName != "" {
+				return modelName
+			}
+		}
 	}
 	return task.Properties.OriginModelName
 }
@@ -273,14 +290,13 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 		return
 	}
 
-	groupRatio := ratio_setting.GetGroupRatio(group)
-	userGroupRatio, hasUserGroupRatio := ratio_setting.GetGroupGroupRatio(group, group)
-
-	var finalGroupRatio float64
-	if hasUserGroupRatio {
+	finalGroupRatio := ratio_setting.GetGroupRatio(group)
+	if task.PrivateData.BillingSource == BillingSourceSubscription {
+		if subscriptionGroupRatio, ok := ratio_setting.GetSubscriptionGroupRatio(group); ok {
+			finalGroupRatio = subscriptionGroupRatio
+		}
+	} else if userGroupRatio, hasUserGroupRatio := ratio_setting.GetGroupGroupRatio(group, group); hasUserGroupRatio {
 		finalGroupRatio = userGroupRatio
-	} else {
-		finalGroupRatio = groupRatio
 	}
 
 	// 计算 OtherRatios 乘积（视频折扣、时长等）
