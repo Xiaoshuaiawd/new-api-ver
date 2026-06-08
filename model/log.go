@@ -449,9 +449,50 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 }
 
 type Stat struct {
-	Quota int `json:"quota"`
-	Rpm   int `json:"rpm"`
-	Tpm   int `json:"tpm"`
+	Quota        int     `json:"quota"`
+	Rpm          int     `json:"rpm"`
+	Tpm          int     `json:"tpm"`
+	TodayRevenue float64 `json:"today_revenue,omitempty"`
+}
+
+func scanMoneySum(tx *gorm.DB) (float64, error) {
+	var row struct {
+		Total float64
+	}
+	if err := tx.Select("COALESCE(SUM(money), 0) AS total").Scan(&row).Error; err != nil {
+		return 0, err
+	}
+	return row.Total, nil
+}
+
+func SumRevenueByTimeRange(startTimestamp int64, endTimestamp int64) (float64, error) {
+	subscriptionQuery := DB.Model(&SubscriptionOrder{}).
+		Where("status = ?", common.TopUpStatusSuccess)
+	walletTopUpQuery := DB.Model(&TopUp{}).
+		Where("status = ?", common.TopUpStatusSuccess).
+		Where(
+			"NOT EXISTS (SELECT 1 FROM subscription_orders WHERE subscription_orders.trade_no = top_ups.trade_no AND subscription_orders.status = ?)",
+			common.TopUpStatusSuccess,
+		)
+
+	if startTimestamp != 0 {
+		subscriptionQuery = subscriptionQuery.Where("complete_time >= ?", startTimestamp)
+		walletTopUpQuery = walletTopUpQuery.Where("complete_time >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		subscriptionQuery = subscriptionQuery.Where("complete_time < ?", endTimestamp)
+		walletTopUpQuery = walletTopUpQuery.Where("complete_time < ?", endTimestamp)
+	}
+
+	subscriptionRevenue, err := scanMoneySum(subscriptionQuery)
+	if err != nil {
+		return 0, err
+	}
+	walletRevenue, err := scanMoneySum(walletTopUpQuery)
+	if err != nil {
+		return 0, err
+	}
+	return subscriptionRevenue + walletRevenue, nil
 }
 
 func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {

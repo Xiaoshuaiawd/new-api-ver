@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -110,14 +111,26 @@ func GetLogsStat(c *gin.Context) {
 		return
 	}
 	//tokenNum := model.SumUsedToken(logType, startTimestamp, endTimestamp, modelName, username, "")
+	data := gin.H{
+		"quota": stat.Quota,
+		"rpm":   stat.Rpm,
+		"tpm":   stat.Tpm,
+	}
+	if c.GetInt("role") >= common.RoleRootUser {
+		now := time.Now()
+		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
+		tomorrowStart := todayStart + 24*60*60
+		todayRevenue, err := model.SumRevenueByTimeRange(todayStart, tomorrowStart)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		data["today_revenue"] = todayRevenue
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data": gin.H{
-			"quota": stat.Quota,
-			"rpm":   stat.Rpm,
-			"tpm":   stat.Tpm,
-		},
+		"data":    data,
 	})
 	return
 }

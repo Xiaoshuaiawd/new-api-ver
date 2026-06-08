@@ -198,6 +198,7 @@ export interface LogStatistics {
   quota: number
   rpm: number
   tpm: number
+  today_revenue?: number
 }
 
 // ============================================================================

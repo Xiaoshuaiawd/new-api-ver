@@ -19,7 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
+import { useAuthStore } from '@/stores/auth-store'
+import { formatLocalCurrencyAmount } from '@/lib/currency'
 import { formatLogQuota } from '@/lib/format'
+import { ROLE } from '@/lib/roles'
 import { cn } from '@/lib/utils'
 import { useIsAdmin } from '@/hooks/use-admin'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -49,6 +52,8 @@ function StatBadge(props: {
 export function CommonLogsStats() {
   const { t } = useTranslation()
   const isAdmin = useIsAdmin()
+  const userRole = useAuthStore((state) => state.auth.user?.role ?? 0)
+  const isRoot = userRole >= ROLE.SUPER_ADMIN
   const searchParams = route.useSearch()
   const { sensitiveVisible } = useUsageLogsContext()
 
@@ -80,6 +85,7 @@ export function CommonLogsStats() {
         <Skeleton className='h-7 w-[150px] rounded-md' />
         <Skeleton className='h-7 w-[100px] rounded-md' />
         <Skeleton className='h-7 w-[120px] rounded-md' />
+        {isRoot ? <Skeleton className='h-7 w-[130px] rounded-md' /> : null}
       </div>
     )
   }
@@ -101,6 +107,17 @@ export function CommonLogsStats() {
         value={stats?.tpm || 0}
         accent='bg-slate-400/70'
       />
+      {isRoot ? (
+        <StatBadge
+          label={t("Today's Revenue")}
+          value={formatLocalCurrencyAmount(stats?.today_revenue || 0, {
+            digitsLarge: 2,
+            digitsSmall: 2,
+            abbreviate: false,
+          })}
+          accent='bg-emerald-500/70'
+        />
+      ) : null}
     </div>
   )
 }
