@@ -29,6 +29,22 @@ func seedSubscriptionPlanForBillingGroupTest(t *testing.T, id int, allowedGroup 
 	require.NoError(t, model.DB.Create(plan).Error)
 }
 
+func seedSubscriptionPlanWithAvailableGroupsForBillingGroupTest(t *testing.T, id int, availableGroups []string) {
+	t.Helper()
+	plan := &model.SubscriptionPlan{
+		Id:              id,
+		Title:           "Group Plan",
+		PriceAmount:     9.99,
+		Currency:        "USD",
+		DurationUnit:    model.SubscriptionDurationMonth,
+		DurationValue:   1,
+		Enabled:         true,
+		TotalAmount:     1000,
+		AvailableGroups: availableGroups,
+	}
+	require.NoError(t, model.DB.Create(plan).Error)
+}
+
 func seedUserSubscriptionForBillingGroupTest(t *testing.T, id int, userId int, planId int, allowedGroup string) {
 	t.Helper()
 	sub := &model.UserSubscription{
@@ -41,6 +57,22 @@ func seedUserSubscriptionForBillingGroupTest(t *testing.T, id int, userId int, p
 		StartTime:    time.Now().Unix(),
 		EndTime:      time.Now().Add(30 * 24 * time.Hour).Unix(),
 		UpgradeGroup: allowedGroup,
+	}
+	require.NoError(t, model.DB.Create(sub).Error)
+}
+
+func seedUserSubscriptionWithAvailableGroupsForBillingGroupTest(t *testing.T, id int, userId int, planId int, availableGroups []string) {
+	t.Helper()
+	sub := &model.UserSubscription{
+		Id:              id,
+		UserId:          userId,
+		PlanId:          planId,
+		AmountTotal:     1000,
+		AmountUsed:      0,
+		Status:          "active",
+		StartTime:       time.Now().Unix(),
+		EndTime:         time.Now().Add(30 * 24 * time.Hour).Unix(),
+		AvailableGroups: availableGroups,
 	}
 	require.NoError(t, model.DB.Create(sub).Error)
 }
@@ -246,6 +278,66 @@ func TestNewBillingSession_UsesSubscriptionWhenGroupMatchesRegardlessOfWalletPre
 			assert.Equal(t, 1000, getTokenRemainForBillingGroupTest(t, tokenId))
 		})
 	}
+}
+
+func TestNewBillingSession_UsesSubscriptionWhenAnyAvailableGroupMatches(t *testing.T) {
+	truncate(t)
+
+	userId := 7301
+	tokenId := 8301
+	subId := 9304
+	planId := 9404
+	quota := 100
+	tokenKey := "billing-group-multi-match"
+	seedUser(t, userId, 1000)
+	seedUnlimitedTokenForBillingGroupTest(t, tokenId, userId, tokenKey, 1000)
+	seedSubscriptionPlanWithAvailableGroupsForBillingGroupTest(t, planId, []string{"vip", "svip"})
+	seedUserSubscriptionWithAvailableGroupsForBillingGroupTest(t, subId, userId, planId, []string{"vip", "svip"})
+
+	ctx := &gin.Context{}
+	ctx.Set("token_quota", 1000)
+	relayInfo := makeBillingGroupRelayInfo(userId, tokenId, tokenKey, "svip", "subscription_first")
+
+	session, apiErr := NewBillingSession(ctx, relayInfo, quota)
+
+	require.Nil(t, apiErr)
+	require.NotNil(t, session)
+	assert.Equal(t, BillingSourceSubscription, relayInfo.BillingSource)
+	assert.Equal(t, quota, relayInfo.FinalPreConsumedQuota)
+	assert.Equal(t, subId, relayInfo.SubscriptionId)
+	assert.Equal(t, 1000, getWalletQuotaForBillingGroupTest(t, userId))
+	assert.Equal(t, int64(quota), getSubscriptionUsedForBillingGroupTest(t, subId))
+	assert.Equal(t, 1000, getTokenRemainForBillingGroupTest(t, tokenId))
+}
+
+func TestNewBillingSession_FallsBackToWalletWhenNoAvailableGroupsMatch(t *testing.T) {
+	truncate(t)
+
+	userId := 7302
+	tokenId := 8302
+	subId := 9305
+	planId := 9405
+	quota := 100
+	tokenKey := "billing-group-multi-mismatch"
+	seedUser(t, userId, 1000)
+	seedUnlimitedTokenForBillingGroupTest(t, tokenId, userId, tokenKey, 1000)
+	seedSubscriptionPlanWithAvailableGroupsForBillingGroupTest(t, planId, []string{"vip", "svip"})
+	seedUserSubscriptionWithAvailableGroupsForBillingGroupTest(t, subId, userId, planId, []string{"vip", "svip"})
+
+	ctx := &gin.Context{}
+	ctx.Set("token_quota", 1000)
+	relayInfo := makeBillingGroupRelayInfo(userId, tokenId, tokenKey, "default", "subscription_first")
+
+	session, apiErr := NewBillingSession(ctx, relayInfo, quota)
+
+	require.Nil(t, apiErr)
+	require.NotNil(t, session)
+	assert.Equal(t, BillingSourceWallet, relayInfo.BillingSource)
+	assert.Equal(t, quota, relayInfo.FinalPreConsumedQuota)
+	assert.Equal(t, 0, relayInfo.SubscriptionId)
+	assert.Equal(t, 900, getWalletQuotaForBillingGroupTest(t, userId))
+	assert.Equal(t, int64(0), getSubscriptionUsedForBillingGroupTest(t, subId))
+	assert.Equal(t, 1000, getTokenRemainForBillingGroupTest(t, tokenId))
 }
 
 func TestNewBillingSession_GroupMatchDoesNotFallbackToWalletWhenSubscriptionInsufficient(t *testing.T) {

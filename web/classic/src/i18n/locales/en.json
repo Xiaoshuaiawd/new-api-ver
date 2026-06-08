@@ -3827,6 +3827,7 @@
     "并确认自行承担部署": "confirm that I bear legal responsibility arising from deployment",
     "运营和收费行为产生的法律责任": "operation and charging behavior",
     "，": ", ",
-    "、": ", "
+    "、": ", ",
+    "仅当请求使用这些分组之一时才会消耗订阅额度。其他分组会使用钱包余额。": "Subscription quota is used only when the request uses one of these groups. Other groups use wallet balance."
   }
 }

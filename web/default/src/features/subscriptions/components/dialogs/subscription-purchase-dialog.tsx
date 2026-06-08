@@ -97,6 +97,12 @@ export function SubscriptionPurchaseDialog(props: Props) {
     t('Select payment method')
   const totalAmount = Number(plan.total_amount || 0)
   const price = Number(plan.price_amount || 0).toFixed(2)
+  const availableGroups =
+    plan.available_groups && plan.available_groups.length > 0
+      ? plan.available_groups
+      : plan.upgrade_group
+        ? [plan.upgrade_group]
+        : []
   const quotaPerUnit =
     currency?.quotaPerUnit && currency.quotaPerUnit > 0
       ? currency.quotaPerUnit
@@ -304,12 +310,16 @@ export function SubscriptionPurchaseDialog(props: Props) {
               {totalAmount > 0 ? formatQuota(totalAmount) : t('Unlimited')}
             </span>
           </div>
-          {plan.upgrade_group && (
+          {availableGroups.length > 0 && (
             <div className='flex items-center justify-between'>
               <span className='text-muted-foreground text-sm'>
-                {t('Available Group')}
+                {t('Available Groups')}
               </span>
-              <GroupBadge group={plan.upgrade_group} />
+              <div className='flex flex-wrap justify-end gap-1'>
+                {availableGroups.map((group) => (
+                  <GroupBadge key={group} group={group} />
+                ))}
+              </div>
             </div>
           )}
           <Separator />

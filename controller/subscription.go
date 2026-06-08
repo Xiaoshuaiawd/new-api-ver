@@ -26,6 +26,23 @@ type SubscriptionBalancePayRequest struct {
 	PlanId int `json:"plan_id"`
 }
 
+func normalizeSubscriptionPlanAvailableGroups(plan *model.SubscriptionPlan) string {
+	if plan == nil {
+		return "订阅可用分组不能为空"
+	}
+	plan.NormalizeDefaults()
+	if len(plan.AvailableGroups) == 0 {
+		return "订阅可用分组不能为空"
+	}
+	groupRatios := ratio_setting.GetGroupRatioCopy()
+	for _, group := range plan.AvailableGroups {
+		if _, ok := groupRatios[group]; !ok {
+			return "订阅可用分组不存在"
+		}
+	}
+	return ""
+}
+
 // ---- User APIs ----
 
 func GetSubscriptionPlans(c *gin.Context) {
@@ -182,13 +199,8 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 		common.ApiErrorMsg(c, "总额度不能为负数")
 		return
 	}
-	req.Plan.UpgradeGroup = strings.TrimSpace(req.Plan.UpgradeGroup)
-	if req.Plan.UpgradeGroup == "" {
-		common.ApiErrorMsg(c, "订阅可用分组不能为空")
-		return
-	}
-	if _, ok := ratio_setting.GetGroupRatioCopy()[req.Plan.UpgradeGroup]; !ok {
-		common.ApiErrorMsg(c, "订阅可用分组不存在")
+	if msg := normalizeSubscriptionPlanAvailableGroups(&req.Plan); msg != "" {
+		common.ApiErrorMsg(c, msg)
 		return
 	}
 	req.Plan.QuotaResetPeriod = model.NormalizeResetPeriod(req.Plan.QuotaResetPeriod)
@@ -251,13 +263,8 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		common.ApiErrorMsg(c, "总额度不能为负数")
 		return
 	}
-	req.Plan.UpgradeGroup = strings.TrimSpace(req.Plan.UpgradeGroup)
-	if req.Plan.UpgradeGroup == "" {
-		common.ApiErrorMsg(c, "订阅可用分组不能为空")
-		return
-	}
-	if _, ok := ratio_setting.GetGroupRatioCopy()[req.Plan.UpgradeGroup]; !ok {
-		common.ApiErrorMsg(c, "订阅可用分组不存在")
+	if msg := normalizeSubscriptionPlanAvailableGroups(&req.Plan); msg != "" {
+		common.ApiErrorMsg(c, msg)
 		return
 	}
 	req.Plan.QuotaResetPeriod = model.NormalizeResetPeriod(req.Plan.QuotaResetPeriod)
@@ -283,6 +290,7 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 			"waffo_pancake_product_id":   req.Plan.WaffoPancakeProductId,
 			"max_purchase_per_user":      req.Plan.MaxPurchasePerUser,
 			"total_amount":               req.Plan.TotalAmount,
+			"available_groups":           req.Plan.AvailableGroups,
 			"upgrade_group":              req.Plan.UpgradeGroup,
 			"quota_reset_period":         req.Plan.QuotaResetPeriod,
 			"quota_reset_custom_seconds": req.Plan.QuotaResetCustomSeconds,

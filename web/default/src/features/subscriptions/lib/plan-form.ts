@@ -42,7 +42,8 @@ export function getPlanFormSchema(t: TFunction) {
     allow_balance_pay: z.boolean(),
     max_purchase_per_user: z.coerce.number().min(0),
     total_amount: z.coerce.number().min(0),
-    upgrade_group: z.string().min(1, t('Group is required')),
+    available_groups: z.array(z.string()).min(1, t('Group is required')),
+    upgrade_group: z.string().optional(),
     stripe_price_id: z.string().optional(),
     creem_product_id: z.string().optional(),
     waffo_pancake_product_id: z.string().optional(),
@@ -65,6 +66,7 @@ export const PLAN_FORM_DEFAULTS: PlanFormValues = {
   allow_balance_pay: true,
   max_purchase_per_user: 0,
   total_amount: 0,
+  available_groups: [],
   upgrade_group: '',
   stripe_price_id: '',
   creem_product_id: '',
@@ -86,6 +88,12 @@ export function planToFormValues(plan: SubscriptionPlan): PlanFormValues {
     allow_balance_pay: plan.allow_balance_pay !== false,
     max_purchase_per_user: Number(plan.max_purchase_per_user || 0),
     total_amount: quotaUnitsToDollars(Number(plan.total_amount || 0)),
+    available_groups:
+      plan.available_groups && plan.available_groups.length > 0
+        ? plan.available_groups
+        : plan.upgrade_group
+          ? [plan.upgrade_group]
+          : [],
     upgrade_group: plan.upgrade_group || '',
     stripe_price_id: plan.stripe_price_id || '',
     creem_product_id: plan.creem_product_id || '',
@@ -109,7 +117,8 @@ export function formValuesToPlanPayload(values: PlanFormValues): PlanPayload {
       sort_order: Number(values.sort_order || 0),
       max_purchase_per_user: Number(values.max_purchase_per_user || 0),
       total_amount: parseQuotaFromDollars(Number(values.total_amount || 0)),
-      upgrade_group: values.upgrade_group || '',
+      available_groups: values.available_groups || [],
+      upgrade_group: values.available_groups?.[0] || '',
     },
   }
 }

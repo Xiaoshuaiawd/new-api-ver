@@ -624,13 +624,21 @@ const SubscriptionPlansCard = ({
                 const isPopular = index === 0 && plans.length > 1;
                 const limit = Number(plan?.max_purchase_per_user || 0);
                 const limitLabel = limit > 0 ? `${t('限购')} ${limit}` : null;
+                const availableGroups =
+                  Array.isArray(plan?.available_groups) &&
+                  plan.available_groups.length > 0
+                    ? plan.available_groups
+                    : plan?.upgrade_group
+                      ? [plan.upgrade_group]
+                      : [];
                 const totalLabel =
                   totalAmount > 0
                     ? `${t('总额度')}: ${renderQuota(totalAmount)}`
                     : `${t('总额度')}: ${t('不限')}`;
-                const upgradeLabel = plan?.upgrade_group
-                  ? `${t('升级分组')}: ${plan.upgrade_group}`
-                  : null;
+                const upgradeLabel =
+                  availableGroups.length > 0
+                    ? `${t('可用分组')}: ${availableGroups.join(', ')}`
+                    : null;
                 const resetLabel =
                   formatSubscriptionResetPeriod(plan, t) === t('不重置')
                     ? null

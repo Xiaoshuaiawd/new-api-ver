@@ -64,6 +64,16 @@ function formatResetPeriod(plan, t) {
   return t('不重置');
 }
 
+function getAvailableGroups(plan) {
+  if (
+    Array.isArray(plan?.available_groups) &&
+    plan.available_groups.length > 0
+  ) {
+    return plan.available_groups;
+  }
+  return plan?.upgrade_group ? [plan.upgrade_group] : [];
+}
+
 const renderPlanTitle = (text, record, t) => {
   const subtitle = record?.plan?.subtitle;
   const plan = record?.plan;
@@ -89,8 +99,8 @@ const renderPlanTitle = (text, record, t) => {
         ) : (
           <Text>{t('不限')}</Text>
         )}
-        <Text type='tertiary'>{t('升级分组')}</Text>
-        <Text>{plan?.upgrade_group ? plan.upgrade_group : t('不升级')}</Text>
+        <Text type='tertiary'>{t('可用分组')}</Text>
+        <Text>{getAvailableGroups(plan).join(', ') || t('无')}</Text>
         <Text type='tertiary'>{t('购买上限')}</Text>
         <Text>
           {plan?.max_purchase_per_user > 0
@@ -184,11 +194,18 @@ const renderTotalAmount = (text, record, t) => {
 };
 
 const renderUpgradeGroup = (text, record, t) => {
-  const group = record?.plan?.upgrade_group || '';
+  const groups = getAvailableGroups(record?.plan);
+  if (groups.length === 0) {
+    return <Text type='tertiary'>{t('无')}</Text>;
+  }
   return (
-    <Text type={group ? 'secondary' : 'tertiary'}>
-      {group ? group : t('不升级')}
-    </Text>
+    <Space spacing={4} wrap>
+      {groups.map((group) => (
+        <Tag key={group} color='blue' shape='circle' size='small'>
+          {group}
+        </Tag>
+      ))}
+    </Space>
   );
 };
 
@@ -312,7 +329,7 @@ export const getSubscriptionsColumns = ({
     {
       title: t('价格'),
       dataIndex: ['plan', 'price_amount'],
-      width: 100,
+      width: 160,
       render: (text) => renderPrice(text),
     },
     {
@@ -354,7 +371,7 @@ export const getSubscriptionsColumns = ({
       render: (text, record) => renderTotalAmount(text, record, t),
     },
     {
-      title: t('升级分组'),
+      title: t('可用分组'),
       width: 100,
       render: (text, record) => renderUpgradeGroup(text, record, t),
     },

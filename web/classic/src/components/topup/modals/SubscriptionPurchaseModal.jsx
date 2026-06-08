@@ -79,6 +79,12 @@ const SubscriptionPurchaseModal = ({
   const purchaseLimitReached =
     purchaseLimit > 0 && purchaseCount >= purchaseLimit;
   const alipayF2FLabel = alipayF2FMethod?.name || t('支付宝当面付');
+  const availableGroups =
+    Array.isArray(plan?.available_groups) && plan.available_groups.length > 0
+      ? plan.available_groups
+      : plan?.upgrade_group
+        ? [plan.upgrade_group]
+        : [];
 
   return (
     <Modal
@@ -151,13 +157,13 @@ const SubscriptionPurchaseModal = ({
                   )}
                 </div>
               </div>
-              {plan?.upgrade_group ? (
+              {availableGroups.length > 0 ? (
                 <div className='flex justify-between items-center'>
                   <Text strong className='text-slate-700 dark:text-slate-200'>
-                    {t('升级分组')}：
+                    {t('可用分组')}：
                   </Text>
                   <Text className='text-slate-900 dark:text-slate-100'>
-                    {plan.upgrade_group}
+                    {availableGroups.join(', ')}
                   </Text>
                 </div>
               ) : null}

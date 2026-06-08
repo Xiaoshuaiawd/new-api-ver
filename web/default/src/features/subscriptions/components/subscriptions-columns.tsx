@@ -191,19 +191,34 @@ export function useSubscriptionsColumns(): ColumnDef<PlanRecord>[] {
         size: 100,
       },
       {
-        id: 'upgrade_group',
-        meta: { label: t('Available Group'), mobileHidden: true },
+        id: 'available_groups',
+        meta: { label: t('Available Groups'), mobileHidden: true },
         header: ({ column }) => (
-          <DataTableColumnHeader column={column} title={t('Available Group')} />
+          <DataTableColumnHeader
+            column={column}
+            title={t('Available Groups')}
+          />
         ),
         cell: ({ row }) => {
-          const group = row.original.plan.upgrade_group
-          if (!group) {
+          const groups =
+            row.original.plan.available_groups &&
+            row.original.plan.available_groups.length > 0
+              ? row.original.plan.available_groups
+              : row.original.plan.upgrade_group
+                ? [row.original.plan.upgrade_group]
+                : []
+          if (groups.length === 0) {
             return <span className='text-muted-foreground'>{t('None')}</span>
           }
-          return <GroupBadge group={group} />
+          return (
+            <div className='flex flex-wrap gap-1'>
+              {groups.map((group) => (
+                <GroupBadge key={group} group={group} />
+              ))}
+            </div>
+          )
         },
-        size: 100,
+        size: 160,
       },
       {
         id: 'actions',

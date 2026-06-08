@@ -94,6 +94,7 @@ const AddEditSubscriptionModal = ({
     sort_order: 0,
     max_purchase_per_user: 0,
     total_amount: 0,
+    available_groups: [],
     upgrade_group: '',
     stripe_price_id: '',
     creem_product_id: '',
@@ -120,6 +121,12 @@ const AddEditSubscriptionModal = ({
       total_amount: Number(
         quotaToDisplayAmount(p.total_amount || 0).toFixed(2),
       ),
+      available_groups:
+        Array.isArray(p.available_groups) && p.available_groups.length > 0
+          ? p.available_groups
+          : p.upgrade_group
+            ? [p.upgrade_group]
+            : [],
       upgrade_group: p.upgrade_group || '',
       stripe_price_id: p.stripe_price_id || '',
       creem_product_id: p.creem_product_id || '',
@@ -146,6 +153,13 @@ const AddEditSubscriptionModal = ({
       showError(t('套餐标题不能为空'));
       return;
     }
+    const availableGroups = Array.isArray(values.available_groups)
+      ? values.available_groups.map((g) => String(g).trim()).filter(Boolean)
+      : [];
+    if (availableGroups.length === 0) {
+      showError(t('请选择分组'));
+      return;
+    }
     setLoading(true);
     try {
       const payload = {
@@ -163,7 +177,8 @@ const AddEditSubscriptionModal = ({
           sort_order: Number(values.sort_order || 0),
           max_purchase_per_user: Number(values.max_purchase_per_user || 0),
           total_amount: displayAmountToQuota(values.total_amount),
-          upgrade_group: values.upgrade_group || '',
+          available_groups: availableGroups,
+          upgrade_group: availableGroups[0] || '',
         },
       };
       if (editingPlan?.plan?.id) {
@@ -324,16 +339,17 @@ const AddEditSubscriptionModal = ({
 
                     <Col span={12}>
                       <Form.Select
-                        field='upgrade_group'
-                        label={t('升级分组')}
-                        showClear
+                        field='available_groups'
+                        label={t('可用分组')}
+                        multiple
+                        required
                         loading={groupLoading}
-                        placeholder={t('不升级')}
+                        placeholder={t('请选择分组')}
+                        rules={[{ required: true, message: t('请选择分组') }]}
                         extraText={t(
-                          '购买或手动新增订阅会升级到该分组；当套餐失效/过期或手动作废/删除后，将回退到升级前分组。回退不会立即生效，通常会有几分钟延迟。',
+                          '仅当请求使用这些分组之一时才会消耗订阅额度。其他分组会使用钱包余额。',
                         )}
                       >
-                        <Select.Option value=''>{t('不升级')}</Select.Option>
                         {(groupOptions || []).map((g) => (
                           <Select.Option key={g} value={g}>
                             {g}

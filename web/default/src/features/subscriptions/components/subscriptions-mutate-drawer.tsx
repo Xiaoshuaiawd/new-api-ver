@@ -59,6 +59,7 @@ import {
   sideDrawerHeaderClassName,
   sideDrawerSwitchItemClassName,
 } from '@/components/drawer-layout'
+import { MultiSelect } from '@/components/multi-select'
 import {
   createPlan,
   updatePlan,
@@ -361,36 +362,24 @@ export function SubscriptionsMutateDrawer({
               <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                 <FormField
                   control={form.control}
-                  name='upgrade_group'
+                  name='available_groups'
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>{t('Available Group')}</FormLabel>
-                      <Select
-                        items={groupOptions.map((g) => ({
-                          value: g,
-                          label: g,
-                        }))}
-                        onValueChange={(v) => field.onChange(v || '')}
-                        value={field.value || ''}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder={t('None')} />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent alignItemWithTrigger={false}>
-                          <SelectGroup>
-                            {groupOptions.map((g) => (
-                              <SelectItem key={g} value={g}>
-                                {g}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        </SelectContent>
-                      </Select>
+                      <FormLabel>{t('Available Groups')}</FormLabel>
+                      <FormControl>
+                        <MultiSelect
+                          options={groupOptions.map((g) => ({
+                            value: g,
+                            label: g,
+                          }))}
+                          selected={field.value || []}
+                          onChange={field.onChange}
+                          placeholder={t('Select groups')}
+                        />
+                      </FormControl>
                       <FormDescription>
                         {t(
-                          'Subscription quota is used only when the request uses this group. Other groups use wallet balance.'
+                          'Subscription quota is used only when the request uses one of these groups. Other groups use wallet balance.'
                         )}
                       </FormDescription>
                       <FormMessage />

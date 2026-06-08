@@ -1,6 +1,7 @@
 package model
 
 import (
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"strconv"
@@ -14,6 +15,117 @@ import (
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
+
+type SubscriptionAvailableGroups []string
+
+func normalizeSubscriptionAvailableGroups(groups []string) SubscriptionAvailableGroups {
+	if len(groups) == 0 {
+		return SubscriptionAvailableGroups{}
+	}
+	seen := make(map[string]struct{}, len(groups))
+	normalized := make([]string, 0, len(groups))
+	for _, group := range groups {
+		group = strings.TrimSpace(group)
+		if group == "" {
+			continue
+		}
+		if _, ok := seen[group]; ok {
+			continue
+		}
+		seen[group] = struct{}{}
+		normalized = append(normalized, group)
+	}
+	return SubscriptionAvailableGroups(normalized)
+}
+
+func (groups SubscriptionAvailableGroups) normalizedWithFallback(fallback string) SubscriptionAvailableGroups {
+	normalized := normalizeSubscriptionAvailableGroups([]string(groups))
+	if len(normalized) > 0 {
+		return normalized
+	}
+	fallback = strings.TrimSpace(fallback)
+	if fallback == "" {
+		return SubscriptionAvailableGroups{}
+	}
+	return SubscriptionAvailableGroups{fallback}
+}
+
+func (groups SubscriptionAvailableGroups) contains(group string) bool {
+	group = strings.TrimSpace(group)
+	if group == "" {
+		return false
+	}
+	for _, availableGroup := range normalizeSubscriptionAvailableGroups([]string(groups)) {
+		if availableGroup == group {
+			return true
+		}
+	}
+	return false
+}
+
+func (groups SubscriptionAvailableGroups) first() string {
+	normalized := normalizeSubscriptionAvailableGroups([]string(groups))
+	if len(normalized) == 0 {
+		return ""
+	}
+	return normalized[0]
+}
+
+func (groups SubscriptionAvailableGroups) Value() (driver.Value, error) {
+	normalized := normalizeSubscriptionAvailableGroups([]string(groups))
+	data, err := common.Marshal([]string(normalized))
+	if err != nil {
+		return nil, err
+	}
+	return string(data), nil
+}
+
+func (groups *SubscriptionAvailableGroups) Scan(value interface{}) error {
+	if groups == nil {
+		return nil
+	}
+	if value == nil {
+		*groups = SubscriptionAvailableGroups{}
+		return nil
+	}
+	var raw string
+	switch v := value.(type) {
+	case string:
+		raw = v
+	case []byte:
+		raw = string(v)
+	default:
+		return fmt.Errorf("unsupported available_groups type: %T", value)
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		*groups = SubscriptionAvailableGroups{}
+		return nil
+	}
+	var parsed []string
+	if err := common.Unmarshal([]byte(raw), &parsed); err != nil {
+		return err
+	}
+	*groups = normalizeSubscriptionAvailableGroups(parsed)
+	return nil
+}
+
+func (groups SubscriptionAvailableGroups) MarshalJSON() ([]byte, error) {
+	normalized := normalizeSubscriptionAvailableGroups([]string(groups))
+	return common.Marshal([]string(normalized))
+}
+
+func (groups *SubscriptionAvailableGroups) UnmarshalJSON(data []byte) error {
+	if groups == nil {
+		return nil
+	}
+	var parsed []string
+	if err := common.Unmarshal(data, &parsed); err != nil {
+		return err
+	}
+	*groups = normalizeSubscriptionAvailableGroups(parsed)
+	return nil
+}
 
 // Subscription duration units
 const (
@@ -169,7 +281,9 @@ type SubscriptionPlan struct {
 	// Max purchases per user (0 = unlimited)
 	MaxPurchasePerUser int `json:"max_purchase_per_user" gorm:"type:int;default:0"`
 
-	// Subscription billing group restriction. Empty values are treated as not configured.
+	// AvailableGroups restricts which request groups may consume subscription quota.
+	AvailableGroups SubscriptionAvailableGroups `json:"available_groups" gorm:"type:text;default:''"`
+	// Deprecated: kept for backward compatibility. Mirrors the first available group.
 	UpgradeGroup string `json:"upgrade_group" gorm:"type:varchar(64);default:''"`
 
 	// Total quota (amount in quota units, 0 = unlimited)
@@ -187,11 +301,13 @@ func (p *SubscriptionPlan) BeforeCreate(tx *gorm.DB) error {
 	now := common.GetTimestamp()
 	p.CreatedAt = now
 	p.UpdatedAt = now
+	p.NormalizeDefaults()
 	return nil
 }
 
 func (p *SubscriptionPlan) BeforeUpdate(tx *gorm.DB) error {
 	p.UpdatedAt = common.GetTimestamp()
+	p.NormalizeDefaults()
 	return nil
 }
 
@@ -199,6 +315,8 @@ func (p *SubscriptionPlan) NormalizeDefaults() {
 	if p.AllowBalancePay == nil {
 		p.AllowBalancePay = common.GetPointer(true)
 	}
+	p.AvailableGroups = p.AvailableGroups.normalizedWithFallback(p.UpgradeGroup)
+	p.UpgradeGroup = p.AvailableGroups.first()
 }
 
 // Subscription order (payment -> webhook -> create UserSubscription)
@@ -258,7 +376,9 @@ type UserSubscription struct {
 	LastResetTime int64 `json:"last_reset_time" gorm:"type:bigint;default:0"`
 	NextResetTime int64 `json:"next_reset_time" gorm:"type:bigint;default:0;index"`
 
-	// Subscription billing group restriction copied from plan. Empty values are treated as not configured.
+	// AvailableGroups is copied from the plan and restricts subscription quota usage.
+	AvailableGroups SubscriptionAvailableGroups `json:"available_groups" gorm:"type:text;default:''"`
+	// Deprecated: kept for backward compatibility. Mirrors the first available group.
 	UpgradeGroup string `json:"upgrade_group" gorm:"type:varchar(64);default:''"`
 	// Deprecated: kept for DB compatibility with older subscriptions that upgraded user groups.
 	PrevUserGroup string `json:"prev_user_group" gorm:"type:varchar(64);default:''"`
@@ -271,12 +391,19 @@ func (s *UserSubscription) BeforeCreate(tx *gorm.DB) error {
 	now := common.GetTimestamp()
 	s.CreatedAt = now
 	s.UpdatedAt = now
+	s.NormalizeDefaults()
 	return nil
 }
 
 func (s *UserSubscription) BeforeUpdate(tx *gorm.DB) error {
 	s.UpdatedAt = common.GetTimestamp()
+	s.NormalizeDefaults()
 	return nil
+}
+
+func (s *UserSubscription) NormalizeDefaults() {
+	s.AvailableGroups = s.AvailableGroups.normalizedWithFallback(s.UpgradeGroup)
+	s.UpgradeGroup = s.AvailableGroups.first()
 }
 
 type SubscriptionSummary struct {
@@ -447,22 +574,23 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 	if nextReset > 0 {
 		lastReset = now.Unix()
 	}
-	allowedGroup := strings.TrimSpace(plan.UpgradeGroup)
+	allowedGroups := plan.AvailableGroups.normalizedWithFallback(plan.UpgradeGroup)
 	sub := &UserSubscription{
-		UserId:        userId,
-		PlanId:        plan.Id,
-		AmountTotal:   plan.TotalAmount,
-		AmountUsed:    0,
-		StartTime:     now.Unix(),
-		EndTime:       endUnix,
-		Status:        "active",
-		Source:        source,
-		LastResetTime: lastReset,
-		NextResetTime: nextReset,
-		UpgradeGroup:  allowedGroup,
-		PrevUserGroup: "",
-		CreatedAt:     common.GetTimestamp(),
-		UpdatedAt:     common.GetTimestamp(),
+		UserId:          userId,
+		PlanId:          plan.Id,
+		AmountTotal:     plan.TotalAmount,
+		AmountUsed:      0,
+		StartTime:       now.Unix(),
+		EndTime:         endUnix,
+		Status:          "active",
+		Source:          source,
+		LastResetTime:   lastReset,
+		NextResetTime:   nextReset,
+		AvailableGroups: allowedGroups,
+		UpgradeGroup:    allowedGroups.first(),
+		PrevUserGroup:   "",
+		CreatedAt:       common.GetTimestamp(),
+		UpdatedAt:       common.GetTimestamp(),
 	}
 	if err := tx.Create(sub).Error; err != nil {
 		return nil, err
@@ -757,20 +885,22 @@ func HasActiveUserSubscriptionForGroup(userId int, usingGroup string) (bool, err
 	if userId <= 0 {
 		return false, errors.New("invalid userId")
 	}
-	allowedGroup := strings.TrimSpace(usingGroup)
-	if allowedGroup == "" {
+	requestGroup := strings.TrimSpace(usingGroup)
+	if requestGroup == "" {
 		return false, nil
 	}
 	now := common.GetTimestamp()
-	var count int64
-	query := DB.Model(&UserSubscription{}).
-		Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
-		Where("upgrade_group = ?", allowedGroup).
-		Limit(1)
-	if err := query.Count(&count).Error; err != nil {
+	var subs []UserSubscription
+	if err := DB.Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
+		Find(&subs).Error; err != nil {
 		return false, err
 	}
-	return count > 0, nil
+	for _, sub := range subs {
+		if sub.AvailableGroups.normalizedWithFallback(sub.UpgradeGroup).contains(requestGroup) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // GetAllUserSubscriptions returns all subscriptions (active and expired) for a user.
@@ -965,8 +1095,8 @@ func PreConsumeUserSubscriptionForGroup(requestId string, userId int, modelName 
 	if amount <= 0 {
 		return nil, errors.New("amount must be > 0")
 	}
-	allowedGroup := strings.TrimSpace(usingGroup)
-	if allowedGroup == "" {
+	requestGroup := strings.TrimSpace(usingGroup)
+	if requestGroup == "" {
 		return nil, errors.New("no active subscription")
 	}
 	now := GetDBTimestamp()
@@ -998,7 +1128,6 @@ func PreConsumeUserSubscriptionForGroup(requestId string, userId int, modelName 
 		var subs []UserSubscription
 		subQuery := tx.Set("gorm:query_option", "FOR UPDATE").
 			Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
-			Where("upgrade_group = ?", allowedGroup).
 			Order("end_time asc, id asc")
 		if err := subQuery.Find(&subs).Error; err != nil {
 			return errors.New("no active subscription")
@@ -1008,6 +1137,9 @@ func PreConsumeUserSubscriptionForGroup(requestId string, userId int, modelName 
 		}
 		for _, candidate := range subs {
 			sub := candidate
+			if !sub.AvailableGroups.normalizedWithFallback(sub.UpgradeGroup).contains(requestGroup) {
+				continue
+			}
 			plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
 			if err != nil {
 				return err
