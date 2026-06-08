@@ -282,7 +282,7 @@ type SubscriptionPlan struct {
 	MaxPurchasePerUser int `json:"max_purchase_per_user" gorm:"type:int;default:0"`
 
 	// AvailableGroups restricts which request groups may consume subscription quota.
-	AvailableGroups SubscriptionAvailableGroups `json:"available_groups" gorm:"type:text;default:''"`
+	AvailableGroups SubscriptionAvailableGroups `json:"available_groups" gorm:"type:text"`
 	// Deprecated: kept for backward compatibility. Mirrors the first available group.
 	UpgradeGroup string `json:"upgrade_group" gorm:"type:varchar(64);default:''"`
 
@@ -377,7 +377,7 @@ type UserSubscription struct {
 	NextResetTime int64 `json:"next_reset_time" gorm:"type:bigint;default:0;index"`
 
 	// AvailableGroups is copied from the plan and restricts subscription quota usage.
-	AvailableGroups SubscriptionAvailableGroups `json:"available_groups" gorm:"type:text;default:''"`
+	AvailableGroups SubscriptionAvailableGroups `json:"available_groups" gorm:"type:text"`
 	// Deprecated: kept for backward compatibility. Mirrors the first available group.
 	UpgradeGroup string `json:"upgrade_group" gorm:"type:varchar(64);default:''"`
 	// Deprecated: kept for DB compatibility with older subscriptions that upgraded user groups.
