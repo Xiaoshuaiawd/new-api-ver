@@ -42,7 +42,7 @@ export function getPlanFormSchema(t: TFunction) {
     allow_balance_pay: z.boolean(),
     max_purchase_per_user: z.coerce.number().min(0),
     total_amount: z.coerce.number().min(0),
-    upgrade_group: z.string().optional(),
+    upgrade_group: z.string().min(1, t('Group is required')),
     stripe_price_id: z.string().optional(),
     creem_product_id: z.string().optional(),
     waffo_pancake_product_id: z.string().optional(),

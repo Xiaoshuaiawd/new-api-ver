@@ -183,11 +183,13 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 		return
 	}
 	req.Plan.UpgradeGroup = strings.TrimSpace(req.Plan.UpgradeGroup)
-	if req.Plan.UpgradeGroup != "" {
-		if _, ok := ratio_setting.GetGroupRatioCopy()[req.Plan.UpgradeGroup]; !ok {
-			common.ApiErrorMsg(c, "升级分组不存在")
-			return
-		}
+	if req.Plan.UpgradeGroup == "" {
+		common.ApiErrorMsg(c, "订阅可用分组不能为空")
+		return
+	}
+	if _, ok := ratio_setting.GetGroupRatioCopy()[req.Plan.UpgradeGroup]; !ok {
+		common.ApiErrorMsg(c, "订阅可用分组不存在")
+		return
 	}
 	req.Plan.QuotaResetPeriod = model.NormalizeResetPeriod(req.Plan.QuotaResetPeriod)
 	if req.Plan.QuotaResetPeriod == model.SubscriptionResetCustom && req.Plan.QuotaResetCustomSeconds <= 0 {
@@ -250,11 +252,13 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		return
 	}
 	req.Plan.UpgradeGroup = strings.TrimSpace(req.Plan.UpgradeGroup)
-	if req.Plan.UpgradeGroup != "" {
-		if _, ok := ratio_setting.GetGroupRatioCopy()[req.Plan.UpgradeGroup]; !ok {
-			common.ApiErrorMsg(c, "升级分组不存在")
-			return
-		}
+	if req.Plan.UpgradeGroup == "" {
+		common.ApiErrorMsg(c, "订阅可用分组不能为空")
+		return
+	}
+	if _, ok := ratio_setting.GetGroupRatioCopy()[req.Plan.UpgradeGroup]; !ok {
+		common.ApiErrorMsg(c, "订阅可用分组不存在")
+		return
 	}
 	req.Plan.QuotaResetPeriod = model.NormalizeResetPeriod(req.Plan.QuotaResetPeriod)
 	if req.Plan.QuotaResetPeriod == model.SubscriptionResetCustom && req.Plan.QuotaResetCustomSeconds <= 0 {

@@ -307,7 +307,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
           {plan.upgrade_group && (
             <div className='flex items-center justify-between'>
               <span className='text-muted-foreground text-sm'>
-                {t('Upgrade Group')}
+                {t('Available Group')}
               </span>
               <GroupBadge group={plan.upgrade_group} />
             </div>

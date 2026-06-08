@@ -192,16 +192,14 @@ export function useSubscriptionsColumns(): ColumnDef<PlanRecord>[] {
       },
       {
         id: 'upgrade_group',
-        meta: { label: t('Upgrade Group'), mobileHidden: true },
+        meta: { label: t('Available Group'), mobileHidden: true },
         header: ({ column }) => (
-          <DataTableColumnHeader column={column} title={t('Upgrade Group')} />
+          <DataTableColumnHeader column={column} title={t('Available Group')} />
         ),
         cell: ({ row }) => {
           const group = row.original.plan.upgrade_group
           if (!group) {
-            return (
-              <span className='text-muted-foreground'>{t('No Upgrade')}</span>
-            )
+            return <span className='text-muted-foreground'>{t('None')}</span>
           }
           return <GroupBadge group={group} />
         },

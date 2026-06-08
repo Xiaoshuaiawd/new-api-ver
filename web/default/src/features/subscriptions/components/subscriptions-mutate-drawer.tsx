@@ -364,27 +364,22 @@ export function SubscriptionsMutateDrawer({
                   name='upgrade_group'
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>{t('Upgrade Group')}</FormLabel>
+                      <FormLabel>{t('Available Group')}</FormLabel>
                       <Select
-                        items={[
-                          { value: '__none__', label: t('No Upgrade') },
-                          ...groupOptions.map((g) => ({ value: g, label: g })),
-                        ]}
-                        onValueChange={(v) =>
-                          field.onChange(v === '__none__' ? '' : v)
-                        }
+                        items={groupOptions.map((g) => ({
+                          value: g,
+                          label: g,
+                        }))}
+                        onValueChange={(v) => field.onChange(v || '')}
                         value={field.value || ''}
                       >
                         <FormControl>
                           <SelectTrigger>
-                            <SelectValue placeholder={t('No Upgrade')} />
+                            <SelectValue placeholder={t('None')} />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent alignItemWithTrigger={false}>
                           <SelectGroup>
-                            <SelectItem value='__none__'>
-                              {t('No Upgrade')}
-                            </SelectItem>
                             {groupOptions.map((g) => (
                               <SelectItem key={g} value={g}>
                                 {g}
@@ -393,6 +388,11 @@ export function SubscriptionsMutateDrawer({
                           </SelectGroup>
                         </SelectContent>
                       </Select>
+                      <FormDescription>
+                        {t(
+                          'Subscription quota is used only when the request uses this group. Other groups use wallet balance.'
+                        )}
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}

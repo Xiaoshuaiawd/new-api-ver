@@ -482,6 +482,8 @@ export const STATIC_I18N_KEYS = [
   'Cancel',
   'Status',
   'Upgrade Group',
+  'Available Group',
+  'Subscription quota is used only when the request uses this group. Other groups use wallet balance.',
   'Regenerate',
   'Untitled',
   'Open in new tab',
