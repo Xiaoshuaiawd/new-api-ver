@@ -302,7 +302,7 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		if err := tx.Model(&model.SubscriptionPlan{}).Where("id = ?", id).Updates(updateMap).Error; err != nil {
 			return err
 		}
-		return nil
+		return model.SyncUserSubscriptionsWithPlanGroupsTx(tx, id, req.Plan.AvailableGroups)
 	})
 	if err != nil {
 		common.ApiError(c, err)

@@ -406,6 +406,26 @@ func (s *UserSubscription) NormalizeDefaults() {
 	s.UpgradeGroup = s.AvailableGroups.first()
 }
 
+func SyncUserSubscriptionsWithPlanGroupsTx(tx *gorm.DB, planId int, groups SubscriptionAvailableGroups) error {
+	if tx == nil {
+		return errors.New("tx is nil")
+	}
+	if planId <= 0 {
+		return errors.New("invalid plan id")
+	}
+	normalized := groups.normalizedWithFallback("")
+	if len(normalized) == 0 {
+		return errors.New("available groups is empty")
+	}
+	return tx.Model(&UserSubscription{}).
+		Where("plan_id = ?", planId).
+		Updates(map[string]interface{}{
+			"available_groups": normalized,
+			"upgrade_group":    normalized.first(),
+			"updated_at":       common.GetTimestamp(),
+		}).Error
+}
+
 type SubscriptionSummary struct {
 	Subscription *UserSubscription `json:"subscription"`
 }
