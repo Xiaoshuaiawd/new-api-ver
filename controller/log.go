@@ -96,6 +96,15 @@ func GetLogByKey(c *gin.Context) {
 	})
 }
 
+func revenueStatRange(startTimestamp int64, endTimestamp int64) (int64, int64) {
+	if startTimestamp != 0 || endTimestamp != 0 {
+		return startTimestamp, endTimestamp
+	}
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
+	return todayStart, todayStart + 24*60*60
+}
+
 func GetLogsStat(c *gin.Context) {
 	logType, _ := strconv.Atoi(c.Query("type"))
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
@@ -117,10 +126,8 @@ func GetLogsStat(c *gin.Context) {
 		"tpm":   stat.Tpm,
 	}
 	if c.GetInt("role") >= common.RoleRootUser {
-		now := time.Now()
-		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
-		tomorrowStart := todayStart + 24*60*60
-		todayRevenue, err := model.SumRevenueByTimeRange(todayStart, tomorrowStart)
+		revenueStartTimestamp, revenueEndTimestamp := revenueStatRange(startTimestamp, endTimestamp)
+		todayRevenue, err := model.SumRevenueByTimeRange(revenueStartTimestamp, revenueEndTimestamp)
 		if err != nil {
 			common.ApiError(c, err)
 			return

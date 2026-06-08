@@ -109,7 +109,7 @@ export function CommonLogsStats() {
       />
       {isRoot ? (
         <StatBadge
-          label={t("Today's Revenue")}
+          label={t('Period Revenue')}
           value={formatLocalCurrencyAmount(stats?.today_revenue || 0, {
             digitsLarge: 2,
             digitsSmall: 2,

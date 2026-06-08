@@ -98,7 +98,7 @@ const LogsActions = ({
               }}
               className='!rounded-lg'
             >
-              {t('今日收益')}:{' '}
+              {t('期间收益')}:{' '}
               {renderQuotaNumberWithDigit(Number(stat.today_revenue || 0), 2)}
             </Tag>
           ) : null}
