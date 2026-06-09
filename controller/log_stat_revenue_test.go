@@ -65,6 +65,24 @@ func seedLogStatRevenue(t *testing.T) {
 	}).Error)
 }
 
+func seedLogStatRevenueBalanceSubscription(t *testing.T) {
+	t.Helper()
+
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
+	require.NoError(t, model.DB.Create(&model.SubscriptionOrder{
+		UserId:          4,
+		PlanId:          2,
+		Money:           3.4,
+		TradeNo:         "sub-balance-stat",
+		PaymentMethod:   model.PaymentMethodBalance,
+		PaymentProvider: model.PaymentProviderBalance,
+		Status:          common.TopUpStatusSuccess,
+		CreateTime:      todayStart + 300,
+		CompleteTime:    todayStart + 360,
+	}).Error)
+}
+
 func callGetLogsStatWithRole(t *testing.T, role int, target string) tokenAPIResponse {
 	t.Helper()
 
@@ -116,4 +134,17 @@ func TestGetLogsStatRevenueFollowsSelectedTimeRange(t *testing.T) {
 	var data map[string]any
 	require.NoError(t, common.Unmarshal(response.Data, &data))
 	require.InDelta(t, 49.0, data["today_revenue"].(float64), 0.001)
+}
+
+func TestGetLogsStatRevenueExcludesBalanceSubscriptionOrders(t *testing.T) {
+	setupLogStatRevenueTestDB(t)
+	seedLogStatRevenue(t)
+	seedLogStatRevenueBalanceSubscription(t)
+
+	response := callGetLogsStatWithRole(t, common.RoleRootUser, "")
+
+	require.True(t, response.Success, response.Message)
+	var data map[string]any
+	require.NoError(t, common.Unmarshal(response.Data, &data))
+	require.InDelta(t, 42.0, data["today_revenue"].(float64), 0.001)
 }

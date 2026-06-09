@@ -9,7 +9,9 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/bytedance/gopkg/util/gopool"
@@ -334,6 +336,62 @@ func (s *BillingSession) syncRelayInfo() {
 	}
 }
 
+func walletGroupRatioInfo(relayInfo *relaycommon.RelayInfo) types.GroupRatioInfo {
+	ratioInfo := types.GroupRatioInfo{
+		GroupRatio:        1,
+		GroupSpecialRatio: -1,
+		BillingSource:     BillingSourceWallet,
+	}
+	if relayInfo == nil {
+		return ratioInfo
+	}
+	if userGroupRatio, ok := ratio_setting.GetGroupGroupRatio(relayInfo.UserGroup, relayInfo.UsingGroup); ok {
+		ratioInfo.GroupSpecialRatio = userGroupRatio
+		ratioInfo.GroupRatio = userGroupRatio
+		ratioInfo.HasSpecialRatio = true
+		return ratioInfo
+	}
+	ratioInfo.GroupRatio = ratio_setting.GetGroupRatio(relayInfo.UsingGroup)
+	return ratioInfo
+}
+
+func quotaWithWalletGroupRatio(quota int, oldRatio float64, walletRatio float64) int {
+	if quota <= 0 {
+		return quota
+	}
+	if oldRatio <= 0 {
+		return quota
+	}
+	return billingexpr.QuotaRound(float64(quota) / oldRatio * walletRatio)
+}
+
+func switchRelayInfoPriceDataToWallet(relayInfo *relaycommon.RelayInfo, preConsumedQuota int) int {
+	if relayInfo == nil {
+		return preConsumedQuota
+	}
+	walletRatioInfo := walletGroupRatioInfo(relayInfo)
+	oldRatio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
+	if oldRatio <= 0 {
+		oldRatio = walletRatioInfo.GroupRatio
+	}
+	walletQuota := quotaWithWalletGroupRatio(preConsumedQuota, oldRatio, walletRatioInfo.GroupRatio)
+
+	relayInfo.PriceData.GroupRatioInfo = walletRatioInfo
+	if relayInfo.PriceData.QuotaToPreConsume != 0 || preConsumedQuota != 0 {
+		relayInfo.PriceData.QuotaToPreConsume = walletQuota
+	}
+	if relayInfo.PriceData.Quota != 0 {
+		relayInfo.PriceData.Quota = quotaWithWalletGroupRatio(relayInfo.PriceData.Quota, oldRatio, walletRatioInfo.GroupRatio)
+	}
+	if snap := relayInfo.TieredBillingSnapshot; snap != nil {
+		snap.GroupRatio = walletRatioInfo.GroupRatio
+		snap.EstimatedQuotaAfterGroup = billingexpr.QuotaRound(snap.EstimatedQuotaBeforeGroup * walletRatioInfo.GroupRatio)
+		walletQuota = snap.EstimatedQuotaAfterGroup
+		relayInfo.PriceData.QuotaToPreConsume = walletQuota
+	}
+	return walletQuota
+}
+
 // ---------------------------------------------------------------------------
 // NewBillingSession 工厂 — 根据计费偏好创建会话并处理回退
 // ---------------------------------------------------------------------------
@@ -347,7 +405,7 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 	pref := common.NormalizeBillingPreference(relayInfo.UserSetting.BillingPreference)
 
 	// 钱包路径需要先检查用户额度
-	tryWallet := func() (*BillingSession, *types.NewAPIError) {
+	tryWallet := func(walletPreConsumedQuota int) (*BillingSession, *types.NewAPIError) {
 		userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
 		if err != nil {
 			return nil, types.NewError(err, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
@@ -358,9 +416,9 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 				types.ErrorCodeInsufficientUserQuota, http.StatusForbidden,
 				types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
 		}
-		if userQuota-preConsumedQuota < 0 {
+		if userQuota-walletPreConsumedQuota < 0 {
 			return nil, types.NewErrorWithStatusCode(
-				fmt.Errorf("预扣费额度失败, 用户剩余额度: %s, 需要预扣费额度: %s", logger.FormatQuota(userQuota), logger.FormatQuota(preConsumedQuota)),
+				fmt.Errorf("预扣费额度失败, 用户剩余额度: %s, 需要预扣费额度: %s", logger.FormatQuota(userQuota), logger.FormatQuota(walletPreConsumedQuota)),
 				types.ErrorCodeInsufficientUserQuota, http.StatusForbidden,
 				types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
 		}
@@ -370,7 +428,7 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 			relayInfo: relayInfo,
 			funding:   &WalletFunding{userId: relayInfo.UserId},
 		}
-		if apiErr := session.preConsume(c, preConsumedQuota); apiErr != nil {
+		if apiErr := session.preConsume(c, walletPreConsumedQuota); apiErr != nil {
 			return nil, apiErr
 		}
 		return session, nil
@@ -398,6 +456,15 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 		}
 		return session, nil
 	}
+	isSubscriptionQuotaErr := func(apiErr *types.NewAPIError) bool {
+		if apiErr == nil {
+			return false
+		}
+		errMsg := apiErr.Error()
+		return strings.Contains(errMsg, "no active subscription") ||
+			strings.Contains(errMsg, "subscription quota insufficient") ||
+			strings.Contains(errMsg, "订阅额度不足")
+	}
 
 	hasGroupSubscription, subCheckErr := model.HasActiveUserSubscriptionForGroup(relayInfo.UserId, relayInfo.UsingGroup)
 	if subCheckErr != nil {
@@ -407,6 +474,14 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 	if hasGroupSubscription {
 		session, apiErr := trySubscription()
 		if apiErr != nil {
+			if isSubscriptionQuotaErr(apiErr) {
+				walletPreConsumedQuota := switchRelayInfoPriceDataToWallet(relayInfo, preConsumedQuota)
+				if walletSession, walletErr := tryWallet(walletPreConsumedQuota); walletErr == nil {
+					return walletSession, nil
+				} else {
+					return nil, walletErr
+				}
+			}
 			return nil, apiErr
 		}
 		return session, nil
@@ -414,14 +489,14 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 
 	switch pref {
 	case "subscription_only":
-		return tryWallet()
+		return tryWallet(preConsumedQuota)
 	case "wallet_only":
-		return tryWallet()
+		return tryWallet(preConsumedQuota)
 	case "wallet_first":
-		return tryWallet()
+		return tryWallet(preConsumedQuota)
 	case "subscription_first":
 		fallthrough
 	default:
-		return tryWallet()
+		return tryWallet(preConsumedQuota)
 	}
 }

@@ -8,6 +8,8 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -369,7 +371,7 @@ func TestNewBillingSession_FallsBackToWalletWhenNoAvailableGroupsMatch(t *testin
 	assert.Equal(t, 1000, getTokenRemainForBillingGroupTest(t, tokenId))
 }
 
-func TestNewBillingSession_GroupMatchDoesNotFallbackToWalletWhenSubscriptionInsufficient(t *testing.T) {
+func TestNewBillingSession_GroupMatchFallsBackToWalletWhenSubscriptionInsufficient(t *testing.T) {
 	for _, preference := range []string{"subscription_first", "wallet_first"} {
 		t.Run(preference, func(t *testing.T) {
 			truncate(t)
@@ -398,14 +400,112 @@ func TestNewBillingSession_GroupMatchDoesNotFallbackToWalletWhenSubscriptionInsu
 
 			session, apiErr := NewBillingSession(ctx, relayInfo, quota)
 
-			require.Nil(t, session)
-			require.NotNil(t, apiErr)
-			assert.Contains(t, apiErr.Error(), "订阅额度")
-			assert.Equal(t, 1000, getWalletQuotaForBillingGroupTest(t, userId))
+			require.Nil(t, apiErr)
+			require.NotNil(t, session)
+			assert.Equal(t, BillingSourceWallet, relayInfo.BillingSource)
+			assert.Equal(t, quota, relayInfo.FinalPreConsumedQuota)
+			assert.Equal(t, 0, relayInfo.SubscriptionId)
+			assert.Equal(t, 900, getWalletQuotaForBillingGroupTest(t, userId))
 			assert.Equal(t, int64(0), getSubscriptionUsedForBillingGroupTest(t, subId))
 			assert.Equal(t, 1000, getTokenRemainForBillingGroupTest(t, tokenId))
 		})
 	}
+}
+
+func TestNewBillingSession_GroupMatchReportsWalletInsufficientWhenSubscriptionAndWalletInsufficient(t *testing.T) {
+	truncate(t)
+
+	userId := 7205
+	tokenId := 8205
+	subId := 9307
+	planId := 9407
+	quota := 100
+	allowedGroup := "vip"
+	tokenKey := "billing-group-sub-wallet-insufficient"
+	seedUser(t, userId, 50)
+	seedUnlimitedTokenForBillingGroupTest(t, tokenId, userId, tokenKey, 1000)
+	seedSubscriptionPlanForBillingGroupTest(t, planId, allowedGroup)
+	seedUserSubscriptionForBillingGroupTest(t, subId, userId, planId, allowedGroup)
+	require.NoError(t, model.DB.Model(&model.UserSubscription{}).
+		Where("id = ?", subId).
+		Updates(map[string]interface{}{
+			"amount_total": 50,
+			"amount_used":  0,
+		}).Error)
+
+	ctx := &gin.Context{}
+	ctx.Set("token_quota", 1000)
+	relayInfo := makeBillingGroupRelayInfo(userId, tokenId, tokenKey, allowedGroup, "subscription_first")
+
+	session, apiErr := NewBillingSession(ctx, relayInfo, quota)
+
+	require.Nil(t, session)
+	require.NotNil(t, apiErr)
+	assert.Contains(t, apiErr.Error(), "用户剩余额度")
+	assert.Equal(t, 50, getWalletQuotaForBillingGroupTest(t, userId))
+	assert.Equal(t, int64(0), getSubscriptionUsedForBillingGroupTest(t, subId))
+	assert.Equal(t, 1000, getTokenRemainForBillingGroupTest(t, tokenId))
+}
+
+func TestNewBillingSession_FallbackToWalletUsesWalletGroupRatio(t *testing.T) {
+	truncate(t)
+
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		saved[key] = value
+		return nil
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, config.GlobalConfig.LoadFromDB(saved))
+	})
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"group_ratio_setting.group_ratio":              `{"vip":0.13}`,
+		"group_ratio_setting.subscription_group_ratio": `{"vip":0.7}`,
+	}))
+
+	userId := 7206
+	tokenId := 8206
+	subId := 9308
+	planId := 9408
+	subscriptionPricedQuota := 700
+	walletPricedQuota := 130
+	allowedGroup := "vip"
+	tokenKey := "billing-group-fallback-wallet-ratio"
+	seedUser(t, userId, 1000)
+	seedUnlimitedTokenForBillingGroupTest(t, tokenId, userId, tokenKey, 1000)
+	seedSubscriptionPlanForBillingGroupTest(t, planId, allowedGroup)
+	seedUserSubscriptionForBillingGroupTest(t, subId, userId, planId, allowedGroup)
+	require.NoError(t, model.DB.Model(&model.UserSubscription{}).
+		Where("id = ?", subId).
+		Updates(map[string]interface{}{
+			"amount_total": 500,
+			"amount_used":  0,
+		}).Error)
+
+	ctx := &gin.Context{}
+	ctx.Set("token_quota", 1000)
+	relayInfo := makeBillingGroupRelayInfo(userId, tokenId, tokenKey, allowedGroup, "subscription_first")
+	relayInfo.PriceData = types.PriceData{
+		QuotaToPreConsume: subscriptionPricedQuota,
+		GroupRatioInfo: types.GroupRatioInfo{
+			GroupRatio:                0.7,
+			BillingSource:             BillingSourceSubscription,
+			HasSubscriptionGroupRatio: true,
+		},
+	}
+
+	session, apiErr := NewBillingSession(ctx, relayInfo, subscriptionPricedQuota)
+
+	require.Nil(t, apiErr)
+	require.NotNil(t, session)
+	assert.Equal(t, BillingSourceWallet, relayInfo.BillingSource)
+	assert.Equal(t, walletPricedQuota, relayInfo.FinalPreConsumedQuota)
+	assert.Equal(t, walletPricedQuota, relayInfo.PriceData.QuotaToPreConsume)
+	assert.Equal(t, 0.13, relayInfo.PriceData.GroupRatioInfo.GroupRatio)
+	assert.Equal(t, BillingSourceWallet, relayInfo.PriceData.GroupRatioInfo.BillingSource)
+	assert.False(t, relayInfo.PriceData.GroupRatioInfo.HasSubscriptionGroupRatio)
+	assert.Equal(t, 870, getWalletQuotaForBillingGroupTest(t, userId))
+	assert.Equal(t, int64(0), getSubscriptionUsedForBillingGroupTest(t, subId))
 }
 
 func TestNewBillingSession_GroupMismatchDoesNotFallbackToSubscriptionWhenWalletInsufficient(t *testing.T) {

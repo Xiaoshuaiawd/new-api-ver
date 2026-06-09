@@ -467,7 +467,9 @@ func scanMoneySum(tx *gorm.DB) (float64, error) {
 
 func SumRevenueByTimeRange(startTimestamp int64, endTimestamp int64) (float64, error) {
 	subscriptionQuery := DB.Model(&SubscriptionOrder{}).
-		Where("status = ?", common.TopUpStatusSuccess)
+		Where("status = ?", common.TopUpStatusSuccess).
+		Where("COALESCE(payment_method, '') <> ?", PaymentMethodBalance).
+		Where("COALESCE(payment_provider, '') <> ?", PaymentProviderBalance)
 	walletTopUpQuery := DB.Model(&TopUp{}).
 		Where("status = ?", common.TopUpStatusSuccess).
 		Where(
