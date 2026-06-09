@@ -39,6 +39,8 @@ export type PaymentResponse = ApiResponse<Record<string, unknown>> & {
   url?: string
 }
 export type StripePaymentResponse = ApiResponse<{ pay_link: string }>
+export type AlipayF2FPaymentResponse = ApiResponse<AlipayF2FOrderData>
+export type AlipayF2FStatusResponse = ApiResponse<AlipayF2FStatusData>
 export type AffiliateCodeResponse = ApiResponse<string>
 export type AffiliateTransferResponse = ApiResponse
 export type CreemPaymentResponse = ApiResponse<{ checkout_url: string }>
@@ -124,12 +126,16 @@ export interface TopupInfo {
   enable_online_topup: boolean
   /** Whether Stripe topup is enabled */
   enable_stripe_topup: boolean
+  /** Whether Alipay Face-to-Face topup is enabled */
+  enable_alipay_f2f_topup?: boolean
   /** Available payment methods */
   pay_methods: PaymentMethod[]
   /** Minimum topup amount for online topup */
   min_topup: number
   /** Minimum topup amount for Stripe */
   stripe_min_topup: number
+  /** Minimum topup amount for Alipay Face-to-Face */
+  alipay_f2f_min_topup?: number
   /** Preset amount options */
   amount_options: number[]
   /** Discount rates by amount */
@@ -184,6 +190,40 @@ export interface PaymentRequest {
   amount: number
   /** Payment method identifier */
   payment_method: string
+}
+
+/**
+ * Alipay Face-to-Face order data
+ */
+export interface AlipayF2FOrderData {
+  /** Merchant trade number */
+  trade_no: string
+  /** QR code content returned by Alipay */
+  qr_code: string
+  /** Local order status */
+  status: TopupStatus | 'failed' | string
+  /** Topup quota amount */
+  amount?: number
+  /** Amount user pays */
+  pay_money?: string
+  /** Alipay timeout expression */
+  timeout_express?: string
+  /** Seconds before order expires */
+  expires_in_sec?: number
+  /** Alipay trade status */
+  trade_status?: string
+}
+
+/**
+ * Alipay Face-to-Face status data
+ */
+export interface AlipayF2FStatusData {
+  /** Merchant trade number */
+  trade_no: string
+  /** Local order status */
+  status: TopupStatus | 'failed' | string
+  /** Alipay trade status */
+  trade_status?: string
 }
 
 /**

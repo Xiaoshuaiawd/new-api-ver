@@ -21,6 +21,7 @@ import i18next from 'i18next'
 import { toast } from 'sonner'
 import {
   calculateAmount,
+  calculateAlipayF2FAmount,
   calculateStripeAmount,
   calculateWaffoPancakeAmount,
   requestPayment,
@@ -28,6 +29,7 @@ import {
   isApiSuccess,
 } from '../api'
 import {
+  isAlipayF2FPayment,
   isStripePayment,
   isWaffoPancakePayment,
   submitPaymentForm,
@@ -49,12 +51,15 @@ export function usePayment() {
         setCalculating(true)
 
         const isStripe = isStripePayment(paymentType)
+        const isAlipayF2F = isAlipayF2FPayment(paymentType)
         const isPancake = isWaffoPancakePayment(paymentType)
         const response = isStripe
           ? await calculateStripeAmount({ amount: topupAmount })
-          : isPancake
-            ? await calculateWaffoPancakeAmount({ amount: topupAmount })
-            : await calculateAmount({ amount: topupAmount })
+          : isAlipayF2F
+            ? await calculateAlipayF2FAmount({ amount: topupAmount })
+            : isPancake
+              ? await calculateWaffoPancakeAmount({ amount: topupAmount })
+              : await calculateAmount({ amount: topupAmount })
 
         if (isApiSuccess(response) && response.data) {
           const calculatedAmount = parseFloat(response.data)

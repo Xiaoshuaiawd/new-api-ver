@@ -23,6 +23,7 @@ import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { SectionPageLayout } from '@/components/layout'
 import { AffiliateRewardsCard } from './components/affiliate-rewards-card'
+import { AlipayF2FDialog } from './components/dialogs/alipay-f2f-dialog'
 import { BillingHistoryDialog } from './components/dialogs/billing-history-dialog'
 import { CreemConfirmDialog } from './components/dialogs/creem-confirm-dialog'
 import { PaymentConfirmDialog } from './components/dialogs/payment-confirm-dialog'
@@ -34,6 +35,7 @@ import { DEFAULT_DISCOUNT_RATE } from './constants'
 import {
   useTopupInfo,
   usePayment,
+  useAlipayF2FPayment,
   useAffiliate,
   useRedemption,
   useCreemPayment,
@@ -43,6 +45,7 @@ import {
 import {
   getDefaultPaymentType,
   getMinTopupAmount,
+  isAlipayF2FPayment,
   isWaffoPancakePayment,
 } from './lib'
 import type {
@@ -84,24 +87,6 @@ export function Wallet(props: WalletProps) {
       ? 1
       : currency?.usdExchangeRate || 1
   }, [currency?.quotaDisplayType, currency?.usdExchangeRate])
-  const {
-    amount: paymentAmount,
-    calculating,
-    processing,
-    calculatePaymentAmount,
-    processPayment,
-  } = usePayment()
-  const {
-    affiliateLink,
-    loading: affiliateLoading,
-    transferQuota,
-    transferring,
-  } = useAffiliate()
-  const { redeeming, redeemCode } = useRedemption()
-  const { processing: creemProcessing, processCreemPayment } = useCreemPayment()
-  const { processWaffoPayment } = useWaffoPayment()
-  const { processing: pancakeProcessing, processWaffoPancakePayment } =
-    useWaffoPancakePayment()
 
   // Fetch and refresh user data
   const fetchUser = useCallback(async () => {
@@ -118,6 +103,32 @@ export function Wallet(props: WalletProps) {
       setUserLoading(false)
     }
   }, [])
+
+  const {
+    amount: paymentAmount,
+    calculating,
+    processing,
+    calculatePaymentAmount,
+    processPayment,
+  } = usePayment()
+  const {
+    alipayF2FOpen,
+    alipayF2FOrder,
+    alipayF2FProcessing,
+    setAlipayF2FOpen,
+    processAlipayF2FPayment,
+  } = useAlipayF2FPayment(fetchUser)
+  const {
+    affiliateLink,
+    loading: affiliateLoading,
+    transferQuota,
+    transferring,
+  } = useAffiliate()
+  const { redeeming, redeemCode } = useRedemption()
+  const { processing: creemProcessing, processCreemPayment } = useCreemPayment()
+  const { processWaffoPayment } = useWaffoPayment()
+  const { processing: pancakeProcessing, processWaffoPancakePayment } =
+    useWaffoPancakePayment()
 
   useEffect(() => {
     fetchUser()
@@ -186,9 +197,12 @@ export function Wallet(props: WalletProps) {
     if (!selectedPaymentMethod) return
 
     const isPancake = isWaffoPancakePayment(selectedPaymentMethod.type)
-    const success = isPancake
-      ? await processWaffoPancakePayment(topupAmount)
-      : await processPayment(topupAmount, selectedPaymentMethod.type)
+    const isAlipayF2F = isAlipayF2FPayment(selectedPaymentMethod.type)
+    const success = isAlipayF2F
+      ? await processAlipayF2FPayment(topupAmount)
+      : isPancake
+        ? await processWaffoPancakePayment(topupAmount)
+        : await processPayment(topupAmount, selectedPaymentMethod.type)
 
     if (success) {
       setConfirmDialogOpen(false)
@@ -303,6 +317,7 @@ export function Wallet(props: WalletProps) {
                   enableWaffoPancakeTopup={
                     topupInfo?.enable_waffo_pancake_topup
                   }
+                  enableAlipayF2FTopup={topupInfo?.enable_alipay_f2f_topup}
                 />
               </div>
 
@@ -335,7 +350,7 @@ export function Wallet(props: WalletProps) {
         paymentAmount={paymentAmount}
         paymentMethod={selectedPaymentMethod}
         calculating={calculating}
-        processing={processing || pancakeProcessing}
+        processing={processing || pancakeProcessing || alipayF2FProcessing}
         discountRate={getDiscountRate()}
         usdExchangeRate={effectiveUsdExchangeRate}
       />
@@ -359,6 +374,12 @@ export function Wallet(props: WalletProps) {
         onConfirm={handleCreemConfirm}
         product={selectedCreemProduct}
         processing={creemProcessing}
+      />
+
+      <AlipayF2FDialog
+        open={alipayF2FOpen}
+        onOpenChange={setAlipayF2FOpen}
+        order={alipayF2FOrder}
       />
     </>
   )

@@ -25,6 +25,7 @@ import type {
   CreateUserSubscriptionRequest,
   SubscriptionPayResponse,
   SubscriptionPayRequest,
+  SubscriptionAlipayF2FStatusResponse,
   SelfSubscriptionData,
 } from './types'
 
@@ -126,6 +127,27 @@ export async function paySubscriptionWaffoPancake(
   data: SubscriptionPayRequest
 ): Promise<SubscriptionPayResponse> {
   const res = await api.post('/api/subscription/waffo-pancake/pay', data)
+  return res.data
+}
+
+export async function paySubscriptionAlipayF2F(
+  data: SubscriptionPayRequest & { payment_method: 'alipay_f2f' }
+): Promise<SubscriptionPayResponse> {
+  const res = await api.post('/api/subscription/alipay-f2f/pay', data, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+export async function getSubscriptionAlipayF2FOrderStatus(
+  tradeNo: string
+): Promise<SubscriptionAlipayF2FStatusResponse> {
+  const res = await api.get(
+    `/api/subscription/alipay-f2f/order/${encodeURIComponent(tradeNo)}/status`,
+    {
+      skipBusinessError: true,
+    } as Record<string, unknown>
+  )
   return res.data
 }
 

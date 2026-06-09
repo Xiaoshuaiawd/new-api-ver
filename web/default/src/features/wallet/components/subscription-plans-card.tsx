@@ -68,7 +68,13 @@ interface SubscriptionPlansCardProps {
 
 function getEpayMethods(payMethods: PaymentMethod[] = []): PaymentMethod[] {
   return payMethods.filter(
-    (m) => m?.type && m.type !== 'stripe' && m.type !== 'creem'
+    (m) =>
+      m?.type &&
+      m.type !== 'stripe' &&
+      m.type !== 'creem' &&
+      m.type !== 'alipay_f2f' &&
+      m.type !== 'waffo' &&
+      m.type !== 'waffo_pancake'
   )
 }
 
@@ -116,7 +122,14 @@ export function SubscriptionPlansCard({
   const enableStripe = !!topupInfo?.enable_stripe_topup
   const enableCreem = !!topupInfo?.enable_creem_topup
   const enableWaffoPancake = !!topupInfo?.enable_waffo_pancake_topup
+  const enableAlipayF2F = !!topupInfo?.enable_alipay_f2f_topup
   const enableOnlineTopUp = !!topupInfo?.enable_online_topup
+  const alipayF2FMethod = useMemo(
+    () =>
+      (topupInfo?.pay_methods || []).find((m) => m?.type === 'alipay_f2f') ||
+      null,
+    [topupInfo?.pay_methods]
+  )
   const epayMethods = useMemo(
     () => getEpayMethods(topupInfo?.pay_methods),
     [topupInfo?.pay_methods]
@@ -641,6 +654,8 @@ export function SubscriptionPlansCard({
         enableStripe={enableStripe}
         enableCreem={enableCreem}
         enableWaffoPancake={enableWaffoPancake}
+        enableAlipayF2F={enableAlipayF2F}
+        alipayF2FMethod={alipayF2FMethod}
         enableOnlineTopUp={enableOnlineTopUp}
         epayMethods={epayMethods}
         userQuota={userQuota}

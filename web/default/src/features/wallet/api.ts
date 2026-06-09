@@ -28,6 +28,8 @@ import type {
   AmountResponse,
   PaymentResponse,
   StripePaymentResponse,
+  AlipayF2FPaymentResponse,
+  AlipayF2FStatusResponse,
   AffiliateCodeResponse,
   AffiliateTransferResponse,
   BillingHistoryResponse,
@@ -94,6 +96,18 @@ export async function calculateStripeAmount(
 }
 
 /**
+ * Calculate payment amount for Alipay Face-to-Face payment
+ */
+export async function calculateAlipayF2FAmount(
+  request: AmountRequest
+): Promise<AmountResponse> {
+  const res = await api.post('/api/user/alipay-f2f/amount', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+/**
  * Request regular payment
  */
 export async function requestPayment(
@@ -106,6 +120,33 @@ export async function requestPayment(
     ...res.data,
     url: res.data.url || (res as unknown as { url?: string }).url,
   }
+}
+
+/**
+ * Request Alipay Face-to-Face payment
+ */
+export async function requestAlipayF2FPayment(
+  request: PaymentRequest
+): Promise<AlipayF2FPaymentResponse> {
+  const res = await api.post('/api/user/alipay-f2f/pay', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+/**
+ * Get Alipay Face-to-Face topup status
+ */
+export async function getAlipayF2FTopupStatus(
+  tradeNo: string
+): Promise<AlipayF2FStatusResponse> {
+  const res = await api.get(
+    `/api/user/alipay-f2f/topup/${encodeURIComponent(tradeNo)}/status`,
+    {
+      skipBusinessError: true,
+    } as Record<string, unknown>
+  )
+  return res.data
 }
 
 /**

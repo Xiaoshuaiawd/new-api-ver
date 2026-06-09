@@ -108,8 +108,26 @@ export interface SubscriptionPayResponse {
     order_id?: string
     token?: string
     token_expires_at?: number | string
+    // Alipay Face-to-Face QR payment.
+    trade_no?: string
+    qr_code?: string
+    status?: string
+    pay_money?: string
+    timeout_express?: string
+    expires_in_sec?: number
+    trade_status?: string
   }
   url?: string
+}
+
+export interface SubscriptionAlipayF2FStatusResponse {
+  success: boolean
+  message?: string
+  data?: {
+    trade_no: string
+    status: string
+    trade_status?: string
+  }
 }
 
 export interface CreateUserSubscriptionRequest {
