@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"unicode/utf8"
@@ -87,6 +88,10 @@ func AddRedemption(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 		return
 	}
+	if err := validateRedemptionReward(&redemption); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	var keys []string
 	for i := 0; i < redemption.Count; i++ {
 		key := common.GetUUID()
@@ -96,6 +101,8 @@ func AddRedemption(c *gin.Context) {
 			Key:         key,
 			CreatedTime: common.GetTimestamp(),
 			Quota:       redemption.Quota,
+			RewardType:  redemption.RewardType,
+			PlanId:      redemption.PlanId,
 			ExpiredTime: redemption.ExpiredTime,
 		}
 		err = cleanRedemption.Insert()
@@ -153,7 +160,13 @@ func UpdateRedemption(c *gin.Context) {
 		// If you add more fields, please also update redemption.Update()
 		cleanRedemption.Name = redemption.Name
 		cleanRedemption.Quota = redemption.Quota
+		cleanRedemption.RewardType = redemption.RewardType
+		cleanRedemption.PlanId = redemption.PlanId
 		cleanRedemption.ExpiredTime = redemption.ExpiredTime
+		if err := validateRedemptionReward(cleanRedemption); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 	}
 	if statusOnly != "" {
 		cleanRedemption.Status = redemption.Status
@@ -190,4 +203,33 @@ func validateExpiredTime(c *gin.Context, expired int64) (bool, string) {
 		return false, i18n.T(c, i18n.MsgRedemptionExpireTimeInvalid)
 	}
 	return true, ""
+}
+
+func validateRedemptionReward(redemption *model.Redemption) error {
+	if redemption == nil {
+		return errors.New("invalid redemption")
+	}
+	redemption.NormalizeRewardType()
+	switch redemption.RewardType {
+	case model.RedemptionRewardTypeSubscription:
+		if redemption.PlanId <= 0 {
+			return errors.New("请选择订阅套餐")
+		}
+		plan, err := model.GetSubscriptionPlanById(redemption.PlanId)
+		if err != nil {
+			return errors.New("订阅套餐不存在")
+		}
+		if !plan.Enabled {
+			return errors.New("订阅套餐未启用")
+		}
+		redemption.Quota = 0
+	case model.RedemptionRewardTypeQuota:
+		redemption.PlanId = 0
+		if redemption.Quota <= 0 {
+			return errors.New("额度必须大于 0")
+		}
+	default:
+		return errors.New("无效的兑换内容类型")
+	}
+	return nil
 }

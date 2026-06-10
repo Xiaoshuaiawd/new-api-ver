@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { type ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
@@ -29,6 +31,7 @@ import { DataTableColumnHeader } from '@/components/data-table'
 import { MaskedValueDisplay } from '@/components/masked-value-display'
 import { StatusBadge } from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
+import { getAdminPlans } from '@/features/subscriptions/api'
 import { REDEMPTION_FILTER_EXPIRED, REDEMPTION_STATUSES } from '../constants'
 import { isRedemptionExpired, isTimestampExpired } from '../lib'
 import { type Redemption } from '../types'
@@ -36,6 +39,16 @@ import { DataTableRowActions } from './data-table-row-actions'
 
 export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
   const { t } = useTranslation()
+  const { data: plansResponse } = useQuery({
+    queryKey: ['redemption-subscription-plans'],
+    queryFn: getAdminPlans,
+  })
+  const planTitleById = useMemo(() => {
+    return new Map(
+      (plansResponse?.data || []).map((item) => [item.plan.id, item.plan.title])
+    )
+  }, [plansResponse?.data])
+
   return [
     {
       id: 'select',
@@ -161,16 +174,27 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
       enableSorting: false,
     },
     {
-      accessorKey: 'quota',
-      meta: { label: t('Quota') },
+      id: 'reward',
+      meta: { label: t('Redemption Content') },
       header: ({ column }) => (
-        <DataTableColumnHeader column={column} title={t('Quota')} />
+        <DataTableColumnHeader column={column} title={t('Redemption Content')} />
       ),
       cell: ({ row }) => {
-        const quota = row.getValue('quota') as number
+        const redemption = row.original
+        const isSubscription = redemption.reward_type === 'subscription'
         return (
           <StatusBadge
-            label={formatQuota(quota)}
+            label={
+              isSubscription
+                ? t('Subscription: {{plan}}', {
+                    plan:
+                      planTitleById.get(redemption.plan_id || 0) ||
+                      t('Plan #{{id}}', { id: redemption.plan_id || 0 }),
+                  })
+                : t('Quota: {{quota}}', {
+                    quota: formatQuota(redemption.quota),
+                  })
+            }
             variant='neutral'
             copyable={false}
           />
