@@ -127,10 +127,15 @@ export function RedemptionsTable() {
     onColumnVisibilityChange: setColumnVisibility,
     globalFilterFn: (row, _columnId, filterValue) => {
       const name = String(row.getValue('name')).toLowerCase()
+      const key = String(row.getValue('key')).toLowerCase()
       const id = String(row.getValue('id'))
       const searchValue = String(filterValue).toLowerCase()
 
-      return name.includes(searchValue) || id.includes(searchValue)
+      return (
+        name.includes(searchValue) ||
+        key.includes(searchValue) ||
+        id.includes(searchValue)
+      )
     },
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
@@ -167,7 +172,7 @@ export function RedemptionsTable() {
       )}
       skeletonKeyPrefix='redemptions-skeleton'
       toolbarProps={{
-        searchPlaceholder: t('Filter by name or ID...'),
+        searchPlaceholder: t('Filter by name, ID, or code...'),
         filters: [
           {
             columnId: 'status',
