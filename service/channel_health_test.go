@@ -37,6 +37,10 @@ func withChannelHealthTestSettings(t *testing.T) *operation_setting.ChannelHealt
 		ProbeTimeoutSeconds:         30,
 		ProbeSuccessesToRecover:     2,
 		ProbeBackoffMaxSeconds:      300,
+		WarmupEnabled:               true,
+		WarmupDurationSeconds:       60,
+		WarmupStartPercent:          10,
+		WarmupStepPercent:           30,
 	}
 	t.Cleanup(func() {
 		*setting = original
@@ -137,13 +141,86 @@ func TestChannelHealthRequiresTwoProbeSuccessesToRecover(t *testing.T) {
 	require.False(t, IsChannelAvailable(channelID))
 
 	RecordProbeResult(channelID, true, "")
-	require.False(t, IsChannelAvailable(channelID))
+	snapshot, ok := GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateProbing, snapshot.State)
 
 	RecordProbeResult(channelID, true, "")
+	snapshot, ok = GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateWarming, snapshot.State)
+	require.Equal(t, 10, snapshot.WarmupPercent)
+}
+
+func TestChannelHealthWarmupCompletesAfterDuration(t *testing.T) {
+	withChannelHealthTestSettings(t)
+	now := time.Unix(1_700_000_000, 0)
+	SetChannelHealthNowFuncForTest(func() time.Time { return now })
+
+	const channelID = 8810
+	OpenChannel(channelID, "test open")
+	RecordProbeResult(channelID, true, "")
+	RecordProbeResult(channelID, true, "")
+
+	now = now.Add(61 * time.Second)
+
 	require.True(t, IsChannelAvailable(channelID))
 	snapshot, ok := GetChannelHealthSnapshot(channelID)
 	require.True(t, ok)
 	require.Equal(t, ChannelHealthStateHealthy, snapshot.State)
+	require.Equal(t, 100, snapshot.WarmupPercent)
+}
+
+func TestChannelHealthWarmupRampsSnapshotPercent(t *testing.T) {
+	withChannelHealthTestSettings(t)
+	now := time.Unix(1_700_000_000, 0)
+	SetChannelHealthNowFuncForTest(func() time.Time { return now })
+
+	const channelID = 8812
+	OpenChannel(channelID, "test open")
+	RecordProbeResult(channelID, true, "")
+	RecordProbeResult(channelID, true, "")
+
+	snapshot, ok := GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateWarming, snapshot.State)
+	require.Equal(t, 10, snapshot.WarmupPercent)
+
+	now = now.Add(20 * time.Second)
+	snapshot, ok = GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateWarming, snapshot.State)
+	require.Equal(t, 40, snapshot.WarmupPercent)
+
+	now = now.Add(20 * time.Second)
+	snapshot, ok = GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateWarming, snapshot.State)
+	require.Equal(t, 70, snapshot.WarmupPercent)
+
+	now = now.Add(20 * time.Second)
+	snapshot, ok = GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateHealthy, snapshot.State)
+	require.Equal(t, 100, snapshot.WarmupPercent)
+}
+
+func TestChannelHealthWarmupFailureReopensChannel(t *testing.T) {
+	withChannelHealthTestSettings(t)
+
+	const channelID = 8811
+	OpenChannel(channelID, "test open")
+	RecordProbeResult(channelID, true, "")
+	RecordProbeResult(channelID, true, "")
+
+	handle := RecordAttemptStart(ChannelAttemptMeta{ChannelID: channelID})
+	RecordAttemptFinish(handle, ChannelAttemptResult{Error: channelHealthTestUpstreamError()})
+
+	require.False(t, IsChannelAvailable(channelID))
+	snapshot, ok := GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateOpen, snapshot.State)
+	require.Contains(t, snapshot.Reason, "warmup")
 }
 
 func TestChannelHealthHalfOpenAttemptSuccessCountsTowardRecovery(t *testing.T) {
@@ -172,6 +249,12 @@ func TestChannelHealthHalfOpenAttemptSuccessCountsTowardRecovery(t *testing.T) {
 	RecordFirstResponse(handle)
 	RecordAttemptFinish(handle, ChannelAttemptResult{StatusCode: http.StatusOK})
 
+	snapshot, ok = GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateWarming, snapshot.State)
+	require.Equal(t, 10, snapshot.WarmupPercent)
+
+	now = now.Add(61 * time.Second)
 	require.True(t, IsChannelAvailable(channelID))
 	snapshot, ok = GetChannelHealthSnapshot(channelID)
 	require.True(t, ok)

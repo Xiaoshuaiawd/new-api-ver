@@ -24,6 +24,7 @@ const (
 	ChannelHealthStateHealthy ChannelHealthState = "healthy"
 	ChannelHealthStateOpen    ChannelHealthState = "open"
 	ChannelHealthStateProbing ChannelHealthState = "probing"
+	ChannelHealthStateWarming ChannelHealthState = "warming"
 
 	ginKeyChannelHealthAttempt = "channel_health_attempt"
 
@@ -67,6 +68,9 @@ type ChannelHealthSnapshot struct {
 	WindowSamples      int                `json:"window_samples"`
 	WindowFailures     int                `json:"window_failures"`
 	ErrorRate          float64            `json:"error_rate"`
+	WarmupStartedAt    int64              `json:"warmup_started_at"`
+	WarmupEndsAt       int64              `json:"warmup_ends_at"`
+	WarmupPercent      int                `json:"warmup_percent"`
 }
 
 type channelAttemptState struct {
@@ -96,6 +100,8 @@ type channelHealthStateData struct {
 	probeSuccesses     int
 	probeFailures      int
 	probeBackoff       time.Duration
+	warmupStartedAt    time.Time
+	warmupEndsAt       time.Time
 	inflight           map[int64]*channelAttemptState
 	samples            []channelHealthSample
 }
@@ -149,7 +155,7 @@ func getChannelHealthIsolationCache() *cachex.HybridCache[ChannelHealthSnapshot]
 }
 
 func channelHealthIsolationTTL(setting operation_setting.ChannelHealthSetting) time.Duration {
-	seconds := setting.WindowSeconds + setting.ProbeBackoffMaxSeconds + setting.ProbeIntervalSeconds
+	seconds := setting.WindowSeconds + setting.ProbeBackoffMaxSeconds + setting.ProbeIntervalSeconds + setting.WarmupDurationSeconds
 	if seconds <= 0 {
 		seconds = 600
 	}
@@ -197,6 +203,21 @@ func defaultChannelHealthSetting() operation_setting.ChannelHealthSetting {
 	}
 	if normalized.ProbeBackoffMaxSeconds <= 0 {
 		normalized.ProbeBackoffMaxSeconds = 300
+	}
+	if normalized.WarmupDurationSeconds <= 0 {
+		normalized.WarmupDurationSeconds = 60
+	}
+	if normalized.WarmupStartPercent <= 0 {
+		normalized.WarmupStartPercent = 10
+	}
+	if normalized.WarmupStartPercent > 100 {
+		normalized.WarmupStartPercent = 100
+	}
+	if normalized.WarmupStepPercent <= 0 {
+		normalized.WarmupStepPercent = 30
+	}
+	if normalized.WarmupStepPercent > 100 {
+		normalized.WarmupStepPercent = 100
 	}
 	return normalized
 }
@@ -264,14 +285,15 @@ func IsChannelAvailable(channelID int) bool {
 		return true
 	}
 
-	if snapshot, found := getChannelHealthIsolationSnapshot(channelID); found {
-		return snapshot.State == ChannelHealthStateHealthy
+	now := channelHealthNow()
+	if snapshot, found := getChannelHealthIsolationSnapshot(channelID, now); found {
+		return isChannelHealthSnapshotAvailable(snapshot, now)
 	}
 
 	channelHealth.Lock()
 	state, ok := channelHealth.channels[channelID]
 	if ok {
-		available := state.state == ChannelHealthStateHealthy
+		available := isChannelAvailableLocked(state, now, defaultChannelHealthSetting())
 		channelHealth.Unlock()
 		return available
 	}
@@ -295,7 +317,7 @@ func IsChannelProbeAvailable(channelID int) bool {
 	}
 	channelHealth.Unlock()
 
-	snapshot, found := getChannelHealthIsolationSnapshot(channelID)
+	snapshot, found := getChannelHealthIsolationSnapshot(channelID, now)
 	if !found {
 		return true
 	}
@@ -321,7 +343,30 @@ func isChannelProbeAvailableLocked(state *channelHealthStateData, now time.Time)
 	return true
 }
 
-func getChannelHealthIsolationSnapshot(channelID int) (ChannelHealthSnapshot, bool) {
+func isChannelAvailableLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting) bool {
+	if state == nil {
+		return true
+	}
+	if state.state == ChannelHealthStateHealthy {
+		return true
+	}
+	if state.state == ChannelHealthStateWarming {
+		if isChannelWarmupCompleteLocked(state, now) {
+			markChannelHealthyLocked(state)
+			deleteChannelHealthIsolation(state.channelID)
+			return true
+		}
+		percent := channelWarmupPercentLocked(state, now, setting)
+		return percent >= 100 || common.GetRandomInt(100) < percent
+	}
+	return false
+}
+
+func isChannelWarmupCompleteLocked(state *channelHealthStateData, now time.Time) bool {
+	return state.warmupEndsAt.IsZero() || !now.Before(state.warmupEndsAt)
+}
+
+func getChannelHealthIsolationSnapshot(channelID int, now time.Time) (ChannelHealthSnapshot, bool) {
 	snapshot, found, err := getChannelHealthIsolationCache().Get(channelHealthCacheKey(channelID))
 	if err != nil {
 		common.SysError(fmt.Sprintf("channel health isolation cache get failed: channel_id=%d, err=%v", channelID, err))
@@ -330,7 +375,38 @@ func getChannelHealthIsolationSnapshot(channelID int) (ChannelHealthSnapshot, bo
 	if !found {
 		return ChannelHealthSnapshot{}, false
 	}
+	if snapshot.State == ChannelHealthStateWarming {
+		snapshot.WarmupPercent = channelWarmupPercentFromSnapshot(snapshot, now, defaultChannelHealthSetting())
+		if snapshot.WarmupEndsAt <= 0 || now.Unix() >= snapshot.WarmupEndsAt {
+			snapshot.State = ChannelHealthStateHealthy
+			snapshot.Reason = ""
+			snapshot.OpenedAt = 0
+			snapshot.NextProbeAt = 0
+			snapshot.WarmupStartedAt = 0
+			snapshot.WarmupEndsAt = 0
+			snapshot.WarmupPercent = 100
+			deleteChannelHealthIsolation(channelID)
+		}
+	}
 	return snapshot, true
+}
+
+func isChannelHealthSnapshotAvailable(snapshot ChannelHealthSnapshot, now time.Time) bool {
+	switch snapshot.State {
+	case ChannelHealthStateHealthy:
+		return true
+	case ChannelHealthStateWarming:
+		if snapshot.WarmupEndsAt <= 0 || now.Unix() >= snapshot.WarmupEndsAt {
+			return true
+		}
+		percent := channelWarmupPercentFromSnapshot(snapshot, now, defaultChannelHealthSetting())
+		if percent >= 100 {
+			return true
+		}
+		return common.GetRandomInt(100) < percent
+	default:
+		return false
+	}
 }
 
 func GetChannelInflight(channelID int) int {
@@ -587,6 +663,17 @@ func evaluateChannelHealthLocked(state *channelHealthStateData, now time.Time, s
 	if state == nil || state.state == ChannelHealthStateOpen || state.state == ChannelHealthStateProbing {
 		return 0, false
 	}
+	if state.state == ChannelHealthStateWarming {
+		if isChannelWarmupCompleteLocked(state, now) {
+			markChannelHealthyLocked(state)
+			deleteChannelHealthIsolation(state.channelID)
+			return 0, false
+		}
+		if state.consecutiveFailure > 0 {
+			return openChannelLocked(state, now, setting, "warmup failure")
+		}
+		return 0, false
+	}
 
 	samples, failures := channelHealthWindowCountsLocked(state, now, setting)
 	if samples >= setting.MinSamples && failures >= setting.MinFailures {
@@ -674,6 +761,8 @@ func openChannelLocked(state *channelHealthStateData, now time.Time, setting ope
 	state.openedAt = now
 	state.nextProbeAt = now.Add(time.Duration(setting.ProbeIntervalSeconds) * time.Second)
 	state.probeSuccesses = 0
+	state.warmupStartedAt = time.Time{}
+	state.warmupEndsAt = time.Time{}
 	if state.probeBackoff <= 0 {
 		state.probeBackoff = time.Duration(setting.ProbeIntervalSeconds) * time.Second
 	}
@@ -705,15 +794,21 @@ func recordProbeAttemptResultLocked(state *channelHealthStateData, now time.Time
 		state.probeSuccesses++
 		state.probeFailures = 0
 		if state.probeSuccesses >= setting.ProbeSuccessesToRecover {
-			state.state = ChannelHealthStateHealthy
-			state.reason = ""
-			state.openedAt = time.Time{}
-			state.nextProbeAt = time.Time{}
-			state.consecutiveFailure = 0
-			state.probeSuccesses = 0
-			state.probeBackoff = 0
-			state.samples = nil
-			deleteChannelHealthIsolation(state.channelID)
+			if setting.WarmupEnabled {
+				state.state = ChannelHealthStateWarming
+				state.reason = "warming"
+				state.nextProbeAt = time.Time{}
+				state.consecutiveFailure = 0
+				state.probeSuccesses = 0
+				state.probeBackoff = 0
+				state.samples = nil
+				state.warmupStartedAt = now
+				state.warmupEndsAt = now.Add(time.Duration(setting.WarmupDurationSeconds) * time.Second)
+				persistChannelHealthIsolationLocked(state, now, setting)
+			} else {
+				markChannelHealthyLocked(state)
+				deleteChannelHealthIsolation(state.channelID)
+			}
 		} else {
 			state.state = ChannelHealthStateProbing
 			state.nextProbeAt = now.Add(time.Duration(setting.ProbeIntervalSeconds) * time.Second)
@@ -724,6 +819,8 @@ func recordProbeAttemptResultLocked(state *channelHealthStateData, now time.Time
 
 	state.state = ChannelHealthStateOpen
 	state.reason = reason
+	state.warmupStartedAt = time.Time{}
+	state.warmupEndsAt = time.Time{}
 	state.probeSuccesses = 0
 	state.probeFailures++
 	if state.probeBackoff <= 0 {
@@ -738,6 +835,20 @@ func recordProbeAttemptResultLocked(state *channelHealthStateData, now time.Time
 	state.nextProbeAt = now.Add(state.probeBackoff)
 	persistChannelHealthIsolationLocked(state, now, setting)
 	return 0, false
+}
+
+func markChannelHealthyLocked(state *channelHealthStateData) {
+	state.state = ChannelHealthStateHealthy
+	state.reason = ""
+	state.openedAt = time.Time{}
+	state.nextProbeAt = time.Time{}
+	state.consecutiveFailure = 0
+	state.probeSuccesses = 0
+	state.probeFailures = 0
+	state.probeBackoff = 0
+	state.warmupStartedAt = time.Time{}
+	state.warmupEndsAt = time.Time{}
+	state.samples = nil
 }
 
 func CheckChannelHealthStuckRequests() {
@@ -912,6 +1023,11 @@ func channelHealthProbeLockKey(channelID int) string {
 }
 
 func GetChannelHealthSnapshot(channelID int) (ChannelHealthSnapshot, bool) {
+	now := channelHealthNow()
+	if snapshot, found := getChannelHealthIsolationSnapshot(channelID, now); found {
+		return snapshot, true
+	}
+
 	channelHealth.Lock()
 	defer channelHealth.Unlock()
 
@@ -919,7 +1035,18 @@ func GetChannelHealthSnapshot(channelID int) (ChannelHealthSnapshot, bool) {
 	if !ok {
 		return ChannelHealthSnapshot{}, false
 	}
-	return buildChannelHealthSnapshotLocked(state, channelHealthNow(), defaultChannelHealthSetting()), true
+	return buildChannelHealthSnapshotLocked(state, now, defaultChannelHealthSetting()), true
+}
+
+func GetChannelHealthSnapshotForDisplay(channelID int) ChannelHealthSnapshot {
+	if snapshot, ok := GetChannelHealthSnapshot(channelID); ok {
+		return snapshot
+	}
+	return ChannelHealthSnapshot{
+		ChannelID:     channelID,
+		State:         ChannelHealthStateHealthy,
+		WarmupPercent: 100,
+	}
 }
 
 func GetChannelHealthSnapshots() []ChannelHealthSnapshot {
@@ -936,11 +1063,16 @@ func GetChannelHealthSnapshots() []ChannelHealthSnapshot {
 }
 
 func buildChannelHealthSnapshotLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting) ChannelHealthSnapshot {
+	if state.state == ChannelHealthStateWarming && isChannelWarmupCompleteLocked(state, now) {
+		markChannelHealthyLocked(state)
+		deleteChannelHealthIsolation(state.channelID)
+	}
 	samples, failures := channelHealthWindowCountsLocked(state, now, setting)
 	errorRate := 0.0
 	if samples > 0 {
 		errorRate = float64(failures) / float64(samples)
 	}
+	warmupPercent := channelWarmupPercentLocked(state, now, setting)
 	return ChannelHealthSnapshot{
 		ChannelID:          state.channelID,
 		State:              state.state,
@@ -955,7 +1087,75 @@ func buildChannelHealthSnapshotLocked(state *channelHealthStateData, now time.Ti
 		WindowSamples:      samples,
 		WindowFailures:     failures,
 		ErrorRate:          errorRate,
+		WarmupStartedAt:    unixOrZero(state.warmupStartedAt),
+		WarmupEndsAt:       unixOrZero(state.warmupEndsAt),
+		WarmupPercent:      warmupPercent,
 	}
+}
+
+func channelWarmupPercentLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting) int {
+	if state == nil {
+		return 100
+	}
+	if state.state == ChannelHealthStateHealthy {
+		return 100
+	}
+	if state.state != ChannelHealthStateWarming {
+		return 0
+	}
+	if isChannelWarmupCompleteLocked(state, now) {
+		return 100
+	}
+	duration := state.warmupEndsAt.Sub(state.warmupStartedAt)
+	if duration <= 0 {
+		return 100
+	}
+	stepDuration := duration / 3
+	if stepDuration <= 0 {
+		return 100
+	}
+	elapsed := now.Sub(state.warmupStartedAt)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	stepCount := int(elapsed / stepDuration)
+	if stepCount < 0 {
+		stepCount = 0
+	}
+	percent := setting.WarmupStartPercent + stepCount*setting.WarmupStepPercent
+	if percent < 1 {
+		percent = 1
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	return percent
+}
+
+func channelWarmupPercentFromSnapshot(snapshot ChannelHealthSnapshot, now time.Time, setting operation_setting.ChannelHealthSetting) int {
+	if snapshot.State == ChannelHealthStateHealthy {
+		return 100
+	}
+	if snapshot.State != ChannelHealthStateWarming {
+		return 0
+	}
+	if snapshot.WarmupEndsAt <= 0 || now.Unix() >= snapshot.WarmupEndsAt {
+		return 100
+	}
+	if snapshot.WarmupStartedAt <= 0 || snapshot.WarmupEndsAt <= snapshot.WarmupStartedAt {
+		if snapshot.WarmupPercent > 0 {
+			return snapshot.WarmupPercent
+		}
+		return setting.WarmupStartPercent
+	}
+	startedAt := time.Unix(snapshot.WarmupStartedAt, 0)
+	endsAt := time.Unix(snapshot.WarmupEndsAt, 0)
+	state := &channelHealthStateData{
+		state:           ChannelHealthStateWarming,
+		warmupStartedAt: startedAt,
+		warmupEndsAt:    endsAt,
+	}
+	return channelWarmupPercentLocked(state, now, setting)
 }
 
 func persistChannelHealthIsolationLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting) {

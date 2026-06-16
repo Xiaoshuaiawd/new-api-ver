@@ -65,6 +65,10 @@ const channelHealthSchema = z.object({
     probe_timeout_seconds: z.coerce.number().int().min(1),
     probe_successes_to_recover: z.coerce.number().int().min(1),
     probe_backoff_max_seconds: z.coerce.number().int().min(1),
+    warmup_enabled: z.boolean(),
+    warmup_duration_seconds: z.coerce.number().int().min(1),
+    warmup_start_percent: z.coerce.number().int().min(1).max(100),
+    warmup_step_percent: z.coerce.number().int().min(1).max(100),
   }),
 })
 
@@ -78,6 +82,7 @@ const FIELD_GROUPS: Array<{
   { id: 'errors', titleKey: 'Error circuit breaker' },
   { id: 'stuck', titleKey: 'Stuck request circuit breaker' },
   { id: 'probe', titleKey: 'Recovery probing' },
+  { id: 'warmup', titleKey: 'Recovery warm-up' },
 ]
 
 type ChannelHealthSettingsSectionProps = {
@@ -111,6 +116,13 @@ function buildFormDefaults(
         defaults['channel_health_setting.probe_successes_to_recover'],
       probe_backoff_max_seconds:
         defaults['channel_health_setting.probe_backoff_max_seconds'],
+      warmup_enabled: defaults['channel_health_setting.warmup_enabled'],
+      warmup_duration_seconds:
+        defaults['channel_health_setting.warmup_duration_seconds'],
+      warmup_start_percent:
+        defaults['channel_health_setting.warmup_start_percent'],
+      warmup_step_percent:
+        defaults['channel_health_setting.warmup_step_percent'],
     },
   }
 }
@@ -120,6 +132,8 @@ function normalizeFormValues(
 ): ChannelHealthSettings {
   const flattened = {
     'channel_health_setting.enabled': values.channel_health_setting.enabled,
+    'channel_health_setting.warmup_enabled':
+      values.channel_health_setting.warmup_enabled,
   } as Partial<ChannelHealthSettings>
 
   for (const field of CHANNEL_HEALTH_SETTING_FIELDS) {
@@ -197,6 +211,29 @@ export function ChannelHealthSettingsSection({
                   <FormDescription>
                     {t(
                       'Temporarily isolates unhealthy channels without changing manual channel status.'
+                    )}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+              </SettingsSwitchItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='channel_health_setting.warmup_enabled'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>{t('Recovery warm-up')}</FormLabel>
+                  <FormDescription>
+                    {t(
+                      'Gradually restores traffic after probes confirm a channel recovered.'
                     )}
                   </FormDescription>
                 </SettingsSwitchContent>

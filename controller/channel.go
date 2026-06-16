@@ -51,6 +51,32 @@ type OpenAIModelsResponse struct {
 	Success bool          `json:"success"`
 }
 
+type channelRuntimeHealthItem struct {
+	*model.Channel
+	RuntimeHealth service.ChannelHealthSnapshot `json:"runtime_health"`
+}
+
+func withChannelRuntimeHealth(channel *model.Channel) channelRuntimeHealthItem {
+	if channel == nil {
+		return channelRuntimeHealthItem{}
+	}
+	return channelRuntimeHealthItem{
+		Channel:       channel,
+		RuntimeHealth: service.GetChannelHealthSnapshotForDisplay(channel.Id),
+	}
+}
+
+func withChannelsRuntimeHealth(channels []*model.Channel) []channelRuntimeHealthItem {
+	items := make([]channelRuntimeHealthItem, 0, len(channels))
+	for _, channel := range channels {
+		if channel == nil {
+			continue
+		}
+		items = append(items, withChannelRuntimeHealth(channel))
+	}
+	return items
+}
+
 func parseStatusFilter(statusParam string) int {
 	switch strings.ToLower(statusParam) {
 	case "enabled", "1":
@@ -176,7 +202,7 @@ func GetAllChannels(c *gin.Context) {
 		typeCounts[r.Type] = r.Count
 	}
 	common.ApiSuccess(c, gin.H{
-		"items":       channelData,
+		"items":       withChannelsRuntimeHealth(channelData),
 		"total":       total,
 		"page":        pageInfo.GetPage(),
 		"page_size":   pageInfo.GetPageSize(),
@@ -371,7 +397,7 @@ func SearchChannels(c *gin.Context) {
 		"success": true,
 		"message": "",
 		"data": gin.H{
-			"items":       pagedData,
+			"items":       withChannelsRuntimeHealth(pagedData),
 			"total":       total,
 			"type_counts": typeCounts,
 		},
@@ -396,7 +422,7 @@ func GetChannel(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    channel,
+		"data":    withChannelRuntimeHealth(channel),
 	})
 	return
 }

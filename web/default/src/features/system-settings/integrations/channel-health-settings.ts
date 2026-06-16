@@ -29,6 +29,9 @@ export const CHANNEL_HEALTH_NUMBER_FIELD_KEYS = [
   'probe_timeout_seconds',
   'probe_successes_to_recover',
   'probe_backoff_max_seconds',
+  'warmup_duration_seconds',
+  'warmup_start_percent',
+  'warmup_step_percent',
 ] as const
 
 export type ChannelHealthNumberFieldKey =
@@ -36,13 +39,15 @@ export type ChannelHealthNumberFieldKey =
 
 export type ChannelHealthSettingKey =
   | 'channel_health_setting.enabled'
+  | 'channel_health_setting.warmup_enabled'
   | `channel_health_setting.${ChannelHealthNumberFieldKey}`
 
 export type ChannelHealthSettings = {
   'channel_health_setting.enabled': boolean
+  'channel_health_setting.warmup_enabled': boolean
 } & Record<`channel_health_setting.${ChannelHealthNumberFieldKey}`, number>
 
-export type ChannelHealthFieldGroup = 'errors' | 'stuck' | 'probe'
+export type ChannelHealthFieldGroup = 'errors' | 'stuck' | 'probe' | 'warmup'
 
 export type ChannelHealthNumberField = {
   key: ChannelHealthNumberFieldKey
@@ -168,10 +173,40 @@ export const CHANNEL_HEALTH_SETTING_FIELDS = [
     step: 1,
     group: 'probe',
   },
+  {
+    key: 'warmup_duration_seconds',
+    optionKey: 'channel_health_setting.warmup_duration_seconds',
+    labelKey: 'Warm-up duration (seconds)',
+    descriptionKey: 'Time window used to gradually restore recovered traffic',
+    min: 1,
+    step: 1,
+    group: 'warmup',
+  },
+  {
+    key: 'warmup_start_percent',
+    optionKey: 'channel_health_setting.warmup_start_percent',
+    labelKey: 'Warm-up start percent',
+    descriptionKey: 'Initial percentage of new selections allowed during warm-up',
+    min: 1,
+    max: 100,
+    step: 1,
+    group: 'warmup',
+  },
+  {
+    key: 'warmup_step_percent',
+    optionKey: 'channel_health_setting.warmup_step_percent',
+    labelKey: 'Warm-up step percent',
+    descriptionKey: 'Traffic percentage added at each warm-up step',
+    min: 1,
+    max: 100,
+    step: 1,
+    group: 'warmup',
+  },
 ] as const satisfies readonly ChannelHealthNumberField[]
 
 export const CHANNEL_HEALTH_SETTING_KEYS = [
   'channel_health_setting.enabled',
+  'channel_health_setting.warmup_enabled',
   'channel_health_setting.window_seconds',
   'channel_health_setting.min_samples',
   'channel_health_setting.min_failures',
@@ -184,10 +219,14 @@ export const CHANNEL_HEALTH_SETTING_KEYS = [
   'channel_health_setting.probe_timeout_seconds',
   'channel_health_setting.probe_successes_to_recover',
   'channel_health_setting.probe_backoff_max_seconds',
+  'channel_health_setting.warmup_duration_seconds',
+  'channel_health_setting.warmup_start_percent',
+  'channel_health_setting.warmup_step_percent',
 ] as const satisfies readonly ChannelHealthSettingKey[]
 
 export const CHANNEL_HEALTH_DEFAULT_VALUES = {
   'channel_health_setting.enabled': true,
+  'channel_health_setting.warmup_enabled': true,
   'channel_health_setting.window_seconds': 180,
   'channel_health_setting.min_samples': 10,
   'channel_health_setting.min_failures': 5,
@@ -200,6 +239,9 @@ export const CHANNEL_HEALTH_DEFAULT_VALUES = {
   'channel_health_setting.probe_timeout_seconds': 30,
   'channel_health_setting.probe_successes_to_recover': 2,
   'channel_health_setting.probe_backoff_max_seconds': 300,
+  'channel_health_setting.warmup_duration_seconds': 60,
+  'channel_health_setting.warmup_start_percent': 10,
+  'channel_health_setting.warmup_step_percent': 30,
 } as const satisfies ChannelHealthSettings
 
 export function pickChannelHealthSettings(

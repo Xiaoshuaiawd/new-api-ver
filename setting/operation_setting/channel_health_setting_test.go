@@ -28,6 +28,10 @@ func TestChannelHealthSettingExportsAndLoadsRuntimeOptions(t *testing.T) {
 	require.Equal(t, "30", exported["channel_health_setting.probe_timeout_seconds"])
 	require.Equal(t, "2", exported["channel_health_setting.probe_successes_to_recover"])
 	require.Equal(t, "300", exported["channel_health_setting.probe_backoff_max_seconds"])
+	require.Equal(t, "true", exported["channel_health_setting.warmup_enabled"])
+	require.Equal(t, "60", exported["channel_health_setting.warmup_duration_seconds"])
+	require.Equal(t, "10", exported["channel_health_setting.warmup_start_percent"])
+	require.Equal(t, "30", exported["channel_health_setting.warmup_step_percent"])
 
 	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
 		"channel_health_setting.enabled":                        "false",
@@ -43,6 +47,10 @@ func TestChannelHealthSettingExportsAndLoadsRuntimeOptions(t *testing.T) {
 		"channel_health_setting.probe_timeout_seconds":          "20",
 		"channel_health_setting.probe_successes_to_recover":     "3",
 		"channel_health_setting.probe_backoff_max_seconds":      "180",
+		"channel_health_setting.warmup_enabled":                 "true",
+		"channel_health_setting.warmup_duration_seconds":        "120",
+		"channel_health_setting.warmup_start_percent":           "15",
+		"channel_health_setting.warmup_step_percent":            "25",
 	}))
 
 	require.False(t, setting.Enabled)
@@ -58,4 +66,8 @@ func TestChannelHealthSettingExportsAndLoadsRuntimeOptions(t *testing.T) {
 	require.Equal(t, 20, setting.ProbeTimeoutSeconds)
 	require.Equal(t, 3, setting.ProbeSuccessesToRecover)
 	require.Equal(t, 180, setting.ProbeBackoffMaxSeconds)
+	require.True(t, setting.WarmupEnabled)
+	require.Equal(t, 120, setting.WarmupDurationSeconds)
+	require.Equal(t, 15, setting.WarmupStartPercent)
+	require.Equal(t, 25, setting.WarmupStepPercent)
 }

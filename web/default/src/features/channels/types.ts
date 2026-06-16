@@ -34,6 +34,46 @@ export const channelInfoSchema = z.object({
 
 export type ChannelInfo = z.infer<typeof channelInfoSchema>
 
+export const channelRuntimeHealthSchema = z
+  .object({
+    channel_id: z.number().default(0),
+    state: z.enum(['healthy', 'open', 'probing', 'warming']).or(z.string()),
+    reason: z.string().default(''),
+    opened_at: z.number().default(0),
+    next_probe_at: z.number().default(0),
+    probe_in_progress: z.boolean().default(false),
+    consecutive_failure: z.number().default(0),
+    probe_successes: z.number().default(0),
+    probe_failures: z.number().default(0),
+    inflight: z.number().default(0),
+    window_samples: z.number().default(0),
+    window_failures: z.number().default(0),
+    error_rate: z.number().default(0),
+    warmup_started_at: z.number().default(0),
+    warmup_ends_at: z.number().default(0),
+    warmup_percent: z.number().default(0),
+  })
+  .default({
+    channel_id: 0,
+    state: 'healthy',
+    reason: '',
+    opened_at: 0,
+    next_probe_at: 0,
+    probe_in_progress: false,
+    consecutive_failure: 0,
+    probe_successes: 0,
+    probe_failures: 0,
+    inflight: 0,
+    window_samples: 0,
+    window_failures: 0,
+    error_rate: 0,
+    warmup_started_at: 0,
+    warmup_ends_at: 0,
+    warmup_percent: 100,
+  })
+
+export type ChannelRuntimeHealth = z.infer<typeof channelRuntimeHealthSchema>
+
 export const channelSchema = z.object({
   id: z.number(),
   type: z.number(),
@@ -71,6 +111,7 @@ export const channelSchema = z.object({
     multi_key_mode: 'random',
   }),
   settings: z.string().default('{}'), // other_settings JSON
+  runtime_health: channelRuntimeHealthSchema.nullish(),
 })
 
 export type Channel = z.infer<typeof channelSchema>

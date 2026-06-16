@@ -22,12 +22,13 @@ import {
   CHANNEL_HEALTH_DEFAULT_VALUES,
   CHANNEL_HEALTH_SETTING_FIELDS,
   CHANNEL_HEALTH_SETTING_KEYS,
-} from './channel-health-settings'
+} from './channel-health-settings.ts'
 
 describe('channel health setting metadata', () => {
   test('lists every editable runtime health option with backend defaults', () => {
     assert.deepEqual(CHANNEL_HEALTH_SETTING_KEYS, [
       'channel_health_setting.enabled',
+      'channel_health_setting.warmup_enabled',
       'channel_health_setting.window_seconds',
       'channel_health_setting.min_samples',
       'channel_health_setting.min_failures',
@@ -40,11 +41,15 @@ describe('channel health setting metadata', () => {
       'channel_health_setting.probe_timeout_seconds',
       'channel_health_setting.probe_successes_to_recover',
       'channel_health_setting.probe_backoff_max_seconds',
+      'channel_health_setting.warmup_duration_seconds',
+      'channel_health_setting.warmup_start_percent',
+      'channel_health_setting.warmup_step_percent',
     ])
 
-    assert.equal(CHANNEL_HEALTH_SETTING_FIELDS.length, 12)
+    assert.equal(CHANNEL_HEALTH_SETTING_FIELDS.length, 15)
     assert.deepEqual(CHANNEL_HEALTH_DEFAULT_VALUES, {
       'channel_health_setting.enabled': true,
+      'channel_health_setting.warmup_enabled': true,
       'channel_health_setting.window_seconds': 180,
       'channel_health_setting.min_samples': 10,
       'channel_health_setting.min_failures': 5,
@@ -57,6 +62,9 @@ describe('channel health setting metadata', () => {
       'channel_health_setting.probe_timeout_seconds': 30,
       'channel_health_setting.probe_successes_to_recover': 2,
       'channel_health_setting.probe_backoff_max_seconds': 300,
+      'channel_health_setting.warmup_duration_seconds': 60,
+      'channel_health_setting.warmup_start_percent': 10,
+      'channel_health_setting.warmup_step_percent': 30,
     })
   })
 })

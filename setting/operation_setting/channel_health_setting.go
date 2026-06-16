@@ -16,6 +16,10 @@ type ChannelHealthSetting struct {
 	ProbeTimeoutSeconds         int     `json:"probe_timeout_seconds"`
 	ProbeSuccessesToRecover     int     `json:"probe_successes_to_recover"`
 	ProbeBackoffMaxSeconds      int     `json:"probe_backoff_max_seconds"`
+	WarmupEnabled               bool    `json:"warmup_enabled"`
+	WarmupDurationSeconds       int     `json:"warmup_duration_seconds"`
+	WarmupStartPercent          int     `json:"warmup_start_percent"`
+	WarmupStepPercent           int     `json:"warmup_step_percent"`
 }
 
 var channelHealthSetting = ChannelHealthSetting{
@@ -32,6 +36,10 @@ var channelHealthSetting = ChannelHealthSetting{
 	ProbeTimeoutSeconds:         30,
 	ProbeSuccessesToRecover:     2,
 	ProbeBackoffMaxSeconds:      300,
+	WarmupEnabled:               true,
+	WarmupDurationSeconds:       60,
+	WarmupStartPercent:          10,
+	WarmupStepPercent:           30,
 }
 
 func init() {

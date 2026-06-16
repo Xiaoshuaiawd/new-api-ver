@@ -48,7 +48,7 @@ import { ConfirmDialog } from '@/components/confirm-dialog'
 import { BadgeListCell } from '@/components/data-table'
 import { GroupBadge } from '@/components/group-badge'
 import { ProviderBadge } from '@/components/provider-badge'
-import { StatusBadge } from '@/components/status-badge'
+import { StatusBadge, type StatusVariant } from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
 import { TruncatedText } from '@/components/truncated-text'
 import { getCodexUsage } from '../api'
@@ -72,7 +72,7 @@ import {
   type TagRow,
 } from '../lib'
 import { parseUpstreamUpdateMeta } from '../lib/upstream-update-utils'
-import type { Channel } from '../types'
+import type { Channel, ChannelRuntimeHealth } from '../types'
 import { useChannels } from './channels-provider'
 import { DataTableRowActions } from './data-table-row-actions'
 import { DataTableTagRowActions } from './data-table-tag-row-actions'
@@ -96,6 +96,187 @@ function parseIonetMeta(otherInfo: string | null | undefined): null | {
     return null
   }
   return null
+}
+
+function getRuntimeHealth(channel: Channel): ChannelRuntimeHealth {
+  return (
+    channel.runtime_health ?? {
+      channel_id: channel.id,
+      state: 'healthy',
+      reason: '',
+      opened_at: 0,
+      next_probe_at: 0,
+      probe_in_progress: false,
+      consecutive_failure: 0,
+      probe_successes: 0,
+      probe_failures: 0,
+      inflight: 0,
+      window_samples: 0,
+      window_failures: 0,
+      error_rate: 0,
+      warmup_started_at: 0,
+      warmup_ends_at: 0,
+      warmup_percent: 100,
+    }
+  )
+}
+
+function getRuntimeHealthBadgeConfig(
+  health: ChannelRuntimeHealth,
+  t: (key: string) => string
+): { label: string; variant: StatusVariant; pulse?: boolean } {
+  switch (health.state) {
+    case 'open':
+      return { label: t('Isolated'), variant: 'danger' }
+    case 'probing':
+      return { label: t('Probing'), variant: 'warning', pulse: true }
+    case 'warming':
+      return {
+        label: `${t('Warming')} ${Math.max(0, health.warmup_percent || 0)}%`,
+        variant: 'purple',
+      }
+    case 'healthy':
+      return { label: t('Healthy'), variant: 'success' }
+    default:
+      return { label: t('Unknown'), variant: 'neutral' }
+  }
+}
+
+function formatHealthPercent(value: number): string {
+  if (!Number.isFinite(value)) return '0%'
+  return `${Math.round(value * 100)}%`
+}
+
+function formatHealthTimestamp(timestamp: number): string {
+  if (!timestamp) return '-'
+  return formatTimestampToDate(timestamp)
+}
+
+function RuntimeHealthCell({ channel }: { channel: Channel }) {
+  const { t } = useTranslation()
+  const isTagRow = isTagAggregateRow(channel)
+
+  if (isTagRow) {
+    const children = (channel as TagRow).children || []
+    const total = children.length
+    const openCount = children.filter(
+      (child) => getRuntimeHealth(child).state === 'open'
+    ).length
+    const probingCount = children.filter(
+      (child) => getRuntimeHealth(child).state === 'probing'
+    ).length
+    const warmingCount = children.filter(
+      (child) => getRuntimeHealth(child).state === 'warming'
+    ).length
+
+    if (openCount > 0) {
+      return (
+        <StatusBadge
+          label={`${t('Isolated')} (${openCount}/${total})`}
+          variant='danger'
+          size='sm'
+          copyable={false}
+          className='-ml-1.5'
+        />
+      )
+    }
+    if (probingCount > 0) {
+      return (
+        <StatusBadge
+          label={`${t('Probing')} (${probingCount}/${total})`}
+          variant='warning'
+          size='sm'
+          pulse
+          copyable={false}
+          className='-ml-1.5'
+        />
+      )
+    }
+    if (warmingCount > 0) {
+      return (
+        <StatusBadge
+          label={`${t('Warming')} (${warmingCount}/${total})`}
+          variant='purple'
+          size='sm'
+          copyable={false}
+          className='-ml-1.5'
+        />
+      )
+    }
+    return (
+      <StatusBadge
+        label={`${t('Healthy')} (${total})`}
+        variant='success'
+        size='sm'
+        copyable={false}
+        className='-ml-1.5'
+      />
+    )
+  }
+
+  const health = getRuntimeHealth(channel)
+  const config = getRuntimeHealthBadgeConfig(health, t)
+  const hasDetails =
+    health.reason ||
+    health.inflight > 0 ||
+    health.window_samples > 0 ||
+    health.next_probe_at > 0 ||
+    health.opened_at > 0 ||
+    health.state === 'warming'
+
+  const badge = (
+    <StatusBadge
+      label={config.label}
+      variant={config.variant}
+      size='sm'
+      pulse={config.pulse}
+      copyable={false}
+      className='-ml-1.5'
+    />
+  )
+
+  if (!hasDetails) return badge
+
+  return (
+    <TooltipProvider delay={100}>
+      <Tooltip>
+        <TooltipTrigger render={<span />}>{badge}</TooltipTrigger>
+        <TooltipContent side='top' className='max-w-xs'>
+          <div className='space-y-1 text-xs'>
+            {health.reason && (
+              <div>
+                {t('Reason:')} {health.reason}
+              </div>
+            )}
+            <div>
+              {t('Error rate:')} {formatHealthPercent(health.error_rate)}
+            </div>
+            <div>
+              {t('Window:')} {health.window_failures}/{health.window_samples}
+            </div>
+            <div>
+              {t('Inflight:')} {health.inflight}
+            </div>
+            {health.opened_at > 0 && (
+              <div>
+                {t('Opened at:')} {formatHealthTimestamp(health.opened_at)}
+              </div>
+            )}
+            {health.next_probe_at > 0 && (
+              <div>
+                {t('Next probe:')} {formatHealthTimestamp(health.next_probe_at)}
+              </div>
+            )}
+            {health.state === 'warming' && (
+              <div>
+                {t('Warm-up:')} {health.warmup_percent}%
+              </div>
+            )}
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
 }
 
 /**
@@ -830,6 +1011,16 @@ export function useChannelsColumns(): ColumnDef<Channel>[] {
         return false
       },
       size: 120,
+      enableSorting: false,
+    },
+
+    // Runtime Health column
+    {
+      accessorKey: 'runtime_health',
+      header: t('Runtime Health'),
+      meta: { mobileHidden: false },
+      cell: ({ row }) => <RuntimeHealthCell channel={row.original} />,
+      size: 140,
       enableSorting: false,
     },
 
