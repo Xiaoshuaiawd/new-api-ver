@@ -11,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/cachex"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -777,6 +778,22 @@ func ShouldKeepChannelAffinityOnChannelDisabled() bool {
 		return false
 	}
 	return setting.KeepOnChannelDisabled
+}
+
+func IsChannelAffinityPriorityStale(group string, modelName string, channelID int) bool {
+	if channelID <= 0 {
+		return false
+	}
+	preferred, err := model.CacheGetChannel(channelID)
+	if err != nil || preferred == nil {
+		return false
+	}
+	preferredPriority := preferred.GetPriority()
+	candidate, err := model.GetRandomSatisfiedChannel(group, modelName, 0)
+	if err != nil || candidate == nil {
+		return false
+	}
+	return candidate.GetPriority() > preferredPriority
 }
 
 func MarkChannelAffinityUsed(c *gin.Context, selectedGroup string, channelID int) {

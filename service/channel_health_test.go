@@ -407,6 +407,23 @@ func TestClearChannelAffinityByChannelIDDeletesReverseIndexedKeys(t *testing.T) 
 	require.False(t, found)
 }
 
+func TestChannelAffinityShouldYieldToRecoveredHigherPriorityChannel(t *testing.T) {
+	withChannelHealthTestSettings(t)
+	withChannelHealthSelectionDB(t)
+
+	require.True(t, IsChannelAffinityPriorityStale("default", "gpt-health-test", 9102))
+	require.False(t, IsChannelAffinityPriorityStale("default", "gpt-health-test", 9101))
+}
+
+func TestChannelAffinityKeepsLowerPriorityWhenHigherPriorityIsOpen(t *testing.T) {
+	withChannelHealthTestSettings(t)
+	withChannelHealthSelectionDB(t)
+
+	OpenChannel(9101, "runtime isolate")
+
+	require.False(t, IsChannelAffinityPriorityStale("default", "gpt-health-test", 9102))
+}
+
 func withChannelHealthSelectionDB(t *testing.T) {
 	t.Helper()
 

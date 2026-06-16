@@ -113,6 +113,10 @@ func Distribute() func(c *gin.Context) {
 								autoGroups := service.GetUserAutoGroup(userGroup)
 								for _, g := range autoGroups {
 									if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
+										if service.IsChannelAffinityPriorityStale(g, modelRequest.Model, preferred.Id) {
+											service.ClearCurrentChannelAffinityCache(c)
+											break
+										}
 										selectGroup = g
 										common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
 										channel = preferred
@@ -122,10 +126,14 @@ func Distribute() func(c *gin.Context) {
 									}
 								}
 							} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {
-								channel = preferred
-								selectGroup = usingGroup
-								affinityUsable = true
-								service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
+								if service.IsChannelAffinityPriorityStale(usingGroup, modelRequest.Model, preferred.Id) {
+									service.ClearCurrentChannelAffinityCache(c)
+								} else {
+									channel = preferred
+									selectGroup = usingGroup
+									affinityUsable = true
+									service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
+								}
 							}
 						}
 					}
