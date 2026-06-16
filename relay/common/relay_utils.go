@@ -3,6 +3,8 @@ package common
 import (
 	"fmt"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -14,6 +16,8 @@ import (
 	"github.com/samber/lo"
 )
 
+var versionPathSegmentPattern = regexp.MustCompile(`^v\d+(?:\.\d+)?$`)
+
 type HasPrompt interface {
 	GetPrompt() string
 }
@@ -23,6 +27,9 @@ type HasImage interface {
 }
 
 func GetFullRequestURL(baseURL string, requestURL string, channelType int) string {
+	if channelType == constant.ChannelTypeOpenAI && baseURLHasVersionPath(baseURL) {
+		requestURL = strings.TrimPrefix(requestURL, "/v1")
+	}
 	fullRequestURL := fmt.Sprintf("%s%s", baseURL, requestURL)
 
 	if strings.HasPrefix(baseURL, "https://gateway.ai.cloudflare.com") {
@@ -34,6 +41,19 @@ func GetFullRequestURL(baseURL string, requestURL string, channelType int) strin
 		}
 	}
 	return fullRequestURL
+}
+
+func baseURLHasVersionPath(baseURL string) bool {
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	path := strings.Trim(parsed.Path, "/")
+	if path == "" {
+		return false
+	}
+	segments := strings.Split(path, "/")
+	return versionPathSegmentPattern.MatchString(strings.ToLower(segments[len(segments)-1]))
 }
 
 func GetAPIVersion(c *gin.Context) string {
