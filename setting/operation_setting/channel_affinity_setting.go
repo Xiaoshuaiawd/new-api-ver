@@ -36,6 +36,28 @@ type ChannelAffinitySetting struct {
 	Rules                 []ChannelAffinityRule `json:"rules"`
 }
 
+type CodexUserAgentRouteTarget struct {
+	ChannelID int `json:"channel_id"`
+	Weight    int `json:"weight"`
+}
+
+type CodexUserAgentRouteRule struct {
+	Name             string                      `json:"name"`
+	UserAgentRegex   []string                    `json:"user_agent_regex"`
+	ModelRegex       []string                    `json:"model_regex,omitempty"`
+	PathRegex        []string                    `json:"path_regex,omitempty"`
+	Targets          []CodexUserAgentRouteTarget `json:"targets"`
+	FakeCacheEnabled bool                        `json:"fake_cache_enabled"`
+	FakeCacheTTL     int                         `json:"fake_cache_ttl_seconds"`
+}
+
+type CodexUserAgentRoutingSetting struct {
+	Enabled             bool                      `json:"enabled"`
+	DefaultFakeCacheTTL int                       `json:"default_fake_cache_ttl_seconds"`
+	MaxEntries          int                       `json:"max_entries"`
+	Rules               []CodexUserAgentRouteRule `json:"rules"`
+}
+
 var codexCliPassThroughHeaders = []string{
 	"Originator",
 	"Session_id",
@@ -114,10 +136,30 @@ var channelAffinitySetting = ChannelAffinitySetting{
 	},
 }
 
+var codexUserAgentRoutingSetting = CodexUserAgentRoutingSetting{
+	Enabled:             false,
+	DefaultFakeCacheTTL: 300,
+	MaxEntries:          100_000,
+	Rules: []CodexUserAgentRouteRule{
+		{
+			Name:           "codex ua route",
+			UserAgentRegex: []string{`(?i)\bcodex(?:_cli_rs| desktop)\b`},
+			ModelRegex:     []string{"^gpt-.*$"},
+			PathRegex:      []string{"/v1/responses"},
+			Targets:        []CodexUserAgentRouteTarget{},
+		},
+	},
+}
+
 func init() {
 	config.GlobalConfig.Register("channel_affinity_setting", &channelAffinitySetting)
+	config.GlobalConfig.Register("codex_user_agent_routing_setting", &codexUserAgentRoutingSetting)
 }
 
 func GetChannelAffinitySetting() *ChannelAffinitySetting {
 	return &channelAffinitySetting
+}
+
+func GetCodexUserAgentRoutingSetting() *CodexUserAgentRoutingSetting {
+	return &codexUserAgentRoutingSetting
 }
