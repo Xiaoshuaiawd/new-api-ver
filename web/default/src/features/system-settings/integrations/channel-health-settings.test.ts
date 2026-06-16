@@ -1,0 +1,62 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+import assert from 'node:assert/strict'
+import { describe, test } from 'node:test'
+import {
+  CHANNEL_HEALTH_DEFAULT_VALUES,
+  CHANNEL_HEALTH_SETTING_FIELDS,
+  CHANNEL_HEALTH_SETTING_KEYS,
+} from './channel-health-settings'
+
+describe('channel health setting metadata', () => {
+  test('lists every editable runtime health option with backend defaults', () => {
+    assert.deepEqual(CHANNEL_HEALTH_SETTING_KEYS, [
+      'channel_health_setting.enabled',
+      'channel_health_setting.window_seconds',
+      'channel_health_setting.min_samples',
+      'channel_health_setting.min_failures',
+      'channel_health_setting.error_rate_threshold',
+      'channel_health_setting.consecutive_failure_threshold',
+      'channel_health_setting.first_response_timeout_seconds',
+      'channel_health_setting.stuck_inflight_threshold',
+      'channel_health_setting.single_stuck_timeout_seconds',
+      'channel_health_setting.probe_interval_seconds',
+      'channel_health_setting.probe_timeout_seconds',
+      'channel_health_setting.probe_successes_to_recover',
+      'channel_health_setting.probe_backoff_max_seconds',
+    ])
+
+    assert.equal(CHANNEL_HEALTH_SETTING_FIELDS.length, 12)
+    assert.deepEqual(CHANNEL_HEALTH_DEFAULT_VALUES, {
+      'channel_health_setting.enabled': true,
+      'channel_health_setting.window_seconds': 180,
+      'channel_health_setting.min_samples': 10,
+      'channel_health_setting.min_failures': 5,
+      'channel_health_setting.error_rate_threshold': 0.4,
+      'channel_health_setting.consecutive_failure_threshold': 5,
+      'channel_health_setting.first_response_timeout_seconds': 45,
+      'channel_health_setting.stuck_inflight_threshold': 3,
+      'channel_health_setting.single_stuck_timeout_seconds': 75,
+      'channel_health_setting.probe_interval_seconds': 30,
+      'channel_health_setting.probe_timeout_seconds': 30,
+      'channel_health_setting.probe_successes_to_recover': 2,
+      'channel_health_setting.probe_backoff_max_seconds': 300,
+    })
+  })
+})

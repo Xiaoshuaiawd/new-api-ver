@@ -17,6 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { SystemBehaviorSection } from '../general/system-behavior-section'
+import { pickChannelHealthSettings } from '../integrations/channel-health-settings'
+import { ChannelHealthSettingsSection } from '../integrations/channel-health-settings-section'
 import { EmailSettingsSection } from '../integrations/email-settings-section'
 import { MonitoringSettingsSection } from '../integrations/monitoring-settings-section'
 import { WorkerSettingsSection } from '../integrations/worker-settings-section'
@@ -60,6 +62,15 @@ const OPERATIONS_SECTIONS = [
           'monitor_setting.auto_test_channel_minutes':
             settings['monitor_setting.auto_test_channel_minutes'],
         }}
+      />
+    ),
+  },
+  {
+    id: 'channel-health',
+    titleKey: 'Channel Health Guard',
+    build: (settings: OperationsSettings) => (
+      <ChannelHealthSettingsSection
+        defaultValues={pickChannelHealthSettings(settings)}
       />
     ),
   },

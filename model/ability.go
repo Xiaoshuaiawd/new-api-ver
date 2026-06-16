@@ -107,15 +107,7 @@ func GetChannel(group string, model string, retry int) (*Channel, error) {
 	var abilities []Ability
 
 	var err error = nil
-	channelQuery, err := getChannelQuery(group, model, retry)
-	if err != nil {
-		return nil, err
-	}
-	if common.UsingSQLite || common.UsingPostgreSQL {
-		err = channelQuery.Order("weight DESC").Find(&abilities).Error
-	} else {
-		err = channelQuery.Order("weight DESC").Find(&abilities).Error
-	}
+	abilities, err = getHealthyAbilities(group, model, retry)
 	if err != nil {
 		return nil, err
 	}
@@ -124,12 +116,14 @@ func GetChannel(group string, model string, retry int) (*Channel, error) {
 		// Randomly choose one
 		weightSum := uint(0)
 		for _, ability_ := range abilities {
-			weightSum += ability_.Weight + 10
+			_, inflight := getChannelRuntimeState(ability_.ChannelId)
+			weightSum += uint(adjustedChannelWeight(int(ability_.Weight), inflight)) + 10
 		}
 		// Randomly choose one
 		weight := common.GetRandomInt(int(weightSum))
 		for _, ability_ := range abilities {
-			weight -= int(ability_.Weight) + 10
+			_, inflight := getChannelRuntimeState(ability_.ChannelId)
+			weight -= adjustedChannelWeight(int(ability_.Weight), inflight) + 10
 			//log.Printf("weight: %d, ability weight: %d", weight, *ability_.Weight)
 			if weight <= 0 {
 				channel.Id = ability_.ChannelId
@@ -141,6 +135,102 @@ func GetChannel(group string, model string, retry int) (*Channel, error) {
 	}
 	err = DB.First(&channel, "id = ?", channel.Id).Error
 	return &channel, err
+}
+
+func getHealthyAbilities(group string, modelName string, retry int) ([]Ability, error) {
+	var priorities []int
+	err := DB.Model(&Ability{}).
+		Select("DISTINCT(priority)").
+		Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, modelName, true).
+		Order("priority DESC").
+		Pluck("priority", &priorities).Error
+	if err != nil {
+		return nil, err
+	}
+	if len(priorities) == 0 {
+		return nil, nil
+	}
+	if retry >= len(priorities) {
+		retry = len(priorities) - 1
+	}
+
+	for i := retry; i < len(priorities); i++ {
+		var abilities []Ability
+		err = DB.Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = ?", group, modelName, true, priorities[i]).
+			Order("weight DESC").
+			Find(&abilities).Error
+		if err != nil {
+			return nil, err
+		}
+		filtered := abilities[:0]
+		for _, ability := range abilities {
+			available, _ := getChannelRuntimeState(ability.ChannelId)
+			if available {
+				filtered = append(filtered, ability)
+			}
+		}
+		if len(filtered) > 0 {
+			return filtered, nil
+		}
+	}
+
+	for i := retry; i < len(priorities); i++ {
+		var abilities []Ability
+		err = DB.Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = ?", group, modelName, true, priorities[i]).
+			Order("weight DESC").
+			Find(&abilities).Error
+		if err != nil {
+			return nil, err
+		}
+		filtered := abilities[:0]
+		for _, ability := range abilities {
+			available, _ := getChannelProbeRuntimeState(ability.ChannelId)
+			if available {
+				filtered = append(filtered, ability)
+			}
+		}
+		for len(filtered) > 0 {
+			idx := weightedAbilityIndex(filtered, true)
+			if idx < 0 {
+				break
+			}
+			if claimChannelProbeRuntimeState(filtered[idx].ChannelId) {
+				return []Ability{filtered[idx]}, nil
+			}
+			filtered = append(filtered[:idx], filtered[idx+1:]...)
+		}
+	}
+	return nil, nil
+}
+
+func weightedAbilityIndex(abilities []Ability, probe bool) int {
+	if len(abilities) == 0 {
+		return -1
+	}
+	weightSum := uint(0)
+	for _, ability := range abilities {
+		var inflight int
+		if probe {
+			_, inflight = getChannelProbeRuntimeState(ability.ChannelId)
+		} else {
+			_, inflight = getChannelRuntimeState(ability.ChannelId)
+		}
+		weightSum += uint(adjustedChannelWeight(int(ability.Weight), inflight)) + 10
+	}
+	weight := common.GetRandomInt(int(weightSum))
+	for i, ability := range abilities {
+		var inflight int
+		if probe {
+			_, inflight = getChannelProbeRuntimeState(ability.ChannelId)
+		} else {
+			_, inflight = getChannelRuntimeState(ability.ChannelId)
+		}
+		weight -= adjustedChannelWeight(int(ability.Weight), inflight) + 10
+		if weight <= 0 {
+			return i
+		}
+	}
+	return -1
 }
 
 func (channel *Channel) AddAbilities(tx *gorm.DB) error {

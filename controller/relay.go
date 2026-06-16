@@ -197,6 +197,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		addUsedChannel(c, channel.Id)
+		service.StartChannelHealthAttemptForContext(c)
 		bodyStorage, bodyErr := common.GetBodyStorage(c)
 		if bodyErr != nil {
 			// Ensure consistent 413 for oversized bodies even when error occurs later (e.g., retry path)
@@ -205,6 +206,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			} else {
 				newAPIError = types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 			}
+			service.FinishChannelHealthAttemptForContext(c, service.ChannelAttemptResult{Error: newAPIError})
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
@@ -234,6 +236,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				Result:     common.ChannelRequestResultSuccess,
 				StatusCode: statusCode,
 			})
+			service.FinishChannelHealthAttemptForContext(c, service.ChannelAttemptResult{StatusCode: statusCode})
 			relayInfo.LastError = nil
 			return
 		}
@@ -248,6 +251,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
+		service.FinishChannelHealthAttemptForContext(c, service.ChannelAttemptResult{Error: newAPIError})
 
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 
@@ -570,6 +574,7 @@ func RelayTask(c *gin.Context) {
 		}
 
 		addUsedChannel(c, channel.Id)
+		service.StartChannelHealthAttemptForContext(c)
 		bodyStorage, bodyErr := common.GetBodyStorage(c)
 		if bodyErr != nil {
 			if common.IsRequestBodyTooLargeError(bodyErr) || errors.Is(bodyErr, common.ErrRequestBodyTooLarge) {
@@ -577,6 +582,9 @@ func RelayTask(c *gin.Context) {
 			} else {
 				taskErr = service.TaskErrorWrapperLocal(bodyErr, "read_request_body_failed", http.StatusBadRequest)
 			}
+			service.FinishChannelHealthAttemptForContext(c, service.ChannelAttemptResult{
+				Error: types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, taskErr.StatusCode, types.ErrOptionWithSkipRetry()),
+			})
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
@@ -596,6 +604,7 @@ func RelayTask(c *gin.Context) {
 				Result:     common.ChannelRequestResultSuccess,
 				StatusCode: statusCode,
 			})
+			service.FinishChannelHealthAttemptForContext(c, service.ChannelAttemptResult{StatusCode: statusCode})
 			break
 		}
 		if relayInfo.HasSendResponse() {
@@ -606,12 +615,17 @@ func RelayTask(c *gin.Context) {
 			StatusCode: taskErr.StatusCode,
 			ErrorCode:  taskErr.Code,
 		})
+		channelHealthErr := types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode)
+		if taskErr.LocalError {
+			channelHealthErr = types.NewErrorWithStatusCode(taskErr.Error, types.ErrorCodeBadRequestBody, taskErr.StatusCode, types.ErrOptionWithSkipRetry())
+		}
+		service.FinishChannelHealthAttemptForContext(c, service.ChannelAttemptResult{Error: channelHealthErr})
 
 		if !taskErr.LocalError {
 			processChannelError(c,
 				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
 					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
-				types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode))
+				channelHealthErr)
 		}
 
 		if !shouldRetryTaskRelay(c, channel.Id, taskErr, common.RetryTimes-retryParam.GetRetry()) {

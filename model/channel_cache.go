@@ -116,13 +116,6 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 		return nil, nil
 	}
 
-	if len(channels) == 1 {
-		if channel, ok := channelsIDM[channels[0]]; ok {
-			return channel, nil
-		}
-		return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channels[0])
-	}
-
 	uniquePriorities := make(map[int]bool)
 	for _, channelId := range channels {
 		if channel, ok := channelsIDM[channelId]; ok {
@@ -137,27 +130,95 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	}
 	sort.Sort(sort.Reverse(sort.IntSlice(sortedUniquePriorities)))
 
-	if retry >= len(uniquePriorities) {
-		retry = len(uniquePriorities) - 1
+	if retry >= len(sortedUniquePriorities) {
+		retry = len(sortedUniquePriorities) - 1
 	}
-	targetPriority := int64(sortedUniquePriorities[retry])
 
-	// get the priority for the given retry number
 	var sumWeight = 0
 	var targetChannels []*Channel
-	for _, channelId := range channels {
-		if channel, ok := channelsIDM[channelId]; ok {
-			if channel.GetPriority() == targetPriority {
-				sumWeight += channel.GetWeight()
-				targetChannels = append(targetChannels, channel)
+	var targetInflight []int
+	var err error
+	for priorityIndex := retry; priorityIndex < len(sortedUniquePriorities); priorityIndex++ {
+		sumWeight, targetChannels, targetInflight, err = collectRuntimeChannels(channels, int64(sortedUniquePriorities[priorityIndex]), false, targetChannels, targetInflight)
+		if err != nil {
+			return nil, err
+		}
+		if len(targetChannels) > 0 {
+			break
+		}
+	}
+
+	useProbeCandidate := false
+	if len(targetChannels) == 0 {
+		for priorityIndex := retry; priorityIndex < len(sortedUniquePriorities); priorityIndex++ {
+			sumWeight, targetChannels, targetInflight, err = collectRuntimeChannels(channels, int64(sortedUniquePriorities[priorityIndex]), true, targetChannels, targetInflight)
+			if err != nil {
+				return nil, err
 			}
-		} else {
-			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId)
+			if len(targetChannels) > 0 {
+				useProbeCandidate = true
+				break
+			}
 		}
 	}
 
 	if len(targetChannels) == 0 {
-		return nil, errors.New(fmt.Sprintf("no channel found, group: %s, model: %s, priority: %d", group, model, targetPriority))
+		return nil, errors.New(fmt.Sprintf("no available healthy channel found, group: %s, model: %s", group, model))
+	}
+
+	return selectWeightedRuntimeChannel(targetChannels, targetInflight, sumWeight, useProbeCandidate)
+}
+
+func collectRuntimeChannels(channels []int, targetPriority int64, probe bool, targetChannels []*Channel, targetInflight []int) (int, []*Channel, []int, error) {
+	sumWeight := 0
+	targetChannels = targetChannels[:0]
+	targetInflight = targetInflight[:0]
+	for _, channelId := range channels {
+		channel, ok := channelsIDM[channelId]
+		if !ok {
+			return 0, targetChannels, targetInflight, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId)
+		}
+		if channel.GetPriority() != targetPriority {
+			continue
+		}
+		var available bool
+		var inflight int
+		if probe {
+			available, inflight = getChannelProbeRuntimeState(channel.Id)
+		} else {
+			available, inflight = getChannelRuntimeState(channel.Id)
+		}
+		if !available {
+			continue
+		}
+		adjustedWeight := adjustedChannelWeight(channel.GetWeight(), inflight)
+		sumWeight += adjustedWeight
+		targetChannels = append(targetChannels, channel)
+		targetInflight = append(targetInflight, inflight)
+	}
+	return sumWeight, targetChannels, targetInflight, nil
+}
+
+func selectWeightedRuntimeChannel(targetChannels []*Channel, targetInflight []int, sumWeight int, claimProbe bool) (*Channel, error) {
+	for len(targetChannels) > 0 {
+		selectedIndex, err := weightedRuntimeChannelIndex(targetChannels, targetInflight, sumWeight)
+		if err != nil {
+			return nil, err
+		}
+		selected := targetChannels[selectedIndex]
+		if !claimProbe || claimChannelProbeRuntimeState(selected.Id) {
+			return selected, nil
+		}
+		sumWeight -= adjustedChannelWeight(selected.GetWeight(), targetInflight[selectedIndex])
+		targetChannels = append(targetChannels[:selectedIndex], targetChannels[selectedIndex+1:]...)
+		targetInflight = append(targetInflight[:selectedIndex], targetInflight[selectedIndex+1:]...)
+	}
+	return nil, errors.New("channel not found")
+}
+
+func weightedRuntimeChannelIndex(targetChannels []*Channel, targetInflight []int, sumWeight int) (int, error) {
+	if len(targetChannels) == 0 {
+		return -1, errors.New("channel not found")
 	}
 
 	// smoothing factor and adjustment
@@ -181,14 +242,26 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	randomWeight := rand.Intn(totalWeight)
 
 	// Find a channel based on its weight
-	for _, channel := range targetChannels {
-		randomWeight -= channel.GetWeight()*smoothingFactor + smoothingAdjustment
+	for i, channel := range targetChannels {
+		adjustedWeight := adjustedChannelWeight(channel.GetWeight(), targetInflight[i])
+		randomWeight -= adjustedWeight*smoothingFactor + smoothingAdjustment
 		if randomWeight < 0 {
-			return channel, nil
+			return i, nil
 		}
 	}
 	// return null if no channel is not found
-	return nil, errors.New("channel not found")
+	return -1, errors.New("channel not found")
+}
+
+func adjustedChannelWeight(weight int, inflight int) int {
+	if inflight <= 0 {
+		return weight
+	}
+	adjusted := weight / (1 + inflight)
+	if weight > 0 && adjusted <= 0 {
+		return 1
+	}
+	return adjusted
 }
 
 func CacheGetChannel(id int) (*Channel, error) {

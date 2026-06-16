@@ -21,6 +21,8 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+var MarkChannelHealthFirstResponseFunc func(*gin.Context)
+
 type ThinkingContentInfo struct {
 	IsFirstThinkingContent  bool
 	SendLastThinkingContent bool
@@ -178,6 +180,7 @@ type RelayInfo struct {
 	FinalRequestRelayFormat types.RelayFormat
 
 	StreamStatus *StreamStatus
+	GinContext   *gin.Context
 
 	ThinkingContentInfo
 	TokenCountMeta
@@ -461,7 +464,8 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		reqId = common.GetTimeString() + common.GetRandomString(8)
 	}
 	info := &RelayInfo{
-		Request: request,
+		Request:    request,
+		GinContext: c,
 
 		RequestId:  reqId,
 		UserId:     common.GetContextKeyInt(c, constant.ContextKeyUserId),
@@ -659,6 +663,9 @@ func (info *RelayInfo) SetFirstResponseTime() {
 	if info.isFirstResponse {
 		info.FirstResponseTime = time.Now()
 		info.isFirstResponse = false
+		if MarkChannelHealthFirstResponseFunc != nil {
+			MarkChannelHealthFirstResponseFunc(info.GinContext)
+		}
 	}
 }
 
