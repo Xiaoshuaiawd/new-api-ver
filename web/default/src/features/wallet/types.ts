@@ -147,6 +147,8 @@ export interface TopupInfo {
   amount_options: number[]
   /** Discount rates by amount */
   discount: Record<number, number>
+  /** Optional threshold-based recharge bonus activity */
+  topup_bonus?: TopUpBonusConfig
   /** Optional topup link for purchasing codes */
   topup_link?: string
   /** Whether Creem topup is enabled */
@@ -169,6 +171,21 @@ export interface TopupInfo {
   payment_compliance_confirmed?: boolean
   /** Current compliance terms version */
   payment_compliance_terms_version?: string
+}
+
+export interface TopUpBonusConfig {
+  enabled?: boolean
+  activity_id?: string
+  activity_name?: string
+  start_time?: number
+  end_time?: number
+  min_amount?: number
+  bonus_percent?: number
+  single_bonus_max_amount?: number
+  user_bonus_max_amount?: number
+  total_bonus_budget_amount?: number
+  first_topup_only?: boolean
+  visible?: boolean
 }
 
 /**
@@ -208,7 +225,7 @@ export interface AlipayF2FOrderData {
   /** QR code content returned by Alipay */
   qr_code: string
   /** Local order status */
-  status: TopupStatus | 'failed' | string
+  status: TopupStatus | string
   /** Topup quota amount */
   amount?: number
   /** Amount user pays */
@@ -228,7 +245,7 @@ export interface AlipayF2FStatusData {
   /** Merchant trade number */
   trade_no: string
   /** Local order status */
-  status: TopupStatus | 'failed' | string
+  status: TopupStatus | string
   /** Alipay trade status */
   trade_status?: string
 }
@@ -294,7 +311,12 @@ export interface UserWalletData {
 /**
  * Topup record status
  */
-export type TopupStatus = 'success' | 'pending' | 'expired'
+export type TopupStatus =
+  | 'success'
+  | 'pending'
+  | 'expired'
+  | 'failed'
+  | 'refunded'
 
 /**
  * Topup billing record
@@ -312,6 +334,16 @@ export interface TopupRecord {
   trade_no: string
   /** Payment method type */
   payment_method: string
+  /** Payment provider */
+  payment_provider?: string
+  /** Bonus amount from recharge activity */
+  bonus_amount?: number
+  /** Bonus quota credited from recharge activity */
+  bonus_quota?: number
+  /** Recharge bonus activity ID */
+  bonus_activity_id?: string
+  /** Recharge bonus activity name */
+  bonus_activity_name?: string
   /** Creation timestamp */
   create_time: number
   /** Completion timestamp */

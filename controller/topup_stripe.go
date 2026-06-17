@@ -87,7 +87,7 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 
 	id := c.GetInt("id")
 	user, _ := model.GetUserById(id, false)
-	chargedMoney := GetChargedAmount(float64(req.Amount), *user)
+	chargedMoney := getStripePayMoney(float64(req.Amount), user.Group)
 
 	reference := fmt.Sprintf("new-api-ref-%d-%d-%s", user.Id, time.Now().UnixMilli(), randstr.String(4))
 	referenceId := "ref_" + common.Sha1([]byte(reference))
@@ -182,6 +182,12 @@ func StripeWebhook(c *gin.Context) {
 		sessionAsyncPaymentSucceeded(ctx, event, callerIp)
 	case stripe.EventTypeCheckoutSessionAsyncPaymentFailed:
 		sessionAsyncPaymentFailed(ctx, event, callerIp)
+	case stripe.EventTypeChargeRefunded:
+		handleStripeChargeRefunded(ctx, event, callerIp)
+	case stripe.EventTypeChargeDisputeCreated:
+		handleStripeChargeDispute(ctx, event, callerIp)
+	case stripe.EventTypeChargeDisputeFundsWithdrawn:
+		handleStripeChargeDispute(ctx, event, callerIp)
 	default:
 		logger.LogInfo(ctx, fmt.Sprintf("Stripe webhook 忽略事件 event_type=%s client_ip=%s", string(event.Type), callerIp))
 	}
@@ -278,15 +284,72 @@ func fulfillOrder(ctx context.Context, event stripe.Event, referenceId string, c
 		return
 	}
 
-	err := model.Recharge(referenceId, customerId, callerIp)
+	total, _ := strconv.ParseFloat(event.GetObjectValue("amount_total"), 64)
+	paidMoney := total / 100
+	paymentIntentID := event.GetObjectValue("payment_intent")
+	err := model.RechargeStripeWithPaymentIntent(referenceId, customerId, paymentIntentID, paidMoney, callerIp)
 	if err != nil {
 		logger.LogError(ctx, fmt.Sprintf("Stripe 充值处理失败 trade_no=%s event_type=%s client_ip=%s error=%q", referenceId, string(event.Type), callerIp, err.Error()))
 		return
 	}
 
-	total, _ := strconv.ParseFloat(event.GetObjectValue("amount_total"), 64)
 	currency := strings.ToUpper(event.GetObjectValue("currency"))
-	logger.LogInfo(ctx, fmt.Sprintf("Stripe 充值成功 trade_no=%s amount_total=%.2f currency=%s event_type=%s client_ip=%s", referenceId, total/100, currency, string(event.Type), callerIp))
+	logger.LogInfo(ctx, fmt.Sprintf("Stripe 充值成功 trade_no=%s amount_total=%.2f currency=%s event_type=%s client_ip=%s", referenceId, paidMoney, currency, string(event.Type), callerIp))
+}
+
+func handleStripeChargeRefunded(ctx context.Context, event stripe.Event, callerIp string) {
+	paymentIntentID := event.GetObjectValue("payment_intent")
+	refundCents, _ := strconv.ParseFloat(event.GetObjectValue("amount_refunded"), 64)
+	if refundCents <= 0 {
+		refundCents, _ = strconv.ParseFloat(event.GetObjectValue("amount"), 64)
+	}
+	refundMoney := refundCents / 100
+	if paymentIntentID == "" || refundMoney <= 0 {
+		logger.LogWarn(ctx, fmt.Sprintf("Stripe 退款事件缺少必要字段 payment_intent=%s refund_money=%.2f event_type=%s client_ip=%s", paymentIntentID, refundMoney, string(event.Type), callerIp))
+		return
+	}
+
+	if err := model.RefundTopUpByPaymentIntentCumulative(paymentIntentID, model.PaymentProviderStripe, refundMoney, callerIp); err != nil {
+		if errors.Is(err, model.ErrTopUpNotFound) {
+			logger.LogInfo(ctx, fmt.Sprintf("Stripe 退款事件未匹配充值订单 payment_intent=%s refund_money=%.2f event_type=%s client_ip=%s", paymentIntentID, refundMoney, string(event.Type), callerIp))
+			return
+		}
+		logger.LogError(ctx, fmt.Sprintf("Stripe 充值退款扣回失败 payment_intent=%s refund_money=%.2f event_type=%s client_ip=%s error=%q", paymentIntentID, refundMoney, string(event.Type), callerIp, err.Error()))
+		return
+	}
+	logger.LogInfo(ctx, fmt.Sprintf("Stripe 充值退款已扣回 payment_intent=%s refund_money=%.2f event_type=%s client_ip=%s", paymentIntentID, refundMoney, string(event.Type), callerIp))
+}
+
+func safeStripeObjectValue(event stripe.Event, keys ...string) (value string) {
+	defer func() {
+		if recover() != nil {
+			value = ""
+		}
+	}()
+	return event.GetObjectValue(keys...)
+}
+
+func handleStripeChargeDispute(ctx context.Context, event stripe.Event, callerIp string) {
+	paymentIntentID := event.GetObjectValue("payment_intent")
+	if paymentIntentID == "" {
+		paymentIntentID = safeStripeObjectValue(event, "charge", "payment_intent")
+	}
+	disputeCents, _ := strconv.ParseFloat(event.GetObjectValue("amount"), 64)
+	refundMoney := disputeCents / 100
+	if paymentIntentID == "" || refundMoney <= 0 {
+		logger.LogWarn(ctx, fmt.Sprintf("Stripe 拒付事件缺少必要字段 payment_intent=%s refund_money=%.2f event_type=%s client_ip=%s", paymentIntentID, refundMoney, string(event.Type), callerIp))
+		return
+	}
+
+	if err := model.RefundTopUpByPaymentIntent(paymentIntentID, model.PaymentProviderStripe, refundMoney, callerIp); err != nil {
+		if errors.Is(err, model.ErrTopUpNotFound) {
+			logger.LogInfo(ctx, fmt.Sprintf("Stripe 拒付事件未匹配充值订单 payment_intent=%s refund_money=%.2f event_type=%s client_ip=%s", paymentIntentID, refundMoney, string(event.Type), callerIp))
+			return
+		}
+		logger.LogError(ctx, fmt.Sprintf("Stripe 拒付扣回失败 payment_intent=%s refund_money=%.2f event_type=%s client_ip=%s error=%q", paymentIntentID, refundMoney, string(event.Type), callerIp, err.Error()))
+		return
+	}
+	logger.LogInfo(ctx, fmt.Sprintf("Stripe 拒付已扣回 payment_intent=%s refund_money=%.2f event_type=%s client_ip=%s", paymentIntentID, refundMoney, string(event.Type), callerIp))
 }
 
 func sessionExpired(ctx context.Context, event stripe.Event) {

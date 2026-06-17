@@ -60,6 +60,7 @@ import { AmountDiscountVisualEditor } from './amount-discount-visual-editor'
 import { AmountOptionsVisualEditor } from './amount-options-visual-editor'
 import { CreemProductsVisualEditor } from './creem-products-visual-editor'
 import { PaymentMethodsVisualEditor } from './payment-methods-visual-editor'
+import { TopUpBonusVisualEditor } from './topup-bonus-visual-editor'
 import {
   formatJsonForEditor,
   getJsonError,
@@ -112,6 +113,19 @@ const paymentSchema = z.object({
     }
   }),
   AmountDiscount: z.string().superRefine((value, ctx) => {
+    const error = getJsonError(
+      value,
+      (parsed) =>
+        !!parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    )
+    if (error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: error,
+      })
+    }
+  }),
+  TopUpBonus: z.string().superRefine((value, ctx) => {
     const error = getJsonError(
       value,
       (parsed) =>
@@ -225,6 +239,8 @@ export function PaymentSettingsSection({
     React.useState(true)
   const [amountDiscountVisualMode, setAmountDiscountVisualMode] =
     React.useState(true)
+  const [topUpBonusVisualMode, setTopUpBonusVisualMode] =
+    React.useState(true)
   const [creemProductsVisualMode, setCreemProductsVisualMode] =
     React.useState(true)
   const [showComplianceDialog, setShowComplianceDialog] = React.useState(false)
@@ -337,6 +353,7 @@ export function PaymentSettingsSection({
       PayMethods: formatJsonForEditor(initialFormValues.PayMethods),
       AmountOptions: formatJsonForEditor(initialFormValues.AmountOptions),
       AmountDiscount: formatJsonForEditor(initialFormValues.AmountDiscount),
+      TopUpBonus: formatJsonForEditor(initialFormValues.TopUpBonus),
       CreemProducts: formatJsonForEditor(initialFormValues.CreemProducts),
     },
   })
@@ -394,6 +411,7 @@ export function PaymentSettingsSection({
       PayMethods: formatJsonForEditor(parsedDefaults.PayMethods),
       AmountOptions: formatJsonForEditor(parsedDefaults.AmountOptions),
       AmountDiscount: formatJsonForEditor(parsedDefaults.AmountDiscount),
+      TopUpBonus: formatJsonForEditor(parsedDefaults.TopUpBonus),
       CreemProducts: formatJsonForEditor(parsedDefaults.CreemProducts),
     })
   }, [defaultsSignature, form])
@@ -409,6 +427,7 @@ export function PaymentSettingsSection({
       PayMethods: values.PayMethods.trim(),
       AmountOptions: values.AmountOptions.trim(),
       AmountDiscount: values.AmountDiscount.trim(),
+      TopUpBonus: values.TopUpBonus.trim(),
       StripeApiSecret: values.StripeApiSecret.trim(),
       StripeWebhookSecret: values.StripeWebhookSecret.trim(),
       StripePriceId: values.StripePriceId.trim(),
@@ -453,6 +472,7 @@ export function PaymentSettingsSection({
       PayMethods: initialRef.current.PayMethods.trim(),
       AmountOptions: initialRef.current.AmountOptions.trim(),
       AmountDiscount: initialRef.current.AmountDiscount.trim(),
+      TopUpBonus: initialRef.current.TopUpBonus.trim(),
       StripeApiSecret: initialRef.current.StripeApiSecret.trim(),
       StripeWebhookSecret: initialRef.current.StripeWebhookSecret.trim(),
       StripePriceId: initialRef.current.StripePriceId.trim(),
@@ -541,6 +561,16 @@ export function PaymentSettingsSection({
       updates.push({
         key: 'payment_setting.amount_discount',
         value: sanitized.AmountDiscount,
+      })
+    }
+
+    if (
+      normalizeJsonForComparison(sanitized.TopUpBonus) !==
+      normalizeJsonForComparison(initial.TopUpBonus)
+    ) {
+      updates.push({
+        key: 'payment_setting.topup_bonus',
+        value: sanitized.TopUpBonus,
       })
     }
 
@@ -1072,6 +1102,62 @@ export function PaymentSettingsSection({
                     </FormControl>
                     <FormDescription>
                       {t('Discount map by recharge amount (JSON object)')}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='TopUpBonus'
+                render={({ field }) => (
+                  <FormItem>
+                    <div className='mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
+                      <FormLabel>{t('Recharge bonus activity')}</FormLabel>
+                      <Button
+                        type='button'
+                        variant='outline'
+                        size='sm'
+                        onClick={() =>
+                          setTopUpBonusVisualMode(!topUpBonusVisualMode)
+                        }
+                        className='w-full sm:w-auto'
+                      >
+                        {topUpBonusVisualMode ? (
+                          <>
+                            <Code2 className='mr-2 h-3 w-3' />
+                            {t('JSON Editor')}
+                          </>
+                        ) : (
+                          <>
+                            <Eye className='mr-2 h-3 w-3' />
+                            {t('Visual Editor')}
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                    <FormControl>
+                      {topUpBonusVisualMode ? (
+                        <TopUpBonusVisualEditor
+                          value={field.value}
+                          onChange={field.onChange}
+                        />
+                      ) : (
+                        <Textarea
+                          rows={8}
+                          placeholder='{"enabled":true,"activity_id":"618-2026","activity_name":"618 Recharge Bonus","start_time":0,"end_time":0,"min_amount":100,"bonus_percent":15,"single_bonus_max_amount":200,"user_bonus_max_amount":500,"total_bonus_budget_amount":10000,"first_topup_only":false,"visible":true}'
+                          {...field}
+                          onChange={(event) =>
+                            field.onChange(event.target.value)
+                          }
+                        />
+                      )}
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Configure threshold-based recharge rewards. Bonus is credited after successful payment.'
+                      )}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

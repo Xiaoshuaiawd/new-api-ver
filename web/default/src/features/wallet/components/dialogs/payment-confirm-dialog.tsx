@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { formatLocalCurrencyAmount } from '@/lib/currency'
+import { formatNumber } from '@/lib/format'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,7 +32,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { DEFAULT_DISCOUNT_RATE } from '../../constants'
-import { formatCurrency, getPaymentIcon } from '../../lib'
+import { formatCurrency, getPaymentIcon, type TopUpBonusPreview } from '../../lib'
 import type { PaymentMethod } from '../../types'
 
 interface PaymentConfirmDialogProps {
@@ -45,6 +46,7 @@ interface PaymentConfirmDialogProps {
   processing: boolean
   discountRate?: number
   usdExchangeRate?: number
+  bonusPreview?: TopUpBonusPreview | null
 }
 
 export function PaymentConfirmDialog({
@@ -58,6 +60,7 @@ export function PaymentConfirmDialog({
   processing,
   discountRate = DEFAULT_DISCOUNT_RATE,
   usdExchangeRate = 1,
+  bonusPreview,
 }: PaymentConfirmDialogProps) {
   const { t } = useTranslation()
   const hasDiscount = discountRate > 0 && discountRate < 1 && paymentAmount > 0
@@ -120,6 +123,25 @@ export function PaymentConfirmDialog({
               </div>
             </div>
           )}
+
+          {bonusPreview?.eligible && !calculating ? (
+            <div className='rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800 dark:border-green-900/60 dark:bg-green-950/30 dark:text-green-200'>
+              <div className='flex items-center justify-between gap-3'>
+                <span>{t('Estimated credit')}</span>
+                <span className='font-semibold'>
+                  {formatNumber(bonusPreview.totalAmount)}
+                </span>
+              </div>
+              <div className='mt-1 flex items-center justify-between gap-3 text-xs'>
+                <span>{t('Recharge bonus')}</span>
+                <span>
+                  +{formatNumber(bonusPreview.bonusCreditAmount)} /{' '}
+                  {formatCurrency(bonusPreview.bonusAmount)} (
+                  {bonusPreview.bonusPercent}%)
+                </span>
+              </div>
+            </div>
+          ) : null}
 
           <div className='border-t pt-4'>
             <div className='flex items-center justify-between'>

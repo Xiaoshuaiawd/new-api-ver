@@ -23,6 +23,10 @@ import {
   DEFAULT_MIN_TOPUP,
 } from '../constants'
 import type { PresetAmount, TopupInfo } from '../types'
+export {
+  calculateTopUpBonusPreview,
+  type TopUpBonusPreview,
+} from './topup-bonus'
 
 // ============================================================================
 // Payment Processing Functions

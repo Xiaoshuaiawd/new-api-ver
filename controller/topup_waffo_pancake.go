@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -478,6 +479,15 @@ func WaffoPancakeWebhook(c *gin.Context) {
 	}
 
 	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Waffo Pancake webhook 验签成功 event_type=%s event_id=%s order_id=%s client_ip=%s", event.NormalizedEventType(), event.ID, event.Data.OrderID, c.ClientIP()))
+	if event.NormalizedEventType() == "refund.succeeded" {
+		if err := processWaffoPancakeRefund(c.Request.Context(), event, c.ClientIP()); err != nil {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("Waffo Pancake 退款处理失败 event_id=%s order_id=%s refund_ticket=%s client_ip=%s error=%q", event.ID, event.Data.OrderID, event.Data.RefundTicketMerchantExternalID, c.ClientIP(), err.Error()))
+			c.String(http.StatusInternalServerError, "retry")
+			return
+		}
+		c.String(http.StatusOK, "OK")
+		return
+	}
 	if event.NormalizedEventType() != "order.completed" {
 		c.String(http.StatusOK, "OK")
 		return
@@ -534,4 +544,49 @@ func WaffoPancakeWebhook(c *gin.Context) {
 
 	logger.LogInfo(c.Request.Context(), fmt.Sprintf("Waffo Pancake 充值成功 trade_no=%s event_id=%s order_id=%s client_ip=%s", tradeNo, event.ID, event.Data.OrderID, c.ClientIP()))
 	c.String(http.StatusOK, "OK")
+}
+
+func processWaffoPancakeRefund(ctx context.Context, event *service.WaffoPancakeWebhookEvent, callerIp string) error {
+	if event == nil {
+		return fmt.Errorf("missing webhook event")
+	}
+	if event.NormalizedEventType() != "refund.succeeded" {
+		return nil
+	}
+	if strings.TrimSpace(event.Data.RefundStatus) != "" && !strings.EqualFold(strings.TrimSpace(event.Data.RefundStatus), "succeeded") {
+		logger.LogInfo(ctx, fmt.Sprintf("Waffo Pancake 退款状态非成功，忽略扣回 event_id=%s order_id=%s refund_status=%s", event.ID, event.Data.OrderID, event.Data.RefundStatus))
+		return nil
+	}
+
+	tradeNo, err := service.ResolveWaffoPancakeTradeNo(event)
+	if err != nil {
+		return err
+	}
+	refundMoney, err := decimal.NewFromString(strings.TrimSpace(event.Data.Amount))
+	if err != nil {
+		return fmt.Errorf("Waffo Pancake 退款金额解析失败: %w", err)
+	}
+	if refundMoney.LessThanOrEqual(decimal.Zero) {
+		return fmt.Errorf("Waffo Pancake 退款金额必须大于 0")
+	}
+
+	refundReferenceID := strings.TrimSpace(event.Data.RefundTicketMerchantExternalID)
+	if refundReferenceID == "" {
+		refundReferenceID = strings.TrimSpace(event.EventID)
+	}
+	if refundReferenceID == "" {
+		refundReferenceID = strings.TrimSpace(event.ID)
+	}
+	if refundReferenceID == "" {
+		refundReferenceID = fmt.Sprintf("%s:%s:%s", tradeNo, event.NormalizedEventType(), event.Data.Amount)
+	}
+
+	LockOrder(tradeNo)
+	defer UnlockOrder(tradeNo)
+
+	if err := model.RefundTopUpWithReference(tradeNo, model.PaymentProviderWaffoPancake, refundMoney.InexactFloat64(), refundReferenceID, callerIp); err != nil {
+		return err
+	}
+	logger.LogInfo(ctx, fmt.Sprintf("Waffo Pancake 退款已扣回 trade_no=%s refund_reference_id=%s refund_amount=%s", tradeNo, refundReferenceID, event.Data.Amount))
+	return nil
 }

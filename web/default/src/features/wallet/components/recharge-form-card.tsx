@@ -40,6 +40,7 @@ import {
   getPaymentIcon,
   getMinTopupAmount,
   calculatePresetPricing,
+  calculateTopUpBonusPreview,
 } from '../lib'
 import type {
   PaymentMethod,
@@ -115,7 +116,9 @@ export function RechargeFormCard({
   const [localAmount, setLocalAmount] = useState(topupAmount.toString())
 
   useEffect(() => {
-    setLocalAmount(topupAmount.toString())
+    queueMicrotask(() => {
+      setLocalAmount(topupAmount.toString())
+    })
   }, [topupAmount])
 
   const handleAmountChange = (value: string) => {
@@ -139,6 +142,11 @@ export function RechargeFormCard({
     Array.isArray(waffoPayMethods) && waffoPayMethods.length > 0
   const minTopup = getMinTopupAmount(topupInfo)
   const redemptionEnabled = topupInfo?.enable_redemption !== false
+  const bonusPreview = calculateTopUpBonusPreview(
+    paymentAmount,
+    topupAmount,
+    topupInfo?.topup_bonus
+  )
 
   if (loading) {
     return (
@@ -305,6 +313,36 @@ export function RechargeFormCard({
                     )}
                   </div>
                 </div>
+                {bonusPreview ? (
+                  <div className='rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800 dark:border-green-900/60 dark:bg-green-950/30 dark:text-green-200'>
+                    {bonusPreview.eligible ? (
+                      <span>
+                        {bonusPreview.activityName
+                          ? `${bonusPreview.activityName}: `
+                          : ''}
+                        {t(
+                          'Recharge bonus: +{{bonus}}%, estimated credit {{total}}.',
+                          {
+                            bonus: bonusPreview.bonusPercent,
+                            total: formatNumber(bonusPreview.totalAmount),
+                          }
+                        )}
+                      </span>
+                    ) : (
+                      <span>
+                        {t(
+                          'Pay {{remaining}} more to get +{{bonus}}% bonus.',
+                          {
+                            remaining: formatNumber(
+                              bonusPreview.remainingAmount
+                            ),
+                            bonus: bonusPreview.bonusPercent,
+                          }
+                        )}
+                      </span>
+                    )}
+                  </div>
+                ) : null}
               </div>
 
               <div className='space-y-2.5 sm:space-y-3'>

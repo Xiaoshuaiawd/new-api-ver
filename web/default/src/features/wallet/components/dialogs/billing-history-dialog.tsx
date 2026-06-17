@@ -180,6 +180,9 @@ export function BillingHistoryDialog({
               <div className='space-y-3'>
                 {records.map((record) => {
                   const statusConfig = getStatusConfig(record.status)
+                  const hasBonus =
+                    (record.bonus_amount ?? 0) > 0 ||
+                    (record.bonus_quota ?? 0) > 0
                   return (
                     <div
                       key={record.id}
@@ -254,6 +257,33 @@ export function BillingHistoryDialog({
                           <div className='text-sm font-semibold text-red-600'>
                             {formatNumber(record.money)}
                           </div>
+                        </div>
+                        <div className='space-y-1'>
+                          <Label className='text-muted-foreground text-xs'>
+                            {t('Recharge bonus')}
+                          </Label>
+                          {hasBonus ? (
+                            <div className='space-y-0.5'>
+                              <div className='text-sm font-semibold text-green-600'>
+                                +{formatNumber(record.bonus_quota ?? 0)}
+                              </div>
+                              <div className='text-muted-foreground text-xs'>
+                                {t('Bonus amount')}:{' '}
+                                {formatNumber(record.bonus_amount ?? 0)}
+                              </div>
+                              {(record.bonus_activity_name ||
+                                record.bonus_activity_id) && (
+                                <div className='text-muted-foreground truncate text-xs'>
+                                  {record.bonus_activity_name ||
+                                    record.bonus_activity_id}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className='text-muted-foreground text-sm'>
+                              -
+                            </div>
+                          )}
                         </div>
                       </div>
 

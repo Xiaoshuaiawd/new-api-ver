@@ -25,6 +25,7 @@ import {
 } from '../lib'
 import type {
   TopupInfo,
+  TopUpBonusConfig,
   PresetAmount,
   CreemProduct,
   PaymentMethod,
@@ -161,12 +162,55 @@ function parseDiscountMap(data: unknown): Record<number, number> {
   )
 }
 
+function parseTopUpBonus(data: unknown): TopUpBonusConfig | undefined {
+  if (!data) {
+    return undefined
+  }
+
+  let parsedData = data
+  if (typeof data === 'string') {
+    try {
+      parsedData = JSON.parse(data)
+    } catch {
+      return undefined
+    }
+  }
+
+  if (
+    !parsedData ||
+    typeof parsedData !== 'object' ||
+    Array.isArray(parsedData)
+  ) {
+    return undefined
+  }
+
+  const source = parsedData as Record<string, unknown>
+  return {
+    enabled: source.enabled === true,
+    activity_id:
+      typeof source.activity_id === 'string' ? source.activity_id : '',
+    activity_name:
+      typeof source.activity_name === 'string' ? source.activity_name : '',
+    start_time: Number(source.start_time) || 0,
+    end_time: Number(source.end_time) || 0,
+    min_amount: Number(source.min_amount) || 0,
+    bonus_percent: Number(source.bonus_percent) || 0,
+    single_bonus_max_amount: Number(source.single_bonus_max_amount) || 0,
+    user_bonus_max_amount: Number(source.user_bonus_max_amount) || 0,
+    total_bonus_budget_amount: Number(source.total_bonus_budget_amount) || 0,
+    first_topup_only: source.first_topup_only === true,
+    visible: source.visible !== false,
+  }
+}
+
 export function useTopupInfo() {
   const [topupInfo, setTopupInfo] = useState<TopupInfo | null>(null)
   const [presetAmounts, setPresetAmounts] = useState<PresetAmount[]>([])
   const [loading, setLoading] = useState(true)
 
   const fetchTopupInfo = async () => {
+    await Promise.resolve()
+
     try {
       setLoading(true)
 
@@ -186,6 +230,7 @@ export function useTopupInfo() {
         ),
         amount_options: parseAmountOptions(response.data.amount_options),
         discount: parseDiscountMap(response.data.discount),
+        topup_bonus: parseTopUpBonus(response.data.topup_bonus),
         creem_products: parseCreemProducts(response.data.creem_products),
         waffo_pay_methods: parseWaffoPayMethods(
           response.data.waffo_pay_methods
@@ -214,7 +259,15 @@ export function useTopupInfo() {
   }
 
   useEffect(() => {
-    fetchTopupInfo()
+    let active = true
+    queueMicrotask(() => {
+      if (active) {
+        void fetchTopupInfo()
+      }
+    })
+    return () => {
+      active = false
+    }
   }, [])
 
   return {

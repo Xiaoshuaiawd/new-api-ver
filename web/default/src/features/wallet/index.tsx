@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { getSelf } from '@/lib/api'
 import { useStatus } from '@/hooks/use-status'
@@ -47,6 +47,7 @@ import {
   getMinTopupAmount,
   isAlipayF2FPayment,
   isWaffoPancakePayment,
+  calculateTopUpBonusPreview,
 } from './lib'
 import type {
   UserWalletData,
@@ -76,6 +77,9 @@ export function Wallet(props: WalletProps) {
   const [selectedCreemProduct, setSelectedCreemProduct] =
     useState<CreemProduct | null>(null)
   const [showSubscriptionPanel, setShowSubscriptionPanel] = useState(true)
+  const userFetchStartedRef = useRef(false)
+  const initialHistoryHandledRef = useRef(false)
+  const initialTopupHandledRef = useRef(false)
 
   const { status } = useStatus()
   const { currency } = useSystemConfig()
@@ -131,25 +135,33 @@ export function Wallet(props: WalletProps) {
     useWaffoPancakePayment()
 
   useEffect(() => {
-    fetchUser()
+    if (userFetchStartedRef.current) return
+    userFetchStartedRef.current = true
+    queueMicrotask(() => {
+      fetchUser()
+    })
   }, [fetchUser])
 
   useEffect(() => {
-    if (props.initialShowHistory) {
-      setBillingDialogOpen(true)
+    if (props.initialShowHistory && !initialHistoryHandledRef.current) {
+      initialHistoryHandledRef.current = true
+      queueMicrotask(() => {
+        setBillingDialogOpen(true)
+      })
       window.history.replaceState({}, '', window.location.pathname)
     }
   }, [props.initialShowHistory])
 
   // Initialize topup amount when topup info is loaded
   useEffect(() => {
-    if (topupInfo && topupAmount === 0) {
+    if (topupInfo && topupAmount === 0 && !initialTopupHandledRef.current) {
+      initialTopupHandledRef.current = true
       const minTopup = getMinTopupAmount(topupInfo)
-      setTopupAmount(minTopup)
-
-      // Calculate initial payment amount with default payment type
       const defaultPaymentType = getDefaultPaymentType(topupInfo)
-      calculatePaymentAmount(minTopup, defaultPaymentType)
+      queueMicrotask(() => {
+        setTopupAmount(minTopup)
+        calculatePaymentAmount(minTopup, defaultPaymentType)
+      })
     }
   }, [topupInfo, topupAmount, calculatePaymentAmount])
 
@@ -264,6 +276,16 @@ export function Wallet(props: WalletProps) {
     return topupInfo?.discount?.[topupAmount] || DEFAULT_DISCOUNT_RATE
   }, [topupInfo, topupAmount])
 
+  const bonusPreview = useMemo(
+    () =>
+      calculateTopUpBonusPreview(
+        paymentAmount,
+        topupAmount,
+        topupInfo?.topup_bonus
+      ),
+    [paymentAmount, topupAmount, topupInfo?.topup_bonus]
+  )
+
   const handleSubscriptionAvailabilityChange = useCallback(
     (available: boolean) => {
       setShowSubscriptionPanel(available)
@@ -353,6 +375,7 @@ export function Wallet(props: WalletProps) {
         processing={processing || pancakeProcessing || alipayF2FProcessing}
         discountRate={getDiscountRate()}
         usdExchangeRate={effectiveUsdExchangeRate}
+        bonusPreview={bonusPreview}
       />
 
       <TransferDialog
