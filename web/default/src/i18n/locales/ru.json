@@ -475,6 +475,7 @@
     "Available Groups": "Доступные группы",
     "Available Models": "Доступные модели",
     "Available Rewards": "Доступные награды",
+    "Average first response": "Среднее время первого ответа",
     "Average latency": "Средняя задержка",
     "Average latency, TTFT, and success rate by group": "Средняя задержка, TTFT и доля успешных запросов по группам",
     "Average latency, TTFT, TPS, and success rate": "Средняя задержка, TTFT, TPS и доля успешных запросов",
@@ -666,6 +667,7 @@
     "Channel disabled successfully": "Канал успешно отключён",
     "Channel enabled successfully": "Канал успешно включён",
     "Channel Extra Settings": "Дополнительные настройки канала",
+    "Channel Health": "Здоровье каналов",
     "Channel Health Guard": "Защита здоровья каналов",
     "Channel health overview": "Обзор здоровья каналов",
     "Channel ID": "ID канала",
@@ -4717,7 +4719,6 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom",
-    "Average first response": "Среднее время первого ответа"
+    "Zoom": "Zoom"
   }
 }

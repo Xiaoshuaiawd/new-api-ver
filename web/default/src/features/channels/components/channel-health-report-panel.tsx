@@ -85,7 +85,7 @@ export function ChannelHealthReportPanel() {
       group: optionalFilter(group),
       type: optionalFilter(eventType),
       state: optionalFilter(state),
-      limit: 8,
+      limit: 50,
     }),
     [channelID, eventType, group, model, state]
   )
@@ -245,11 +245,11 @@ export function ChannelHealthReportPanel() {
             </div>
           </div>
 
-          <div className='rounded-md border'>
+          <div className='min-h-0 rounded-md border'>
             <div className='border-b px-3 py-2 text-sm font-medium'>
               {t('Health event timeline')}
             </div>
-            <div className='divide-y'>
+            <div className='max-h-[420px] divide-y overflow-y-auto'>
               {events.length > 0 ? (
                 events.map((event) => (
                   <div

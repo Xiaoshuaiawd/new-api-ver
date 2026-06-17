@@ -475,6 +475,7 @@
     "Available Groups": "Nhóm khả dụng",
     "Available Models": "Mô hình khả dụng",
     "Available Rewards": "Phần thưởng hiện có",
+    "Average first response": "Phản hồi đầu tiên trung bình",
     "Average latency": "Độ trễ trung bình",
     "Average latency, TTFT, and success rate by group": "Độ trễ trung bình, TTFT và tỷ lệ thành công theo nhóm",
     "Average latency, TTFT, TPS, and success rate": "Độ trễ trung bình, TTFT, TPS và tỷ lệ thành công",
@@ -666,6 +667,7 @@
     "Channel disabled successfully": "Kênh đã bị vô hiệu hóa thành công",
     "Channel enabled successfully": "Kênh đã được bật thành công",
     "Channel Extra Settings": "Cài đặt thêm kênh",
+    "Channel Health": "Sức khỏe kênh",
     "Channel Health Guard": "Bảo vệ sức khỏe kênh",
     "Channel health overview": "Tổng quan sức khỏe kênh",
     "Channel ID": "Mã kênh",
@@ -4717,7 +4719,6 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom",
-    "Average first response": "Phản hồi đầu tiên trung bình"
+    "Zoom": "Zoom"
   }
 }

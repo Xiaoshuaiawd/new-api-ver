@@ -50,7 +50,6 @@ import {
   getChannelTypeLabel,
 } from '../lib'
 import type { Channel, ChannelSortBy } from '../types'
-import { ChannelHealthReportPanel } from './channel-health-report-panel'
 import { useChannelsColumns } from './channels-columns'
 import { useChannels } from './channels-provider'
 import { DataTableBulkActions } from './data-table-bulk-actions'
@@ -343,65 +342,62 @@ export function ChannelsTable() {
   ]
 
   return (
-    <div className='space-y-3'>
-      <ChannelHealthReportPanel />
-      <DataTablePage
-        table={table}
-        columns={columns}
-        isLoading={isLoading}
-        isFetching={isFetching}
-        emptyTitle={t('No Channels Found')}
-        emptyDescription={t(
-          'No channels available. Create your first channel to get started.'
-        )}
-        skeletonKeyPrefix='channel-skeleton'
-        applyHeaderSize
-        toolbarProps={{
-          searchPlaceholder: t('Filter by name, ID, or key...'),
-          searchDebounceMs: 500,
-          onReset: () => {
-            resetModelFilterInput()
+    <DataTablePage
+      table={table}
+      columns={columns}
+      isLoading={isLoading}
+      isFetching={isFetching}
+      emptyTitle={t('No Channels Found')}
+      emptyDescription={t(
+        'No channels available. Create your first channel to get started.'
+      )}
+      skeletonKeyPrefix='channel-skeleton'
+      applyHeaderSize
+      toolbarProps={{
+        searchPlaceholder: t('Filter by name, ID, or key...'),
+        searchDebounceMs: 500,
+        onReset: () => {
+          resetModelFilterInput()
+        },
+        additionalSearch: (
+          <Input
+            placeholder={t('Filter by model...')}
+            value={modelFilterInput}
+            onChange={onModelFilterInputChange}
+            onCompositionStart={onModelFilterCompositionStart}
+            onCompositionEnd={onModelFilterCompositionEnd}
+            className='w-full sm:w-[150px] lg:w-[180px]'
+          />
+        ),
+        filters: [
+          {
+            columnId: 'status',
+            title: t('Status'),
+            options: [...CHANNEL_STATUS_OPTIONS],
+            singleSelect: true,
           },
-          additionalSearch: (
-            <Input
-              placeholder={t('Filter by model...')}
-              value={modelFilterInput}
-              onChange={onModelFilterInputChange}
-              onCompositionStart={onModelFilterCompositionStart}
-              onCompositionEnd={onModelFilterCompositionEnd}
-              className='w-full sm:w-[150px] lg:w-[180px]'
-            />
-          ),
-          filters: [
-            {
-              columnId: 'status',
-              title: t('Status'),
-              options: [...CHANNEL_STATUS_OPTIONS],
-              singleSelect: true,
-            },
-            {
-              columnId: 'type',
-              title: t('Type'),
-              options: typeFilterOptions,
-              singleSelect: true,
-            },
-            {
-              columnId: 'group',
-              title: t('Group'),
-              options: groupFilterOptions,
-              singleSelect: true,
-            },
-          ],
-        }}
-        getRowClassName={(row, { isMobile }) =>
-          isDisabledChannelRow(row.original)
-            ? isMobile
-              ? DISABLED_ROW_MOBILE
-              : DISABLED_ROW_DESKTOP
-            : undefined
-        }
-        bulkActions={<DataTableBulkActions table={table} />}
-      />
-    </div>
+          {
+            columnId: 'type',
+            title: t('Type'),
+            options: typeFilterOptions,
+            singleSelect: true,
+          },
+          {
+            columnId: 'group',
+            title: t('Group'),
+            options: groupFilterOptions,
+            singleSelect: true,
+          },
+        ],
+      }}
+      getRowClassName={(row, { isMobile }) =>
+        isDisabledChannelRow(row.original)
+          ? isMobile
+            ? DISABLED_ROW_MOBILE
+            : DISABLED_ROW_DESKTOP
+          : undefined
+      }
+      bulkActions={<DataTableBulkActions table={table} />}
+    />
   )
 }

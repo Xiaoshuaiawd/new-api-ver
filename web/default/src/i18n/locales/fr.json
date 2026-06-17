@@ -475,6 +475,7 @@
     "Available Groups": "Groupes disponibles",
     "Available Models": "Modèles disponibles",
     "Available Rewards": "Récompenses disponibles",
+    "Average first response": "Réponse initiale moyenne",
     "Average latency": "Latence moyenne",
     "Average latency, TTFT, and success rate by group": "Latence moyenne, TTFT et taux de réussite par groupe",
     "Average latency, TTFT, TPS, and success rate": "Latence moyenne, TTFT, TPS et taux de réussite",
@@ -666,6 +667,7 @@
     "Channel disabled successfully": "Canal désactivé avec succès",
     "Channel enabled successfully": "Canal activé avec succès",
     "Channel Extra Settings": "Paramètres supplémentaires du canal",
+    "Channel Health": "Santé des canaux",
     "Channel Health Guard": "Protection de santé des canaux",
     "Channel health overview": "Vue d’ensemble de santé des canaux",
     "Channel ID": "ID du Canal",
@@ -4717,7 +4719,6 @@
     "Zero retention": "Aucune rétention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom",
-    "Average first response": "Réponse initiale moyenne"
+    "Zoom": "Zoom"
   }
 }

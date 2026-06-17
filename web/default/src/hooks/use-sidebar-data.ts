@@ -22,6 +22,7 @@ import {
   CreditCard,
   FileText,
   FlaskConical,
+  HeartPulse,
   Key,
   LayoutDashboard,
   ListTodo,
@@ -34,7 +35,9 @@ import {
   Wallet,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { type SidebarData } from '@/components/layout/types'
+import type { SidebarData } from '../components/layout/types.ts'
+
+type Translate = (key: string) => string
 
 /**
  * Root navigation groups for the application sidebar.
@@ -42,9 +45,7 @@ import { type SidebarData } from '@/components/layout/types'
  * These are shown when the URL does not match any nested sidebar view
  * registered in `layout/lib/sidebar-view-registry.ts`.
  */
-export function useSidebarData(): SidebarData {
-  const { t } = useTranslation()
-
+export function buildSidebarData(t: Translate): SidebarData {
   return {
     navGroups: [
       {
@@ -117,6 +118,11 @@ export function useSidebarData(): SidebarData {
         title: t('Admin'),
         items: [
           {
+            title: t('Channel Health'),
+            url: '/channel-health',
+            icon: HeartPulse,
+          },
+          {
             title: t('Channels'),
             url: '/channels',
             icon: Radio,
@@ -151,4 +157,10 @@ export function useSidebarData(): SidebarData {
       },
     ],
   }
+}
+
+export function useSidebarData(): SidebarData {
+  const { t } = useTranslation()
+
+  return buildSidebarData(t)
 }

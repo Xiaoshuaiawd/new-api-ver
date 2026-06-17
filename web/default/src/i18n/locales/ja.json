@@ -475,6 +475,7 @@
     "Available Groups": "利用可能なグループ",
     "Available Models": "利用可能なモデル",
     "Available Rewards": "利用可能な報酬",
+    "Average first response": "平均初回応答",
     "Average latency": "平均レイテンシ",
     "Average latency, TTFT, and success rate by group": "グループ別の平均レイテンシ、TTFT、成功率",
     "Average latency, TTFT, TPS, and success rate": "平均レイテンシ、TTFT、TPS、成功率",
@@ -666,6 +667,7 @@
     "Channel disabled successfully": "チャネルが正常に無効化されました",
     "Channel enabled successfully": "チャネルが正常に有効化されました",
     "Channel Extra Settings": "チャネル詳細設定",
+    "Channel Health": "チャネルヘルス",
     "Channel Health Guard": "チャネルヘルスガード",
     "Channel health overview": "チャネルヘルス概要",
     "Channel ID": "チャネルID",
@@ -4717,7 +4719,6 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム",
-    "Average first response": "平均初回応答"
+    "Zoom": "ズーム"
   }
 }

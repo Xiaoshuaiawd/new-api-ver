@@ -475,6 +475,7 @@
     "Available Groups": "可用分组",
     "Available Models": "可用模型",
     "Available Rewards": "可用奖励",
+    "Average first response": "平均首响应",
     "Average latency": "平均延迟",
     "Average latency, TTFT, and success rate by group": "各分组的平均延迟、首 Token 延迟和成功率",
     "Average latency, TTFT, TPS, and success rate": "平均延迟、TTFT、TPS 和成功率",
@@ -666,6 +667,7 @@
     "Channel disabled successfully": "渠道禁用成功",
     "Channel enabled successfully": "渠道启用成功",
     "Channel Extra Settings": "渠道额外设置",
+    "Channel Health": "渠道健康",
     "Channel Health Guard": "渠道健康防护",
     "Channel health overview": "渠道健康概览",
     "Channel ID": "渠道 ID",
@@ -4717,7 +4719,6 @@
     "Zero retention": "零数据保留",
     "Zhipu": "智谱",
     "Zhipu V4": "智谱 V4",
-    "Zoom": "缩放",
-    "Average first response": "平均首响应"
+    "Zoom": "缩放"
   }
 }
