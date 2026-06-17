@@ -99,6 +99,63 @@ export async function getChannel(id: number): Promise<GetChannelResponse> {
   return res.data
 }
 
+export async function runChannelRuntimeAction(
+  id: number,
+  data: {
+    action: 'isolate' | 'probe_now' | 'clear_isolation' | 'clear_affinity'
+    reason?: string
+    duration_seconds?: number
+  }
+): Promise<{ success: boolean; message?: string; data?: unknown }> {
+  const res = await api.post(
+    `/api/channel/${id}/runtime_action`,
+    data,
+    channelActionConfig()
+  )
+  return res.data
+}
+
+export async function getChannelRuntimeHealthReport(params?: {
+  channel_id?: number
+  model?: string
+  group?: string
+  type?: string
+  state?: string
+  limit?: number
+}): Promise<{
+  success: boolean
+  message?: string
+  data?: {
+    isolation_count: number
+    recovery_count: number
+    probe_failure_count: number
+    average_first_response_ms: number
+    top_failing_channels: Array<{
+      channel_id: number
+      model_name?: string
+      group?: string
+      count: number
+    }>
+    events: Array<{
+      type: string
+      channel_id: number
+      model_name?: string
+      group?: string
+      state: string
+      reason?: string
+      occurred_at: number
+      alert_sent: boolean
+      alert_subject?: string
+    }>
+  }
+}> {
+  const res = await api.get('/api/channel/runtime_health_report', {
+    params,
+    ...channelActionConfig(),
+  })
+  return res.data
+}
+
 /**
  * Create new channel(s)
  * Supports single, batch, and multi-key modes

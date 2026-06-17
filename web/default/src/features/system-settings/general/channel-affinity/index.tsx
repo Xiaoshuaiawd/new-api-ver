@@ -31,6 +31,14 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { StaticDataTable } from '@/components/data-table'
 import { Dialog } from '@/components/dialog'
@@ -133,6 +141,10 @@ export function ChannelAffinitySection(props: Props) {
   const [keepOnChannelDisabled, setKeepOnChannelDisabled] = useState(
     props.defaultValues['channel_affinity_setting.keep_on_channel_disabled']
   )
+  const [recoveryStrategy, setRecoveryStrategy] = useState(
+    props.defaultValues['channel_affinity_setting.recovery_strategy'] ||
+      'priority_first'
+  )
   const [maxEntries, setMaxEntries] = useState(
     props.defaultValues['channel_affinity_setting.max_entries']
   )
@@ -171,6 +183,10 @@ export function ChannelAffinitySection(props: Props) {
     )
     setKeepOnChannelDisabled(
       props.defaultValues['channel_affinity_setting.keep_on_channel_disabled']
+    )
+    setRecoveryStrategy(
+      props.defaultValues['channel_affinity_setting.recovery_strategy'] ||
+        'priority_first'
     )
     setMaxEntries(props.defaultValues['channel_affinity_setting.max_entries'])
     setDefaultTtl(
@@ -274,6 +290,14 @@ export function ChannelAffinitySection(props: Props) {
         updates.push({
           key: 'channel_affinity_setting.keep_on_channel_disabled',
           value: String(keepOnChannelDisabled),
+        })
+      if (
+        recoveryStrategy !==
+        props.defaultValues['channel_affinity_setting.recovery_strategy']
+      )
+        updates.push({
+          key: 'channel_affinity_setting.recovery_strategy',
+          value: recoveryStrategy,
         })
       if (
         maxEntries !==
@@ -449,6 +473,37 @@ export function ChannelAffinitySection(props: Props) {
             'When enabled, keep the affinity entry even if the affinity channel is disabled or no longer usable for the current group/model. Leave it off to delete the entry and select another channel.'
           )}
         />
+        <div className='grid gap-1.5 md:max-w-md'>
+          <Label>{t('Affinity recovery strategy')}</Label>
+          <Select
+            value={recoveryStrategy}
+            onValueChange={(value) => {
+              if (value) setRecoveryStrategy(value)
+            }}
+          >
+            <SelectTrigger className='w-full'>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent alignItemWithTrigger={false}>
+              <SelectGroup>
+                <SelectItem value='priority_first'>
+                  {t('Priority first')}
+                </SelectItem>
+                <SelectItem value='stable_affinity'>
+                  {t('Stable affinity')}
+                </SelectItem>
+                <SelectItem value='strict_affinity'>
+                  {t('Strict affinity')}
+                </SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          <p className='text-muted-foreground text-xs'>
+            {t(
+              'Controls whether recovered higher-priority channels reclaim traffic from existing affinity.'
+            )}
+          </p>
+        </div>
 
         <Separator />
 

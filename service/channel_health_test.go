@@ -41,6 +41,10 @@ func withChannelHealthTestSettings(t *testing.T) *operation_setting.ChannelHealt
 		WarmupDurationSeconds:       60,
 		WarmupStartPercent:          10,
 		WarmupStepPercent:           30,
+		Preset:                      operation_setting.ChannelHealthPresetBalanced,
+		ModelLevelEnabled:           false,
+		EventsEnabled:               true,
+		AlertMinIntervalSeconds:     60,
 	}
 	t.Cleanup(func() {
 		*setting = original
@@ -268,7 +272,7 @@ func TestChannelHealthAvailabilityReadsIsolationCache(t *testing.T) {
 	OpenChannel(channelID, "cached isolate")
 
 	channelHealth.Lock()
-	channelHealth.channels = make(map[int]*channelHealthStateData)
+	channelHealth.channels = make(map[string]*channelHealthStateData)
 	channelHealth.Unlock()
 
 	require.False(t, IsChannelAvailable(channelID))
@@ -283,7 +287,7 @@ func TestChannelHealthAvailabilityHonorsIsolationCacheOverLocalHealthyState(t *t
 	RecordAttemptFinish(handle, ChannelAttemptResult{StatusCode: http.StatusOK})
 	require.True(t, IsChannelAvailable(channelID))
 
-	err := getChannelHealthIsolationCache().SetWithTTL(channelHealthCacheKey(channelID), ChannelHealthSnapshot{
+	err := getChannelHealthIsolationCache().SetWithTTL(channelHealthCacheKey(channelHealthScope{channelID: channelID}), ChannelHealthSnapshot{
 		ChannelID: channelID,
 		State:     ChannelHealthStateOpen,
 		Reason:    "remote isolate",
@@ -465,6 +469,130 @@ func TestCacheGetRandomSatisfiedChannelPrefersHealthyOverDueProbingChannel(t *te
 	require.False(t, snapshot.ProbeInProgress)
 }
 
+func TestChannelHealthModelLevelIsolationDoesNotBlockOtherModels(t *testing.T) {
+	setting := withChannelHealthTestSettings(t)
+	setting.ModelLevelEnabled = true
+	withChannelHealthSelectionDB(t)
+	addChannelHealthSelectionModel(t, "gpt-health-other")
+
+	OpenChannelForModel(9101, "gpt-health-test", "model specific isolate")
+
+	channel, group, err := CacheGetRandomSatisfiedChannel(&RetryParam{
+		TokenGroup: "default",
+		ModelName:  "gpt-health-test",
+		Retry:      common.GetPointer(0),
+	})
+	require.NoError(t, err)
+	require.Equal(t, "default", group)
+	require.NotNil(t, channel)
+	require.Equal(t, 9102, channel.Id)
+
+	channel, group, err = CacheGetRandomSatisfiedChannel(&RetryParam{
+		TokenGroup: "default",
+		ModelName:  "gpt-health-other",
+		Retry:      common.GetPointer(0),
+	})
+	require.NoError(t, err)
+	require.Equal(t, "default", group)
+	require.NotNil(t, channel)
+	require.Equal(t, 9101, channel.Id)
+}
+
+func TestChannelHealthChannelLevelModeKeepsCurrentBehavior(t *testing.T) {
+	setting := withChannelHealthTestSettings(t)
+	setting.ModelLevelEnabled = false
+	withChannelHealthSelectionDB(t)
+	addChannelHealthSelectionModel(t, "gpt-health-other")
+
+	OpenChannelForModel(9101, "gpt-health-test", "channel isolate")
+
+	channel, group, err := CacheGetRandomSatisfiedChannel(&RetryParam{
+		TokenGroup: "default",
+		ModelName:  "gpt-health-other",
+		Retry:      common.GetPointer(0),
+	})
+	require.NoError(t, err)
+	require.Equal(t, "default", group)
+	require.NotNil(t, channel)
+	require.Equal(t, 9102, channel.Id)
+}
+
+func TestChannelHealthEventsEmitOncePerTransitionAndSummarize(t *testing.T) {
+	withChannelHealthTestSettings(t)
+	now := time.Unix(1_700_000_000, 0)
+	SetChannelHealthNowFuncForTest(func() time.Time { return now })
+
+	OpenChannel(8813, "first isolate")
+	CheckChannelHealthStuckRequests()
+	OpenChannel(8813, "second isolate should not duplicate")
+	events := GetChannelHealthEvents(ChannelHealthEventFilter{})
+	require.Len(t, events, 1)
+	require.Equal(t, ChannelHealthEventTypeOpened, events[0].Type)
+	require.Equal(t, 8813, events[0].ChannelID)
+
+	RecordProbeResult(8813, true, "")
+	RecordProbeResult(8813, true, "")
+	events = GetChannelHealthEvents(ChannelHealthEventFilter{})
+	require.Len(t, events, 2)
+	require.Equal(t, ChannelHealthEventTypeRecovered, events[1].Type)
+
+	report := GetChannelHealthReport(ChannelHealthEventFilter{})
+	require.Equal(t, 1, report.IsolationCount)
+	require.Equal(t, 1, report.RecoveryCount)
+	require.Len(t, report.TopFailingChannels, 1)
+	require.Equal(t, 8813, report.TopFailingChannels[0].ChannelID)
+}
+
+func TestChannelHealthReportIncludesAverageFirstResponseLatency(t *testing.T) {
+	withChannelHealthTestSettings(t)
+	now := time.Unix(1_700_000_000, 0)
+	SetChannelHealthNowFuncForTest(func() time.Time { return now })
+
+	handle := RecordAttemptStart(ChannelAttemptMeta{ChannelID: 8814})
+	now = now.Add(100 * time.Millisecond)
+	RecordFirstResponse(handle)
+	RecordAttemptFinish(handle, ChannelAttemptResult{StatusCode: http.StatusOK})
+
+	now = now.Add(time.Second)
+	handle = RecordAttemptStart(ChannelAttemptMeta{ChannelID: 8814})
+	now = now.Add(300 * time.Millisecond)
+	RecordFirstResponse(handle)
+	RecordAttemptFinish(handle, ChannelAttemptResult{StatusCode: http.StatusOK})
+
+	report := GetChannelHealthReport(ChannelHealthEventFilter{})
+	require.Equal(t, 200.0, report.AverageFirstResponseMs)
+
+	snapshot, ok := GetChannelHealthSnapshot(8814)
+	require.True(t, ok)
+	require.Equal(t, 200.0, snapshot.AverageFirstResponseMs)
+}
+
+func TestChannelHealthEventsFilterByGroupAndState(t *testing.T) {
+	withChannelHealthTestSettings(t)
+	now := time.Unix(1_700_000_000, 0)
+	SetChannelHealthNowFuncForTest(func() time.Time { return now })
+
+	for i := 0; i < 5; i++ {
+		handle := RecordAttemptStart(ChannelAttemptMeta{
+			ChannelID: 8815,
+			ModelName: "gpt-filter",
+			Group:     "vip",
+		})
+		RecordAttemptFinish(handle, ChannelAttemptResult{Error: channelHealthTestUpstreamError()})
+	}
+
+	OpenChannelForModel(8816, "gpt-filter", "default isolate")
+
+	events := GetChannelHealthEvents(ChannelHealthEventFilter{
+		Group: "vip",
+		State: string(ChannelHealthStateOpen),
+	})
+	require.Len(t, events, 1)
+	require.Equal(t, 8815, events[0].ChannelID)
+	require.Equal(t, "vip", events[0].Group)
+	require.Equal(t, string(ChannelHealthStateOpen), events[0].State)
+}
+
 func TestClearChannelAffinityByChannelIDDeletesReverseIndexedKeys(t *testing.T) {
 	withChannelHealthTestSettings(t)
 
@@ -552,4 +680,28 @@ func withChannelHealthSelectionDB(t *testing.T) {
 		common.MemoryCacheEnabled = oldMemoryCacheEnabled
 		model.InitChannelCache()
 	})
+}
+
+func addChannelHealthSelectionModel(t *testing.T, modelName string) {
+	t.Helper()
+
+	pHigh := int64(10)
+	pLow := int64(1)
+	weight := uint(100)
+	for _, channelID := range []int{9101, 9102} {
+		priority := &pHigh
+		if channelID == 9102 {
+			priority = &pLow
+		}
+		require.NoError(t, model.DB.Create(&model.Ability{
+			Group:     "default",
+			Model:     modelName,
+			ChannelId: channelID,
+			Enabled:   true,
+			Priority:  priority,
+			Weight:    weight,
+		}).Error)
+	}
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id IN ?", []int{9101, 9102}).Update("models", "gpt-health-test,"+modelName).Error)
+	model.InitChannelCache()
 }

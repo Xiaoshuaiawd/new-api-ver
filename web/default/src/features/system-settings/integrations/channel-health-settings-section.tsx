@@ -16,7 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useRef } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  type ChangeEvent,
+  type FormEvent,
+} from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -32,6 +39,14 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import {
   SettingsForm,
@@ -44,8 +59,12 @@ import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 import { safeNumberFieldProps } from '../utils/numeric-field'
 import {
+  applyChannelHealthPreset,
+  CHANNEL_HEALTH_PRESETS,
   CHANNEL_HEALTH_SETTING_FIELDS,
   CHANNEL_HEALTH_SETTING_KEYS,
+  markChannelHealthPresetCustom,
+  type ChannelHealthPreset,
   type ChannelHealthFieldGroup,
   type ChannelHealthSettings,
 } from './channel-health-settings'
@@ -53,6 +72,10 @@ import {
 const channelHealthSchema = z.object({
   channel_health_setting: z.object({
     enabled: z.boolean(),
+    preset: z.enum(CHANNEL_HEALTH_PRESETS),
+    model_level_enabled: z.boolean(),
+    events_enabled: z.boolean(),
+    alert_min_interval_seconds: z.coerce.number().int().min(1),
     window_seconds: z.coerce.number().int().min(1),
     min_samples: z.coerce.number().int().min(1),
     min_failures: z.coerce.number().int().min(1),
@@ -95,6 +118,12 @@ function buildFormDefaults(
   return {
     channel_health_setting: {
       enabled: defaults['channel_health_setting.enabled'],
+      preset: defaults['channel_health_setting.preset'],
+      model_level_enabled:
+        defaults['channel_health_setting.model_level_enabled'],
+      events_enabled: defaults['channel_health_setting.events_enabled'],
+      alert_min_interval_seconds:
+        defaults['channel_health_setting.alert_min_interval_seconds'],
       window_seconds: defaults['channel_health_setting.window_seconds'],
       min_samples: defaults['channel_health_setting.min_samples'],
       min_failures: defaults['channel_health_setting.min_failures'],
@@ -132,6 +161,13 @@ function normalizeFormValues(
 ): ChannelHealthSettings {
   const flattened = {
     'channel_health_setting.enabled': values.channel_health_setting.enabled,
+    'channel_health_setting.preset': values.channel_health_setting.preset,
+    'channel_health_setting.model_level_enabled':
+      values.channel_health_setting.model_level_enabled,
+    'channel_health_setting.events_enabled':
+      values.channel_health_setting.events_enabled,
+    'channel_health_setting.alert_min_interval_seconds':
+      values.channel_health_setting.alert_min_interval_seconds,
     'channel_health_setting.warmup_enabled':
       values.channel_health_setting.warmup_enabled,
   } as Partial<ChannelHealthSettings>
@@ -141,6 +177,12 @@ function normalizeFormValues(
   }
 
   return flattened as ChannelHealthSettings
+}
+
+function formInputToSettings(
+  values: ChannelHealthFormInput
+): ChannelHealthSettings {
+  return normalizeFormValues(channelHealthSchema.parse(values))
 }
 
 export function ChannelHealthSettingsSection({
@@ -170,33 +212,64 @@ export function ChannelHealthSettingsSection({
     baselineRef.current = defaultValues
   }, [defaultValues])
 
-  const onSubmit = async (values: ChannelHealthFormValues) => {
-    const normalized = normalizeFormValues(values)
-    const updates = CHANNEL_HEALTH_SETTING_KEYS.filter(
-      (key) => normalized[key] !== baselineRef.current[key]
-    )
+  const applyPresetToForm = (preset: ChannelHealthPreset) => {
+    const current = formInputToSettings(form.getValues())
+    const next = applyChannelHealthPreset(current, preset)
+    form.reset(buildFormDefaults(next), { keepDirty: true })
+  }
 
-    if (updates.length === 0) {
-      toast.info(t('No changes to save'))
-      return
-    }
-
-    for (const key of updates) {
-      await updateOption.mutateAsync({
-        key,
-        value: normalized[key],
+  const markPresetCustom = () => {
+    const current = formInputToSettings(form.getValues())
+    const next = markChannelHealthPresetCustom(current)
+    if (next['channel_health_setting.preset'] !== current['channel_health_setting.preset']) {
+      form.setValue('channel_health_setting.preset', 'custom', {
+        shouldDirty: true,
+        shouldValidate: true,
       })
     }
-
-    baselineRef.current = normalized
   }
+
+  const onSubmit = useCallback(
+    async (values: ChannelHealthFormValues) => {
+      const normalized = normalizeFormValues(values)
+      const updates = CHANNEL_HEALTH_SETTING_KEYS.filter(
+        (key) => normalized[key] !== baselineRef.current[key]
+      )
+
+      if (updates.length === 0) {
+        toast.info(t('No changes to save'))
+        return
+      }
+
+      for (const key of updates) {
+        await updateOption.mutateAsync({
+          key,
+          value: normalized[key],
+        })
+      }
+
+      baselineRef.current = normalized
+    },
+    [t, updateOption]
+  )
+
+  const handleFormSubmit = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      void form.handleSubmit(onSubmit)(event)
+    },
+    [form, onSubmit]
+  )
+
+  const handleSave = useCallback(() => {
+    void form.handleSubmit(onSubmit)()
+  }, [form, onSubmit])
 
   return (
     <SettingsSection title={t('Channel Health Guard')}>
       <Form {...form}>
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
+        <SettingsForm onSubmit={handleFormSubmit}>
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
+            onSave={handleSave}
             isSaving={updateOption.isPending}
             saveLabel='Save channel health settings'
           />
@@ -211,6 +284,92 @@ export function ChannelHealthSettingsSection({
                   <FormDescription>
                     {t(
                       'Temporarily isolates unhealthy channels without changing manual channel status.'
+                    )}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+              </SettingsSwitchItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='channel_health_setting.preset'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t('Health threshold preset')}</FormLabel>
+                <Select
+                  value={field.value}
+                  onValueChange={(value) => {
+                    if (value) applyPresetToForm(value as ChannelHealthPreset)
+                  }}
+                >
+                  <FormControl>
+                    <SelectTrigger className='w-full'>
+                      <SelectValue />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent alignItemWithTrigger={false}>
+                    <SelectGroup>
+                      <SelectItem value='conservative'>
+                        {t('Conservative')}
+                      </SelectItem>
+                      <SelectItem value='balanced'>{t('Balanced')}</SelectItem>
+                      <SelectItem value='aggressive'>
+                        {t('Aggressive')}
+                      </SelectItem>
+                      <SelectItem value='custom'>{t('Custom')}</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <FormDescription>
+                  {t(
+                    'Presets fill all numeric thresholds. Editing any numeric value switches the preset to custom.'
+                  )}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='channel_health_setting.model_level_enabled'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>{t('Model-level isolation')}</FormLabel>
+                  <FormDescription>
+                    {t(
+                      'When enabled, health isolation applies to a channel and model pair instead of the whole channel.'
+                    )}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+              </SettingsSwitchItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='channel_health_setting.events_enabled'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>{t('Health events and alerts')}</FormLabel>
+                  <FormDescription>
+                    {t(
+                      'Record runtime isolation, recovery, and probe failure events for operators.'
                     )}
                   </FormDescription>
                 </SettingsSwitchContent>
@@ -248,6 +407,35 @@ export function ChannelHealthSettingsSection({
           />
 
           <div data-settings-form-span='full' className='space-y-7'>
+            <section className='space-y-4'>
+              <h3 className='text-sm font-medium'>{t('Health alerts')}</h3>
+              <div className='grid gap-6 md:grid-cols-2'>
+                <FormField
+                  control={form.control}
+                  name='channel_health_setting.alert_min_interval_seconds'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Alert minimum interval (seconds)')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={1}
+                          step={1}
+                          {...safeNumberFieldProps(field)}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Minimum time between repeated alerts for the same channel health event.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            </section>
+
             {FIELD_GROUPS.map((group) => {
               const fields = CHANNEL_HEALTH_SETTING_FIELDS.filter(
                 (field) => field.group === group.id
@@ -275,7 +463,18 @@ export function ChannelHealthSettingsSection({
                                     : undefined
                                 }
                                 step={fieldConfig.step}
-                                {...safeNumberFieldProps(field)}
+                                {...(() => {
+                                  const props = safeNumberFieldProps(field)
+                                  return {
+                                    ...props,
+                                    onChange: (
+                                      event: ChangeEvent<HTMLInputElement>
+                                    ) => {
+                                      props.onChange(event)
+                                      markPresetCustom()
+                                    },
+                                  }
+                                })()}
                               />
                             </FormControl>
                             <FormDescription>

@@ -116,13 +116,13 @@ func GetChannel(group string, model string, retry int) (*Channel, error) {
 		// Randomly choose one
 		weightSum := uint(0)
 		for _, ability_ := range abilities {
-			_, inflight := getChannelRuntimeState(ability_.ChannelId)
+			_, inflight := getChannelRuntimeState(ability_.ChannelId, model)
 			weightSum += uint(adjustedChannelWeight(int(ability_.Weight), inflight)) + 10
 		}
 		// Randomly choose one
 		weight := common.GetRandomInt(int(weightSum))
 		for _, ability_ := range abilities {
-			_, inflight := getChannelRuntimeState(ability_.ChannelId)
+			_, inflight := getChannelRuntimeState(ability_.ChannelId, model)
 			weight -= adjustedChannelWeight(int(ability_.Weight), inflight) + 10
 			//log.Printf("weight: %d, ability weight: %d", weight, *ability_.Weight)
 			if weight <= 0 {
@@ -164,7 +164,7 @@ func getHealthyAbilities(group string, modelName string, retry int) ([]Ability, 
 		}
 		filtered := abilities[:0]
 		for _, ability := range abilities {
-			available, _ := getChannelRuntimeState(ability.ChannelId)
+			available, _ := getChannelRuntimeState(ability.ChannelId, modelName)
 			if available {
 				filtered = append(filtered, ability)
 			}
@@ -184,7 +184,7 @@ func getHealthyAbilities(group string, modelName string, retry int) ([]Ability, 
 		}
 		filtered := abilities[:0]
 		for _, ability := range abilities {
-			available, _ := getChannelProbeRuntimeState(ability.ChannelId)
+			available, _ := getChannelProbeRuntimeState(ability.ChannelId, modelName)
 			if available {
 				filtered = append(filtered, ability)
 			}
@@ -194,7 +194,7 @@ func getHealthyAbilities(group string, modelName string, retry int) ([]Ability, 
 			if idx < 0 {
 				break
 			}
-			if claimChannelProbeRuntimeState(filtered[idx].ChannelId) {
+			if claimChannelProbeRuntimeState(filtered[idx].ChannelId, modelName) {
 				return []Ability{filtered[idx]}, nil
 			}
 			filtered = append(filtered[:idx], filtered[idx+1:]...)
@@ -211,9 +211,9 @@ func weightedAbilityIndex(abilities []Ability, probe bool) int {
 	for _, ability := range abilities {
 		var inflight int
 		if probe {
-			_, inflight = getChannelProbeRuntimeState(ability.ChannelId)
+			_, inflight = getChannelProbeRuntimeState(ability.ChannelId, ability.Model)
 		} else {
-			_, inflight = getChannelRuntimeState(ability.ChannelId)
+			_, inflight = getChannelRuntimeState(ability.ChannelId, ability.Model)
 		}
 		weightSum += uint(adjustedChannelWeight(int(ability.Weight), inflight)) + 10
 	}
@@ -221,9 +221,9 @@ func weightedAbilityIndex(abilities []Ability, probe bool) int {
 	for i, ability := range abilities {
 		var inflight int
 		if probe {
-			_, inflight = getChannelProbeRuntimeState(ability.ChannelId)
+			_, inflight = getChannelProbeRuntimeState(ability.ChannelId, ability.Model)
 		} else {
-			_, inflight = getChannelRuntimeState(ability.ChannelId)
+			_, inflight = getChannelRuntimeState(ability.ChannelId, ability.Model)
 		}
 		weight -= adjustedChannelWeight(int(ability.Weight), inflight) + 10
 		if weight <= 0 {

@@ -95,6 +95,10 @@ func SyncChannelCache(frequency int) {
 }
 
 func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel, error) {
+	return GetRandomSatisfiedChannelWithTrace(group, model, retry, nil)
+}
+
+func GetRandomSatisfiedChannelWithTrace(group string, model string, retry int, traceFn ChannelSelectionTraceFunc) (*Channel, error) {
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
 		return GetChannel(group, model, retry)
@@ -139,24 +143,43 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	var targetInflight []int
 	var err error
 	for priorityIndex := retry; priorityIndex < len(sortedUniquePriorities); priorityIndex++ {
-		sumWeight, targetChannels, targetInflight, err = collectRuntimeChannels(channels, int64(sortedUniquePriorities[priorityIndex]), false, targetChannels, targetInflight)
+		sumWeight, targetChannels, targetInflight, err = collectRuntimeChannels(group, model, channels, int64(sortedUniquePriorities[priorityIndex]), false, traceFn, targetChannels, targetInflight)
 		if err != nil {
 			return nil, err
 		}
 		if len(targetChannels) > 0 {
 			break
 		}
+		if priorityIndex+1 < len(sortedUniquePriorities) {
+			recordChannelSelectionTrace(traceFn, ChannelSelectionTraceEvent{
+				Stage:    "priority",
+				Action:   "fallback",
+				Group:    group,
+				Model:    model,
+				Priority: int64(sortedUniquePriorities[priorityIndex]),
+				Reason:   "priority has no runtime available channels",
+			})
+		}
 	}
 
 	useProbeCandidate := false
 	if len(targetChannels) == 0 {
 		for priorityIndex := retry; priorityIndex < len(sortedUniquePriorities); priorityIndex++ {
-			sumWeight, targetChannels, targetInflight, err = collectRuntimeChannels(channels, int64(sortedUniquePriorities[priorityIndex]), true, targetChannels, targetInflight)
+			sumWeight, targetChannels, targetInflight, err = collectRuntimeChannels(group, model, channels, int64(sortedUniquePriorities[priorityIndex]), true, traceFn, targetChannels, targetInflight)
 			if err != nil {
 				return nil, err
 			}
 			if len(targetChannels) > 0 {
 				useProbeCandidate = true
+				recordChannelSelectionTrace(traceFn, ChannelSelectionTraceEvent{
+					Stage:    "probe",
+					Action:   "fallback",
+					Group:    group,
+					Model:    model,
+					Priority: int64(sortedUniquePriorities[priorityIndex]),
+					Reason:   "using due probe candidate",
+					Probe:    true,
+				})
 				break
 			}
 		}
@@ -166,10 +189,10 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 		return nil, errors.New(fmt.Sprintf("no available healthy channel found, group: %s, model: %s", group, model))
 	}
 
-	return selectWeightedRuntimeChannel(targetChannels, targetInflight, sumWeight, useProbeCandidate)
+	return selectWeightedRuntimeChannel(model, targetChannels, targetInflight, sumWeight, useProbeCandidate)
 }
 
-func collectRuntimeChannels(channels []int, targetPriority int64, probe bool, targetChannels []*Channel, targetInflight []int) (int, []*Channel, []int, error) {
+func collectRuntimeChannels(group string, modelName string, channels []int, targetPriority int64, probe bool, traceFn ChannelSelectionTraceFunc, targetChannels []*Channel, targetInflight []int) (int, []*Channel, []int, error) {
 	sumWeight := 0
 	targetChannels = targetChannels[:0]
 	targetInflight = targetInflight[:0]
@@ -184,11 +207,22 @@ func collectRuntimeChannels(channels []int, targetPriority int64, probe bool, ta
 		var available bool
 		var inflight int
 		if probe {
-			available, inflight = getChannelProbeRuntimeState(channel.Id)
+			available, inflight = getChannelProbeRuntimeState(channel.Id, modelName)
 		} else {
-			available, inflight = getChannelRuntimeState(channel.Id)
+			available, inflight = getChannelRuntimeState(channel.Id, modelName)
 		}
 		if !available {
+			recordChannelSelectionTrace(traceFn, ChannelSelectionTraceEvent{
+				Stage:       "runtime",
+				Action:      "skip",
+				Group:       group,
+				Model:       modelName,
+				ChannelID:   channel.Id,
+				Priority:    channel.GetPriority(),
+				HealthState: runtimeTraceHealthState(channel.Id),
+				Reason:      "runtime unavailable",
+				Probe:       probe,
+			})
 			continue
 		}
 		adjustedWeight := adjustedChannelWeight(channel.GetWeight(), inflight)
@@ -199,14 +233,14 @@ func collectRuntimeChannels(channels []int, targetPriority int64, probe bool, ta
 	return sumWeight, targetChannels, targetInflight, nil
 }
 
-func selectWeightedRuntimeChannel(targetChannels []*Channel, targetInflight []int, sumWeight int, claimProbe bool) (*Channel, error) {
+func selectWeightedRuntimeChannel(modelName string, targetChannels []*Channel, targetInflight []int, sumWeight int, claimProbe bool) (*Channel, error) {
 	for len(targetChannels) > 0 {
 		selectedIndex, err := weightedRuntimeChannelIndex(targetChannels, targetInflight, sumWeight)
 		if err != nil {
 			return nil, err
 		}
 		selected := targetChannels[selectedIndex]
-		if !claimProbe || claimChannelProbeRuntimeState(selected.Id) {
+		if !claimProbe || claimChannelProbeRuntimeState(selected.Id, modelName) {
 			return selected, nil
 		}
 		sumWeight -= adjustedChannelWeight(selected.GetWeight(), targetInflight[selectedIndex])

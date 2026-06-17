@@ -32,9 +32,17 @@ func TestChannelHealthSettingExportsAndLoadsRuntimeOptions(t *testing.T) {
 	require.Equal(t, "60", exported["channel_health_setting.warmup_duration_seconds"])
 	require.Equal(t, "10", exported["channel_health_setting.warmup_start_percent"])
 	require.Equal(t, "30", exported["channel_health_setting.warmup_step_percent"])
+	require.Equal(t, "balanced", exported["channel_health_setting.preset"])
+	require.Equal(t, "false", exported["channel_health_setting.model_level_enabled"])
+	require.Equal(t, "true", exported["channel_health_setting.events_enabled"])
+	require.Equal(t, "60", exported["channel_health_setting.alert_min_interval_seconds"])
 
 	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
 		"channel_health_setting.enabled":                        "false",
+		"channel_health_setting.preset":                         "aggressive",
+		"channel_health_setting.model_level_enabled":            "true",
+		"channel_health_setting.events_enabled":                 "false",
+		"channel_health_setting.alert_min_interval_seconds":     "120",
 		"channel_health_setting.window_seconds":                 "240",
 		"channel_health_setting.min_samples":                    "12",
 		"channel_health_setting.min_failures":                   "6",
@@ -54,6 +62,10 @@ func TestChannelHealthSettingExportsAndLoadsRuntimeOptions(t *testing.T) {
 	}))
 
 	require.False(t, setting.Enabled)
+	require.Equal(t, "aggressive", setting.Preset)
+	require.True(t, setting.ModelLevelEnabled)
+	require.False(t, setting.EventsEnabled)
+	require.Equal(t, 120, setting.AlertMinIntervalSeconds)
 	require.Equal(t, 240, setting.WindowSeconds)
 	require.Equal(t, 12, setting.MinSamples)
 	require.Equal(t, 6, setting.MinFailures)

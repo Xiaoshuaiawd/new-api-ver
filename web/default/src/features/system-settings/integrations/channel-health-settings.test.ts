@@ -19,9 +19,12 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import {
+  applyChannelHealthPreset,
   CHANNEL_HEALTH_DEFAULT_VALUES,
+  CHANNEL_HEALTH_PRESET_VALUES,
   CHANNEL_HEALTH_SETTING_FIELDS,
   CHANNEL_HEALTH_SETTING_KEYS,
+  markChannelHealthPresetCustom,
 } from './channel-health-settings.ts'
 
 describe('channel health setting metadata', () => {
@@ -29,6 +32,10 @@ describe('channel health setting metadata', () => {
     assert.deepEqual(CHANNEL_HEALTH_SETTING_KEYS, [
       'channel_health_setting.enabled',
       'channel_health_setting.warmup_enabled',
+      'channel_health_setting.preset',
+      'channel_health_setting.model_level_enabled',
+      'channel_health_setting.events_enabled',
+      'channel_health_setting.alert_min_interval_seconds',
       'channel_health_setting.window_seconds',
       'channel_health_setting.min_samples',
       'channel_health_setting.min_failures',
@@ -50,6 +57,10 @@ describe('channel health setting metadata', () => {
     assert.deepEqual(CHANNEL_HEALTH_DEFAULT_VALUES, {
       'channel_health_setting.enabled': true,
       'channel_health_setting.warmup_enabled': true,
+      'channel_health_setting.preset': 'balanced',
+      'channel_health_setting.model_level_enabled': false,
+      'channel_health_setting.events_enabled': true,
+      'channel_health_setting.alert_min_interval_seconds': 60,
       'channel_health_setting.window_seconds': 180,
       'channel_health_setting.min_samples': 10,
       'channel_health_setting.min_failures': 5,
@@ -66,5 +77,29 @@ describe('channel health setting metadata', () => {
       'channel_health_setting.warmup_start_percent': 10,
       'channel_health_setting.warmup_step_percent': 30,
     })
+  })
+
+  test('preset selection fills numeric values and manual edit marks custom', () => {
+    const aggressive = applyChannelHealthPreset(
+      CHANNEL_HEALTH_DEFAULT_VALUES,
+      'aggressive'
+    )
+
+    assert.equal(aggressive['channel_health_setting.preset'], 'aggressive')
+    assert.deepEqual(
+      Object.fromEntries(
+        Object.entries(aggressive).filter(([key]) =>
+          key in CHANNEL_HEALTH_PRESET_VALUES.aggressive
+        )
+      ),
+      CHANNEL_HEALTH_PRESET_VALUES.aggressive
+    )
+
+    const custom = markChannelHealthPresetCustom({
+      ...aggressive,
+      'channel_health_setting.window_seconds': 121,
+    })
+    assert.equal(custom['channel_health_setting.preset'], 'custom')
+    assert.equal(custom['channel_health_setting.window_seconds'], 121)
   })
 })

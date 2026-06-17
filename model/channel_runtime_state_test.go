@@ -32,7 +32,7 @@ func TestGetChannelSkipsRuntimeUnavailableChannel(t *testing.T) {
 
 	insertRuntimeStateCandidate(t, 9301, "gpt-runtime-state", 10)
 	insertRuntimeStateCandidate(t, 9302, "gpt-runtime-state", 1)
-	SetChannelRuntimeStateFunc(func(channelID int, mode ChannelRuntimeStateMode) (bool, int) {
+	SetChannelRuntimeStateFunc(func(channelID int, modelName string, mode ChannelRuntimeStateMode) (bool, int) {
 		return channelID != 9301, 0
 	})
 
@@ -65,7 +65,7 @@ func TestGetChannelUsesDueProbeChannelWhenAllNormalUnavailable(t *testing.T) {
 	insertRuntimeStateCandidate(t, 9401, "gpt-runtime-probe", 10)
 	insertRuntimeStateCandidate(t, 9402, "gpt-runtime-probe", 1)
 	claimed := false
-	SetChannelRuntimeStateFunc(func(channelID int, mode ChannelRuntimeStateMode) (bool, int) {
+	SetChannelRuntimeStateFunc(func(channelID int, modelName string, mode ChannelRuntimeStateMode) (bool, int) {
 		switch mode {
 		case ChannelRuntimeStateNormal:
 			return false, 0
@@ -90,6 +90,48 @@ func TestGetChannelUsesDueProbeChannelWhenAllNormalUnavailable(t *testing.T) {
 	require.True(t, claimed)
 }
 
+func TestGetChannelPassesModelNameToRuntimeState(t *testing.T) {
+	oldDB := DB
+	oldMemoryCacheEnabled := common.MemoryCacheEnabled
+	oldSQLite := common.UsingSQLite
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	DB = db
+	common.MemoryCacheEnabled = false
+	common.UsingSQLite = true
+	initCol()
+	t.Cleanup(func() {
+		DB = oldDB
+		common.MemoryCacheEnabled = oldMemoryCacheEnabled
+		common.UsingSQLite = oldSQLite
+		SetChannelRuntimeStateFunc(nil)
+		initCol()
+	})
+	require.NoError(t, db.AutoMigrate(&Channel{}, &Ability{}))
+
+	insertRuntimeStateCandidate(t, 9501, "gpt-runtime-model-a", 10)
+	insertRuntimeStateCandidate(t, 9502, "gpt-runtime-model-a", 1)
+	insertRuntimeStateAbility(t, 9501, "gpt-runtime-model-b", 10)
+	insertRuntimeStateAbility(t, 9502, "gpt-runtime-model-b", 1)
+	seenModels := make(map[string]bool)
+	SetChannelRuntimeStateFunc(func(channelID int, modelName string, mode ChannelRuntimeStateMode) (bool, int) {
+		seenModels[modelName] = true
+		return !(channelID == 9501 && modelName == "gpt-runtime-model-a"), 0
+	})
+
+	channelA, err := GetChannel("default", "gpt-runtime-model-a", 0)
+	require.NoError(t, err)
+	require.NotNil(t, channelA)
+	require.Equal(t, 9502, channelA.Id)
+
+	channelB, err := GetChannel("default", "gpt-runtime-model-b", 0)
+	require.NoError(t, err)
+	require.NotNil(t, channelB)
+	require.Equal(t, 9501, channelB.Id)
+	require.True(t, seenModels["gpt-runtime-model-a"])
+	require.True(t, seenModels["gpt-runtime-model-b"])
+}
+
 func insertRuntimeStateCandidate(t *testing.T, channelID int, modelName string, priorityValue int64) {
 	t.Helper()
 	weight := uint(100)
@@ -104,6 +146,19 @@ func insertRuntimeStateCandidate(t *testing.T, channelID int, modelName string, 
 		Models:   modelName,
 		Group:    "default",
 	}).Error)
+	require.NoError(t, DB.Create(&Ability{
+		Group:     "default",
+		Model:     modelName,
+		ChannelId: channelID,
+		Enabled:   true,
+		Priority:  &priorityValue,
+		Weight:    weight,
+	}).Error)
+}
+
+func insertRuntimeStateAbility(t *testing.T, channelID int, modelName string, priorityValue int64) {
+	t.Helper()
+	weight := uint(100)
 	require.NoError(t, DB.Create(&Ability{
 		Group:     "default",
 		Model:     modelName,

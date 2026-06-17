@@ -34,8 +34,13 @@ import {
   Trash2,
   RefreshCw,
   Loader2,
+  ShieldAlert,
+  Stethoscope,
+  RotateCcw,
+  Link2Off,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -43,6 +48,9 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
@@ -51,6 +59,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { runChannelRuntimeAction } from '../api'
 import { MODEL_FETCHABLE_TYPES } from '../constants'
 import {
   channelsQueryKeys,
@@ -74,8 +83,15 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const { setOpen, setCurrentRow, upstream } = useChannels()
   const queryClient = useQueryClient()
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [runtimeConfirm, setRuntimeConfirm] = useState<null | {
+    action: 'isolate' | 'clear_isolation' | 'clear_affinity'
+    title: string
+    desc: string
+    destructive?: boolean
+  }>(null)
   const [isTesting, setIsTesting] = useState(false)
   const [isTogglingStatus, setIsTogglingStatus] = useState(false)
+  const [isRuntimeActionRunning, setIsRuntimeActionRunning] = useState(false)
 
   const isEnabled = isChannelEnabled(channel)
   const isMultiKey = isMultiKeyChannel(channel)
@@ -136,6 +152,34 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
       await handleToggleChannelStatus(channel.id, channel.status, queryClient)
     } finally {
       setIsTogglingStatus(false)
+    }
+  }
+
+  const runRuntimeAction = async (
+    action: 'isolate' | 'probe_now' | 'clear_isolation' | 'clear_affinity'
+  ) => {
+    setIsRuntimeActionRunning(true)
+    try {
+      const res = await runChannelRuntimeAction(channel.id, {
+        action,
+        reason:
+          action === 'isolate'
+            ? 'operator forced runtime isolation'
+            : undefined,
+        duration_seconds: action === 'isolate' ? 300 : undefined,
+      })
+      if (!res.success) {
+        throw new Error(res.message || t('Runtime action failed'))
+      }
+      toast.success(t('Runtime action completed'))
+      queryClient.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : t('Runtime action failed')
+      )
+    } finally {
+      setIsRuntimeActionRunning(false)
+      setRuntimeConfirm(null)
     }
   }
 
@@ -296,6 +340,76 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
 
           <DropdownMenuSeparator />
 
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger disabled={isRuntimeActionRunning}>
+              {t('Runtime Controls')}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className='w-52'>
+              <DropdownMenuItem
+                onSelect={(e) => {
+                  e.preventDefault()
+                  setRuntimeConfirm({
+                    action: 'isolate',
+                    title: t('Force runtime isolate'),
+                    desc: t(
+                      'Temporarily isolate this channel at runtime for 5 minutes without changing its database status.'
+                    ),
+                    destructive: true,
+                  })
+                }}
+                className='text-destructive focus:text-destructive'
+              >
+                {t('Force runtime isolate')}
+                <DropdownMenuShortcut>
+                  <ShieldAlert size={16} />
+                </DropdownMenuShortcut>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => runRuntimeAction('probe_now')}>
+                {t('Probe now')}
+                <DropdownMenuShortcut>
+                  <Stethoscope size={16} />
+                </DropdownMenuShortcut>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={(e) => {
+                  e.preventDefault()
+                  setRuntimeConfirm({
+                    action: 'clear_isolation',
+                    title: t('Clear runtime isolation'),
+                    desc: t(
+                      'Clear runtime isolation only if this channel is still enabled in database status.'
+                    ),
+                  })
+                }}
+              >
+                {t('Clear runtime isolation')}
+                <DropdownMenuShortcut>
+                  <RotateCcw size={16} />
+                </DropdownMenuShortcut>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={(e) => {
+                  e.preventDefault()
+                  setRuntimeConfirm({
+                    action: 'clear_affinity',
+                    title: t('Clear channel affinity'),
+                    desc: t(
+                      'Delete all affinity entries that currently point to this channel.'
+                    ),
+                    destructive: true,
+                  })
+                }}
+              >
+                {t('Clear channel affinity')}
+                <DropdownMenuShortcut>
+                  <Link2Off size={16} />
+                </DropdownMenuShortcut>
+              </DropdownMenuItem>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+
+          <DropdownMenuSeparator />
+
           {/* Delete */}
           <DropdownMenuItem
             onSelect={(e) => {
@@ -322,6 +436,18 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         handleConfirm={() => {
           handleDeleteChannel(channel.id, queryClient)
           setDeleteConfirmOpen(false)
+        }}
+      />
+      <ConfirmDialog
+        open={runtimeConfirm !== null}
+        onOpenChange={(open) => {
+          if (!open) setRuntimeConfirm(null)
+        }}
+        title={runtimeConfirm?.title || ''}
+        desc={runtimeConfirm?.desc || ''}
+        destructive={runtimeConfirm?.destructive}
+        handleConfirm={() => {
+          if (runtimeConfirm) runRuntimeAction(runtimeConfirm.action)
         }}
       />
     </div>

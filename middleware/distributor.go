@@ -102,10 +102,28 @@ func Distribute() func(c *gin.Context) {
 				}
 
 				if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
+					service.RecordChannelSelectionTrace(c, service.ChannelSelectionTraceEvent{
+						Stage:     service.ChannelSelectionTraceStageAffinity,
+						Action:    service.ChannelSelectionTraceActionHit,
+						Group:     usingGroup,
+						Model:     modelRequest.Model,
+						ChannelID: preferredChannelID,
+						Reason:    "affinity cache hit",
+					})
 					affinityUsable := false
 					preferred, err := model.CacheGetChannel(preferredChannelID)
 					if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled {
 						if !service.IsChannelAvailable(preferred.Id) {
+							service.RecordChannelSelectionTrace(c, service.ChannelSelectionTraceEvent{
+								Stage:       service.ChannelSelectionTraceStageAffinity,
+								Action:      service.ChannelSelectionTraceActionClear,
+								Group:       usingGroup,
+								Model:       modelRequest.Model,
+								ChannelID:   preferred.Id,
+								Priority:    preferred.GetPriority(),
+								HealthState: string(service.GetChannelHealthSnapshotForDisplay(preferred.Id).State),
+								Reason:      "affinity channel runtime unavailable",
+							})
 							service.ClearCurrentChannelAffinityCache(c)
 						} else {
 							if usingGroup == "auto" {
@@ -114,6 +132,15 @@ func Distribute() func(c *gin.Context) {
 								for _, g := range autoGroups {
 									if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
 										if service.IsChannelAffinityPriorityStale(g, modelRequest.Model, preferred.Id) {
+											service.RecordChannelSelectionTrace(c, service.ChannelSelectionTraceEvent{
+												Stage:     service.ChannelSelectionTraceStageAffinity,
+												Action:    service.ChannelSelectionTraceActionClear,
+												Group:     g,
+												Model:     modelRequest.Model,
+												ChannelID: preferred.Id,
+												Priority:  preferred.GetPriority(),
+												Reason:    "higher priority channel recovered",
+											})
 											service.ClearCurrentChannelAffinityCache(c)
 											break
 										}
@@ -122,17 +149,44 @@ func Distribute() func(c *gin.Context) {
 										channel = preferred
 										affinityUsable = true
 										service.MarkChannelAffinityUsed(c, g, preferred.Id)
+										service.RecordChannelSelectionTrace(c, service.ChannelSelectionTraceEvent{
+											Stage:     service.ChannelSelectionTraceStageFinal,
+											Action:    service.ChannelSelectionTraceActionSelect,
+											Group:     g,
+											Model:     modelRequest.Model,
+											ChannelID: preferred.Id,
+											Priority:  preferred.GetPriority(),
+											Reason:    "selected by affinity",
+										})
 										break
 									}
 								}
 							} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {
 								if service.IsChannelAffinityPriorityStale(usingGroup, modelRequest.Model, preferred.Id) {
+									service.RecordChannelSelectionTrace(c, service.ChannelSelectionTraceEvent{
+										Stage:     service.ChannelSelectionTraceStageAffinity,
+										Action:    service.ChannelSelectionTraceActionClear,
+										Group:     usingGroup,
+										Model:     modelRequest.Model,
+										ChannelID: preferred.Id,
+										Priority:  preferred.GetPriority(),
+										Reason:    "higher priority channel recovered",
+									})
 									service.ClearCurrentChannelAffinityCache(c)
 								} else {
 									channel = preferred
 									selectGroup = usingGroup
 									affinityUsable = true
 									service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
+									service.RecordChannelSelectionTrace(c, service.ChannelSelectionTraceEvent{
+										Stage:     service.ChannelSelectionTraceStageFinal,
+										Action:    service.ChannelSelectionTraceActionSelect,
+										Group:     usingGroup,
+										Model:     modelRequest.Model,
+										ChannelID: preferred.Id,
+										Priority:  preferred.GetPriority(),
+										Reason:    "selected by affinity",
+									})
 								}
 							}
 						}
@@ -140,6 +194,14 @@ func Distribute() func(c *gin.Context) {
 					if !affinityUsable && !service.ShouldKeepChannelAffinityOnChannelDisabled() {
 						service.ClearCurrentChannelAffinityCache(c)
 					}
+				} else {
+					service.RecordChannelSelectionTrace(c, service.ChannelSelectionTraceEvent{
+						Stage:  service.ChannelSelectionTraceStageAffinity,
+						Action: service.ChannelSelectionTraceActionMiss,
+						Group:  usingGroup,
+						Model:  modelRequest.Model,
+						Reason: "affinity miss",
+					})
 				}
 
 				if channel == nil {
@@ -167,6 +229,15 @@ func Distribute() func(c *gin.Context) {
 						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 						return
 					}
+					service.RecordChannelSelectionTrace(c, service.ChannelSelectionTraceEvent{
+						Stage:     service.ChannelSelectionTraceStageFinal,
+						Action:    service.ChannelSelectionTraceActionSelect,
+						Group:     selectGroup,
+						Model:     modelRequest.Model,
+						ChannelID: channel.Id,
+						Priority:  channel.GetPriority(),
+						Reason:    "selected by priority and weight",
+					})
 				}
 			}
 		}

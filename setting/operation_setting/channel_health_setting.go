@@ -2,8 +2,19 @@ package operation_setting
 
 import "github.com/QuantumNous/new-api/setting/config"
 
+const (
+	ChannelHealthPresetConservative = "conservative"
+	ChannelHealthPresetBalanced     = "balanced"
+	ChannelHealthPresetAggressive   = "aggressive"
+	ChannelHealthPresetCustom       = "custom"
+)
+
 type ChannelHealthSetting struct {
 	Enabled                     bool    `json:"enabled"`
+	Preset                      string  `json:"preset"`
+	ModelLevelEnabled           bool    `json:"model_level_enabled"`
+	EventsEnabled               bool    `json:"events_enabled"`
+	AlertMinIntervalSeconds     int     `json:"alert_min_interval_seconds"`
 	WindowSeconds               int     `json:"window_seconds"`
 	MinSamples                  int     `json:"min_samples"`
 	MinFailures                 int     `json:"min_failures"`
@@ -24,6 +35,10 @@ type ChannelHealthSetting struct {
 
 var channelHealthSetting = ChannelHealthSetting{
 	Enabled:                     true,
+	Preset:                      ChannelHealthPresetBalanced,
+	ModelLevelEnabled:           false,
+	EventsEnabled:               true,
+	AlertMinIntervalSeconds:     60,
 	WindowSeconds:               180,
 	MinSamples:                  10,
 	MinFailures:                 5,

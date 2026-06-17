@@ -784,8 +784,19 @@ func IsChannelAffinityPriorityStale(group string, modelName string, channelID in
 	if channelID <= 0 {
 		return false
 	}
+	setting := operation_setting.GetChannelAffinitySetting()
+	strategy := operation_setting.ChannelAffinityRecoveryStrategyPriorityFirst
+	if setting != nil && strings.TrimSpace(setting.RecoveryStrategy) != "" {
+		strategy = strings.TrimSpace(setting.RecoveryStrategy)
+	}
 	preferred, err := model.CacheGetChannel(channelID)
 	if err != nil || preferred == nil {
+		return false
+	}
+	if strategy == operation_setting.ChannelAffinityRecoveryStrategyStableAffinity {
+		return false
+	}
+	if strategy == operation_setting.ChannelAffinityRecoveryStrategyStrictAffinity && IsChannelAvailable(channelID) {
 		return false
 	}
 	preferredPriority := preferred.GetPriority()

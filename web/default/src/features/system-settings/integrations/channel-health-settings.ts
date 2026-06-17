@@ -40,12 +40,29 @@ export type ChannelHealthNumberFieldKey =
 export type ChannelHealthSettingKey =
   | 'channel_health_setting.enabled'
   | 'channel_health_setting.warmup_enabled'
+  | 'channel_health_setting.preset'
+  | 'channel_health_setting.model_level_enabled'
+  | 'channel_health_setting.events_enabled'
   | `channel_health_setting.${ChannelHealthNumberFieldKey}`
+  | 'channel_health_setting.alert_min_interval_seconds'
 
 export type ChannelHealthSettings = {
   'channel_health_setting.enabled': boolean
   'channel_health_setting.warmup_enabled': boolean
+  'channel_health_setting.preset': ChannelHealthPreset
+  'channel_health_setting.model_level_enabled': boolean
+  'channel_health_setting.events_enabled': boolean
+  'channel_health_setting.alert_min_interval_seconds': number
 } & Record<`channel_health_setting.${ChannelHealthNumberFieldKey}`, number>
+
+export const CHANNEL_HEALTH_PRESETS = [
+  'conservative',
+  'balanced',
+  'aggressive',
+  'custom',
+] as const
+
+export type ChannelHealthPreset = (typeof CHANNEL_HEALTH_PRESETS)[number]
 
 export type ChannelHealthFieldGroup = 'errors' | 'stuck' | 'probe' | 'warmup'
 
@@ -207,6 +224,10 @@ export const CHANNEL_HEALTH_SETTING_FIELDS = [
 export const CHANNEL_HEALTH_SETTING_KEYS = [
   'channel_health_setting.enabled',
   'channel_health_setting.warmup_enabled',
+  'channel_health_setting.preset',
+  'channel_health_setting.model_level_enabled',
+  'channel_health_setting.events_enabled',
+  'channel_health_setting.alert_min_interval_seconds',
   'channel_health_setting.window_seconds',
   'channel_health_setting.min_samples',
   'channel_health_setting.min_failures',
@@ -227,6 +248,10 @@ export const CHANNEL_HEALTH_SETTING_KEYS = [
 export const CHANNEL_HEALTH_DEFAULT_VALUES = {
   'channel_health_setting.enabled': true,
   'channel_health_setting.warmup_enabled': true,
+  'channel_health_setting.preset': 'balanced',
+  'channel_health_setting.model_level_enabled': false,
+  'channel_health_setting.events_enabled': true,
+  'channel_health_setting.alert_min_interval_seconds': 60,
   'channel_health_setting.window_seconds': 180,
   'channel_health_setting.min_samples': 10,
   'channel_health_setting.min_failures': 5,
@@ -244,14 +269,92 @@ export const CHANNEL_HEALTH_DEFAULT_VALUES = {
   'channel_health_setting.warmup_step_percent': 30,
 } as const satisfies ChannelHealthSettings
 
+export const CHANNEL_HEALTH_PRESET_VALUES = {
+  conservative: {
+    'channel_health_setting.window_seconds': 300,
+    'channel_health_setting.min_samples': 20,
+    'channel_health_setting.min_failures': 8,
+    'channel_health_setting.error_rate_threshold': 0.6,
+    'channel_health_setting.consecutive_failure_threshold': 8,
+    'channel_health_setting.first_response_timeout_seconds': 60,
+    'channel_health_setting.stuck_inflight_threshold': 5,
+    'channel_health_setting.single_stuck_timeout_seconds': 120,
+    'channel_health_setting.probe_interval_seconds': 60,
+    'channel_health_setting.probe_timeout_seconds': 30,
+    'channel_health_setting.probe_successes_to_recover': 3,
+    'channel_health_setting.probe_backoff_max_seconds': 300,
+    'channel_health_setting.warmup_duration_seconds': 120,
+    'channel_health_setting.warmup_start_percent': 10,
+    'channel_health_setting.warmup_step_percent': 20,
+  },
+  balanced: {
+    'channel_health_setting.window_seconds': 180,
+    'channel_health_setting.min_samples': 10,
+    'channel_health_setting.min_failures': 5,
+    'channel_health_setting.error_rate_threshold': 0.4,
+    'channel_health_setting.consecutive_failure_threshold': 5,
+    'channel_health_setting.first_response_timeout_seconds': 45,
+    'channel_health_setting.stuck_inflight_threshold': 3,
+    'channel_health_setting.single_stuck_timeout_seconds': 75,
+    'channel_health_setting.probe_interval_seconds': 30,
+    'channel_health_setting.probe_timeout_seconds': 30,
+    'channel_health_setting.probe_successes_to_recover': 2,
+    'channel_health_setting.probe_backoff_max_seconds': 300,
+    'channel_health_setting.warmup_duration_seconds': 60,
+    'channel_health_setting.warmup_start_percent': 10,
+    'channel_health_setting.warmup_step_percent': 30,
+  },
+  aggressive: {
+    'channel_health_setting.window_seconds': 120,
+    'channel_health_setting.min_samples': 6,
+    'channel_health_setting.min_failures': 3,
+    'channel_health_setting.error_rate_threshold': 0.3,
+    'channel_health_setting.consecutive_failure_threshold': 3,
+    'channel_health_setting.first_response_timeout_seconds': 30,
+    'channel_health_setting.stuck_inflight_threshold': 2,
+    'channel_health_setting.single_stuck_timeout_seconds': 60,
+    'channel_health_setting.probe_interval_seconds': 20,
+    'channel_health_setting.probe_timeout_seconds': 20,
+    'channel_health_setting.probe_successes_to_recover': 2,
+    'channel_health_setting.probe_backoff_max_seconds': 180,
+    'channel_health_setting.warmup_duration_seconds': 45,
+    'channel_health_setting.warmup_start_percent': 15,
+    'channel_health_setting.warmup_step_percent': 35,
+  },
+} as const satisfies Record<
+  Exclude<ChannelHealthPreset, 'custom'>,
+  Record<`channel_health_setting.${ChannelHealthNumberFieldKey}`, number>
+>
+
+export function applyChannelHealthPreset(
+  current: ChannelHealthSettings,
+  preset: ChannelHealthPreset
+): ChannelHealthSettings {
+  if (preset === 'custom') {
+    return { ...current, 'channel_health_setting.preset': 'custom' }
+  }
+  return {
+    ...current,
+    ...CHANNEL_HEALTH_PRESET_VALUES[preset],
+    'channel_health_setting.preset': preset,
+  }
+}
+
+export function markChannelHealthPresetCustom(
+  current: ChannelHealthSettings
+): ChannelHealthSettings {
+  if (current['channel_health_setting.preset'] === 'custom') return current
+  return { ...current, 'channel_health_setting.preset': 'custom' }
+}
+
 export function pickChannelHealthSettings(
-  settings: Partial<Record<ChannelHealthSettingKey, boolean | number>>
+  settings: Partial<Record<ChannelHealthSettingKey, boolean | number | string>>
 ): ChannelHealthSettings {
   const picked = {} as ChannelHealthSettings
   for (const key of CHANNEL_HEALTH_SETTING_KEYS) {
     const fallback = CHANNEL_HEALTH_DEFAULT_VALUES[key]
     const value = settings[key]
-    ;(picked as Record<ChannelHealthSettingKey, boolean | number>)[key] =
+    ;(picked as Record<ChannelHealthSettingKey, boolean | number | string>)[key] =
       value ?? fallback
   }
   return picked
