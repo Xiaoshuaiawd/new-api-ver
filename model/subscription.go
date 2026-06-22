@@ -272,7 +272,10 @@ type SubscriptionPlan struct {
 	Enabled   bool `json:"enabled" gorm:"default:true"`
 	SortOrder int  `json:"sort_order" gorm:"type:int;default:0"`
 
-	AllowBalancePay *bool `json:"allow_balance_pay" gorm:"default:true"`
+	AllowBalancePay *bool `json:"allow_balance_pay"`
+
+	// Allow falling back to wallet balance after subscription quota is exhausted (empty = true)
+	AllowWalletOverflow *bool `json:"allow_wallet_overflow"`
 
 	StripePriceId         string `json:"stripe_price_id" gorm:"type:varchar(128);default:''"`
 	CreemProductId        string `json:"creem_product_id" gorm:"type:varchar(128);default:''"`
@@ -285,6 +288,9 @@ type SubscriptionPlan struct {
 	AvailableGroups SubscriptionAvailableGroups `json:"available_groups" gorm:"type:text"`
 	// Deprecated: kept for backward compatibility. Mirrors the first available group.
 	UpgradeGroup string `json:"upgrade_group" gorm:"type:varchar(64);default:''"`
+
+	// Downgrade user group on expiry (empty = revert to the group held before purchase)
+	DowngradeGroup string `json:"downgrade_group" gorm:"type:varchar(64);default:''"`
 
 	// Total quota (amount in quota units, 0 = unlimited)
 	TotalAmount int64 `json:"total_amount" gorm:"type:bigint;not null;default:0"`
@@ -317,6 +323,9 @@ func (p *SubscriptionPlan) NormalizeDefaults() {
 	}
 	p.AvailableGroups = p.AvailableGroups.normalizedWithFallback(p.UpgradeGroup)
 	p.UpgradeGroup = p.AvailableGroups.first()
+	if p.AllowWalletOverflow == nil {
+		p.AllowWalletOverflow = common.GetPointer(true)
+	}
 }
 
 // Subscription order (payment -> webhook -> create UserSubscription)
@@ -382,6 +391,12 @@ type UserSubscription struct {
 	UpgradeGroup string `json:"upgrade_group" gorm:"type:varchar(64);default:''"`
 	// Deprecated: kept for DB compatibility with older subscriptions that upgraded user groups.
 	PrevUserGroup string `json:"prev_user_group" gorm:"type:varchar(64);default:''"`
+
+	// Downgrade target group on expiry (snapshot from plan; empty = revert to PrevUserGroup)
+	DowngradeGroup string `json:"downgrade_group" gorm:"type:varchar(64);default:''"`
+
+	// Whether wallet fallback is allowed after this subscription's quota is exhausted (snapshot from plan)
+	AllowWalletOverflow bool `json:"allow_wallet_overflow"`
 
 	CreatedAt int64 `json:"created_at" gorm:"bigint"`
 	UpdatedAt int64 `json:"updated_at" gorm:"bigint"`
@@ -561,6 +576,50 @@ func getUserGroupByIdTx(tx *gorm.DB, userId int) (string, error) {
 	return group, nil
 }
 
+func downgradeUserGroupForSubscriptionTx(tx *gorm.DB, sub *UserSubscription, now int64) (string, error) {
+	if tx == nil || sub == nil {
+		return "", errors.New("invalid downgrade args")
+	}
+	downgradeGroup := strings.TrimSpace(sub.DowngradeGroup)
+	upgradeGroup := strings.TrimSpace(sub.UpgradeGroup)
+	// Nothing to do if neither an explicit downgrade target nor an upgrade snapshot exists.
+	if downgradeGroup == "" && upgradeGroup == "" {
+		return "", nil
+	}
+	currentGroup, err := getUserGroupByIdTx(tx, sub.UserId)
+	if err != nil {
+		return "", err
+	}
+	// If another active upgraded subscription exists, keep the current group.
+	var activeSub UserSubscription
+	activeQuery := tx.Where("user_id = ? AND status = ? AND end_time > ? AND id <> ? AND upgrade_group <> ''",
+		sub.UserId, "active", now, sub.Id).
+		Order("end_time desc, id desc").
+		Limit(1).
+		Find(&activeSub)
+	if activeQuery.Error == nil && activeQuery.RowsAffected > 0 {
+		return "", nil
+	}
+	// Determine the downgrade target: an explicit downgrade group takes precedence,
+	// otherwise revert to the group held before purchase (legacy behavior).
+	target := downgradeGroup
+	if target == "" {
+		// Legacy behavior: only revert when the subscription actually elevated the user.
+		if currentGroup != upgradeGroup {
+			return "", nil
+		}
+		target = strings.TrimSpace(sub.PrevUserGroup)
+	}
+	if target == "" || target == currentGroup {
+		return "", nil
+	}
+	if err := tx.Model(&User{}).Where("id = ?", sub.UserId).
+		Update("group", target).Error; err != nil {
+		return "", err
+	}
+	return target, nil
+}
+
 func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *SubscriptionPlan, source string) (*UserSubscription, error) {
 	if tx == nil {
 		return nil, errors.New("tx is nil")
@@ -595,22 +654,43 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 		lastReset = now.Unix()
 	}
 	allowedGroups := plan.AvailableGroups.normalizedWithFallback(plan.UpgradeGroup)
+	upgradeGroup := strings.TrimSpace(allowedGroups.first())
+	prevGroup := ""
+	if upgradeGroup != "" {
+		currentGroup, err := getUserGroupByIdTx(tx, userId)
+		if err != nil {
+			return nil, err
+		}
+		if currentGroup != upgradeGroup {
+			prevGroup = currentGroup
+			if err := tx.Model(&User{}).Where("id = ?", userId).
+				Update("group", upgradeGroup).Error; err != nil {
+				return nil, err
+			}
+		}
+	}
+	allowWalletOverflow := true
+	if plan.AllowWalletOverflow != nil {
+		allowWalletOverflow = *plan.AllowWalletOverflow
+	}
 	sub := &UserSubscription{
-		UserId:          userId,
-		PlanId:          plan.Id,
-		AmountTotal:     plan.TotalAmount,
-		AmountUsed:      0,
-		StartTime:       now.Unix(),
-		EndTime:         endUnix,
-		Status:          "active",
-		Source:          source,
-		LastResetTime:   lastReset,
-		NextResetTime:   nextReset,
-		AvailableGroups: allowedGroups,
-		UpgradeGroup:    allowedGroups.first(),
-		PrevUserGroup:   "",
-		CreatedAt:       common.GetTimestamp(),
-		UpdatedAt:       common.GetTimestamp(),
+		UserId:              userId,
+		PlanId:              plan.Id,
+		AmountTotal:         plan.TotalAmount,
+		AmountUsed:          0,
+		StartTime:           now.Unix(),
+		EndTime:             endUnix,
+		Status:              "active",
+		Source:              source,
+		LastResetTime:       lastReset,
+		NextResetTime:       nextReset,
+		AvailableGroups:     allowedGroups,
+		UpgradeGroup:        upgradeGroup,
+		PrevUserGroup:       prevGroup,
+		DowngradeGroup:      strings.TrimSpace(plan.DowngradeGroup),
+		AllowWalletOverflow: allowWalletOverflow,
+		CreatedAt:           common.GetTimestamp(),
+		UpdatedAt:           common.GetTimestamp(),
 	}
 	if err := tx.Create(sub).Error; err != nil {
 		return nil, err
@@ -923,6 +1003,24 @@ func HasActiveUserSubscriptionForGroup(userId int, usingGroup string) (bool, err
 	return false, nil
 }
 
+// UserActiveSubscriptionsAllowWalletOverflow returns whether wallet balance may be used
+// after the user's subscription quota is exhausted. A single active subscription that
+// disallows wallet overflow (allow_wallet_overflow = false) blocks the fallback.
+func UserActiveSubscriptionsAllowWalletOverflow(userId int) (bool, error) {
+	if userId <= 0 {
+		return false, errors.New("invalid userId")
+	}
+	now := common.GetTimestamp()
+	var strictCount int64
+	if err := DB.Model(&UserSubscription{}).
+		Where("user_id = ? AND status = ? AND end_time > ? AND allow_wallet_overflow = ?",
+			userId, "active", now, false).
+		Count(&strictCount).Error; err != nil {
+		return false, err
+	}
+	return strictCount == 0, nil
+}
+
 // GetAllUserSubscriptions returns all subscriptions (active and expired) for a user.
 func GetAllUserSubscriptions(userId int) ([]SubscriptionSummary, error) {
 	if userId <= 0 {
@@ -1025,16 +1123,86 @@ func ExpireDueSubscriptions(limit int) (int, error) {
 	if len(subs) == 0 {
 		return 0, nil
 	}
-	res := DB.Model(&UserSubscription{}).
-		Where("status = ? AND end_time > 0 AND end_time <= ?", "active", now).
-		Updates(map[string]interface{}{
-			"status":     "expired",
-			"updated_at": common.GetTimestamp(),
-		})
-	if res.Error != nil {
-		return 0, res.Error
+	expiredCount := 0
+	userIds := make(map[int]struct{}, len(subs))
+	for _, sub := range subs {
+		if sub.UserId > 0 {
+			userIds[sub.UserId] = struct{}{}
+		}
 	}
-	return int(res.RowsAffected), nil
+	for userId := range userIds {
+		cacheGroup := ""
+		err := DB.Transaction(func(tx *gorm.DB) error {
+			res := tx.Model(&UserSubscription{}).
+				Where("user_id = ? AND status = ? AND end_time > 0 AND end_time <= ?", userId, "active", now).
+				Updates(map[string]interface{}{
+					"status":     "expired",
+					"updated_at": common.GetTimestamp(),
+				})
+			if res.Error != nil {
+				return res.Error
+			}
+			expiredCount += int(res.RowsAffected)
+
+			// If there's an active upgraded subscription, keep current group.
+			var activeSub UserSubscription
+			activeQuery := tx.Where("user_id = ? AND status = ? AND end_time > ? AND upgrade_group <> ''",
+				userId, "active", now).
+				Order("end_time desc, id desc").
+				Limit(1).
+				Find(&activeSub)
+			if activeQuery.Error == nil && activeQuery.RowsAffected > 0 {
+				return nil
+			}
+
+			// Find the most recently expired subscription that defines a group transition
+			// (an explicit downgrade target or an upgrade snapshot to revert).
+			var lastExpired UserSubscription
+			expiredQuery := tx.Where("user_id = ? AND status = ? AND (downgrade_group <> '' OR upgrade_group <> '')",
+				userId, "expired").
+				Order("end_time desc, id desc").
+				Limit(1).
+				Find(&lastExpired)
+			if expiredQuery.Error != nil || expiredQuery.RowsAffected == 0 {
+				return nil
+			}
+			currentGroup, err := getUserGroupByIdTx(tx, userId)
+			if err != nil {
+				return err
+			}
+			// An explicit downgrade group takes precedence; otherwise revert to the
+			// group held before purchase (legacy behavior, only when the subscription
+			// actually elevated the user).
+			target := strings.TrimSpace(lastExpired.DowngradeGroup)
+			if target == "" {
+				upgradeGroup := strings.TrimSpace(lastExpired.UpgradeGroup)
+				prevGroup := strings.TrimSpace(lastExpired.PrevUserGroup)
+				if upgradeGroup == "" || prevGroup == "" {
+					return nil
+				}
+				if currentGroup != upgradeGroup {
+					return nil
+				}
+				target = prevGroup
+			}
+			if target == "" || target == currentGroup {
+				return nil
+			}
+			if err := tx.Model(&User{}).Where("id = ?", userId).
+				Update("group", target).Error; err != nil {
+				return err
+			}
+			cacheGroup = target
+			return nil
+		})
+		if err != nil {
+			return expiredCount, err
+		}
+		if cacheGroup != "" {
+			_ = UpdateUserGroupCache(userId, cacheGroup)
+		}
+	}
+	return expiredCount, nil
 }
 
 // SubscriptionPreConsumeRecord stores idempotent pre-consume operations per request.

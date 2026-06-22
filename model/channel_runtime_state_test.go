@@ -36,7 +36,7 @@ func TestGetChannelSkipsRuntimeUnavailableChannel(t *testing.T) {
 		return channelID != 9301, 0
 	})
 
-	channel, err := GetChannel("default", "gpt-runtime-state", 0)
+	channel, err := GetChannel("default", "gpt-runtime-state", 0, "")
 
 	require.NoError(t, err)
 	require.NotNil(t, channel)
@@ -82,7 +82,7 @@ func TestGetChannelUsesDueProbeChannelWhenAllNormalUnavailable(t *testing.T) {
 		}
 	})
 
-	channel, err := GetChannel("default", "gpt-runtime-probe", 0)
+	channel, err := GetChannel("default", "gpt-runtime-probe", 0, "")
 
 	require.NoError(t, err)
 	require.NotNil(t, channel)
@@ -119,12 +119,12 @@ func TestGetChannelPassesModelNameToRuntimeState(t *testing.T) {
 		return !(channelID == 9501 && modelName == "gpt-runtime-model-a"), 0
 	})
 
-	channelA, err := GetChannel("default", "gpt-runtime-model-a", 0)
+	channelA, err := GetChannel("default", "gpt-runtime-model-a", 0, "")
 	require.NoError(t, err)
 	require.NotNil(t, channelA)
 	require.Equal(t, 9502, channelA.Id)
 
-	channelB, err := GetChannel("default", "gpt-runtime-model-b", 0)
+	channelB, err := GetChannel("default", "gpt-runtime-model-b", 0, "")
 	require.NoError(t, err)
 	require.NotNil(t, channelB)
 	require.Equal(t, 9501, channelB.Id)

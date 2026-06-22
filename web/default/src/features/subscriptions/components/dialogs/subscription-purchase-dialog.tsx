@@ -394,10 +394,10 @@ export function SubscriptionPurchaseDialog(props: Props) {
               <span className='text-muted-foreground text-sm'>
                 {t('Plan Name')}
               </span>
-              <span className='max-w-[200px] truncate text-sm font-medium'>
-                {plan.title}
-              </span>
-            </div>
+            <span className='max-w-[200px] truncate text-sm font-medium'>
+              {plan.title}
+            </span>
+          </div>
             <div className='flex items-center justify-between'>
               <span className='text-muted-foreground text-sm'>
                 {t('Validity Period')}

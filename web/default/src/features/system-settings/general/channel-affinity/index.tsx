@@ -271,26 +271,26 @@ export function ChannelAffinitySection(props: Props) {
       const updates: { key: string; value: string }[] = []
 
       if (enabled !== props.defaultValues['channel_affinity_setting.enabled'])
-        updates.push({
+        {updates.push({
           key: 'channel_affinity_setting.enabled',
           value: String(enabled),
-        })
+        })}
       if (
         switchOnSuccess !==
         props.defaultValues['channel_affinity_setting.switch_on_success']
       )
-        updates.push({
+        {updates.push({
           key: 'channel_affinity_setting.switch_on_success',
           value: String(switchOnSuccess),
-        })
+        })}
       if (
         keepOnChannelDisabled !==
         props.defaultValues['channel_affinity_setting.keep_on_channel_disabled']
       )
-        updates.push({
+        {updates.push({
           key: 'channel_affinity_setting.keep_on_channel_disabled',
           value: String(keepOnChannelDisabled),
-        })
+        })}
       if (
         recoveryStrategy !==
         props.defaultValues['channel_affinity_setting.recovery_strategy']
@@ -303,18 +303,18 @@ export function ChannelAffinitySection(props: Props) {
         maxEntries !==
         props.defaultValues['channel_affinity_setting.max_entries']
       )
-        updates.push({
+        {updates.push({
           key: 'channel_affinity_setting.max_entries',
           value: String(maxEntries),
-        })
+        })}
       if (
         defaultTtl !==
         props.defaultValues['channel_affinity_setting.default_ttl_seconds']
       )
-        updates.push({
+        {updates.push({
           key: 'channel_affinity_setting.default_ttl_seconds',
           value: String(defaultTtl),
-        })
+        })}
 
       const origRules = props.defaultValues['channel_affinity_setting.rules']
       const origSerialized = (() => {
@@ -435,7 +435,7 @@ export function ChannelAffinitySection(props: Props) {
             checked={enabled}
             onCheckedChange={setEnabled}
             label={t('Enable')}
-            className='border-b-0 py-0'
+            className='py-0'
           />
           <div className='grid gap-1.5'>
             <Label>{t('Max Entries')}</Label>

@@ -800,7 +800,7 @@ func IsChannelAffinityPriorityStale(group string, modelName string, channelID in
 		return false
 	}
 	preferredPriority := preferred.GetPriority()
-	candidate, err := model.GetRandomSatisfiedChannel(group, modelName, 0)
+	candidate, err := model.GetRandomSatisfiedChannel(group, modelName, 0, "")
 	if err != nil || candidate == nil {
 		return false
 	}

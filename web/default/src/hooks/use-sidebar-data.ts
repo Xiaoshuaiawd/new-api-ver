@@ -143,7 +143,7 @@ export function buildSidebarData(t: Translate): SidebarData {
             icon: Ticket,
           },
           {
-            title: t('Subscription Management'),
+            title: t('Subscriptions'),
             url: '/subscriptions',
             icon: CreditCard,
           },
