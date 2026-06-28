@@ -50,7 +50,7 @@ func init() {
 		if err != nil {
 			return err
 		}
-		result := testChannelWithContext(ctx, channel, testUserID, "", "", shouldUseStreamForAutomaticChannelTest(channel))
+		result := testChannel(ctx, channel, testUserID, "", "", shouldUseStreamForAutomaticChannelTest(channel))
 		if result.localErr != nil {
 			return result.localErr
 		}
@@ -92,11 +92,7 @@ func resolveChannelTestUserID(c *gin.Context) (int, error) {
 	return rootUser.Id, nil
 }
 
-func testChannel(channel *model.Channel, testModel string, requestPath string, balanceThreshold int64) testResult {
-	return testChannelWithContext(context.Background(), channel, testModel, requestPath, balanceThreshold)
-}
-
-func testChannelWithContext(ctx context.Context, channel *model.Channel, testModel string, requestPath string, balanceThreshold int64) testResult {
+func testChannel(ctx context.Context, channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool) testResult {
 	if ctx == nil {
 		ctx = context.Background()
 	}
