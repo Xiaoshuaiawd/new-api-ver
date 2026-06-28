@@ -14,17 +14,18 @@ import (
 func TestGetChannelSkipsRuntimeUnavailableChannel(t *testing.T) {
 	oldDB := DB
 	oldMemoryCacheEnabled := common.MemoryCacheEnabled
-	oldSQLite := common.UsingSQLite
+	oldMainDatabaseType := common.MainDatabaseType()
+	oldLogDatabaseType := common.LogDatabaseType()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	DB = db
 	common.MemoryCacheEnabled = false
-	common.UsingSQLite = true
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	initCol()
 	t.Cleanup(func() {
 		DB = oldDB
 		common.MemoryCacheEnabled = oldMemoryCacheEnabled
-		common.UsingSQLite = oldSQLite
+		common.SetDatabaseTypes(oldMainDatabaseType, oldLogDatabaseType)
 		SetChannelRuntimeStateFunc(nil)
 		initCol()
 	})
@@ -46,17 +47,18 @@ func TestGetChannelSkipsRuntimeUnavailableChannel(t *testing.T) {
 func TestGetChannelUsesDueProbeChannelWhenAllNormalUnavailable(t *testing.T) {
 	oldDB := DB
 	oldMemoryCacheEnabled := common.MemoryCacheEnabled
-	oldSQLite := common.UsingSQLite
+	oldMainDatabaseType := common.MainDatabaseType()
+	oldLogDatabaseType := common.LogDatabaseType()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	DB = db
 	common.MemoryCacheEnabled = false
-	common.UsingSQLite = true
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	initCol()
 	t.Cleanup(func() {
 		DB = oldDB
 		common.MemoryCacheEnabled = oldMemoryCacheEnabled
-		common.UsingSQLite = oldSQLite
+		common.SetDatabaseTypes(oldMainDatabaseType, oldLogDatabaseType)
 		SetChannelRuntimeStateFunc(nil)
 		initCol()
 	})
@@ -93,17 +95,18 @@ func TestGetChannelUsesDueProbeChannelWhenAllNormalUnavailable(t *testing.T) {
 func TestGetChannelPassesModelNameToRuntimeState(t *testing.T) {
 	oldDB := DB
 	oldMemoryCacheEnabled := common.MemoryCacheEnabled
-	oldSQLite := common.UsingSQLite
+	oldMainDatabaseType := common.MainDatabaseType()
+	oldLogDatabaseType := common.LogDatabaseType()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	DB = db
 	common.MemoryCacheEnabled = false
-	common.UsingSQLite = true
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	initCol()
 	t.Cleanup(func() {
 		DB = oldDB
 		common.MemoryCacheEnabled = oldMemoryCacheEnabled
-		common.UsingSQLite = oldSQLite
+		common.SetDatabaseTypes(oldMainDatabaseType, oldLogDatabaseType)
 		SetChannelRuntimeStateFunc(nil)
 		initCol()
 	})

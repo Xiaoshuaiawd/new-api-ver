@@ -77,21 +77,16 @@ func setupPriceHelperSubscriptionDB(t *testing.T) {
 	sqlDB.SetMaxOpenConns(1)
 
 	previousDB := model.DB
-	previousUsingSQLite := common.UsingSQLite
-	previousUsingMySQL := common.UsingMySQL
-	previousUsingPostgreSQL := common.UsingPostgreSQL
+	previousMainDatabaseType := common.MainDatabaseType()
+	previousLogDatabaseType := common.LogDatabaseType()
 	t.Cleanup(func() {
 		model.DB = previousDB
-		common.UsingSQLite = previousUsingSQLite
-		common.UsingMySQL = previousUsingMySQL
-		common.UsingPostgreSQL = previousUsingPostgreSQL
+		common.SetDatabaseTypes(previousMainDatabaseType, previousLogDatabaseType)
 		_ = sqlDB.Close()
 	})
 
 	model.DB = db
-	common.UsingSQLite = true
-	common.UsingMySQL = false
-	common.UsingPostgreSQL = false
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 
 	require.NoError(t, db.AutoMigrate(
 		&model.User{},
