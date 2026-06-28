@@ -1082,3 +1082,10 @@ func TestAllChannels(c *gin.Context) {
 		},
 	})
 }
+
+func AutomaticallyTestChannels() {
+	_, err := runChannelTestTask(context.Background(), operation_setting.ChannelTestModeScheduledAll, false, nil)
+	if err != nil {
+		common.SysLog("automatic channel test failed: " + err.Error())
+	}
+}
