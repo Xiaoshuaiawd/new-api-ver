@@ -28,6 +28,7 @@ import {
   ListTodo,
   MessageSquare,
   Radio,
+  ServerCog,
   Settings,
   Ticket,
   User,
@@ -35,7 +36,8 @@ import {
   Wallet,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import type { SidebarData } from '../components/layout/types.ts'
+import type { SidebarData } from '@/components/layout/types'
+import { ROLE } from '@/lib/roles'
 
 type Translate = (key: string) => string
 
@@ -146,6 +148,12 @@ export function buildSidebarData(t: Translate): SidebarData {
             title: t('Subscriptions'),
             url: '/subscriptions',
             icon: CreditCard,
+          },
+          {
+            title: t('System Info'),
+            url: '/system-info',
+            icon: ServerCog,
+            requiredRole: ROLE.SUPER_ADMIN,
           },
           {
             title: t('System Settings'),

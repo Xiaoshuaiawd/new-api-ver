@@ -32,7 +32,7 @@ func TestMain(m *testing.M) {
 	model.DB = db
 	model.LOG_DB = db
 
-	common.UsingSQLite = true
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	common.RedisEnabled = false
 	common.BatchUpdateEnabled = false
 	common.LogConsumeEnabled = true
@@ -44,13 +44,16 @@ func TestMain(m *testing.M) {
 		&model.Log{},
 		&model.Channel{},
 		&model.TopUp{},
+		&model.QuotaData{},
+		&model.Option{},
 		&model.SubscriptionPlan{},
 		&model.UserSubscription{},
 		&model.SubscriptionPreConsumeRecord{},
+		&model.SystemTask{},
+		&model.SystemTaskLock{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
-
 	os.Exit(m.Run())
 }
 
@@ -61,18 +64,25 @@ func TestMain(m *testing.M) {
 func truncate(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
-		model.DB.Exec("DELETE FROM tasks")
-		model.DB.Exec("DELETE FROM users")
-		model.DB.Exec("DELETE FROM tokens")
-		model.DB.Exec("DELETE FROM logs")
-		model.DB.Exec("DELETE FROM channels")
-		model.DB.Exec("DELETE FROM top_ups")
-		model.DB.Exec("DELETE FROM subscription_plans")
-		model.DB.Exec("DELETE FROM user_subscriptions")
-		model.DB.Exec("DELETE FROM subscription_pre_consume_records")
+		for _, table := range []string{
+			"tasks",
+			"users",
+			"tokens",
+			"logs",
+			"channels",
+			"top_ups",
+			"quota_data",
+			"options",
+			"subscription_pre_consume_records",
+			"user_subscriptions",
+			"subscription_plans",
+			"system_task_locks",
+			"system_tasks",
+		} {
+			require.NoError(t, model.DB.Exec("DELETE FROM "+table).Error)
+		}
 	})
 }
-
 func seedUser(t *testing.T, id int, quota int) {
 	t.Helper()
 	user := &model.User{Id: id, Username: "test_user", Quota: quota, Status: common.UserStatusEnabled}
