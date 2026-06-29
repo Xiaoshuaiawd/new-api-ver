@@ -69,6 +69,21 @@ type channelMultiplierMonitorClient struct {
 	client  *http.Client
 }
 
+type channelMultiplierSession struct {
+	client    *channelMultiplierMonitorClient
+	auth      *channelMultiplierAuth
+	expiresAt time.Time
+}
+
+type channelMultiplierHTTPError struct {
+	statusCode int
+	body       string
+}
+
+func (err channelMultiplierHTTPError) Error() string {
+	return fmt.Sprintf("upstream responded %d: %s", err.statusCode, strings.TrimSpace(err.body))
+}
+
 type sub2APIKeyItem struct {
 	ID    int    `json:"id"`
 	Key   string `json:"key"`
@@ -91,9 +106,11 @@ var channelMultiplierMonitor = struct {
 	running   atomic.Bool
 	cacheOnce sync.Once
 	cache     *cachex.HybridCache[ChannelMultiplierSnapshot]
+	sessions  map[string]*channelMultiplierSession
 	now       func() time.Time
 }{
-	now: time.Now,
+	sessions: map[string]*channelMultiplierSession{},
+	now:      time.Now,
 }
 
 var channelMultiplierProbe = probeChannelMultiplier
@@ -130,6 +147,7 @@ func ResetChannelMultiplierMonitorForTest() {
 	channelMultiplierMonitor.running.Store(false)
 	channelMultiplierMonitor.cacheOnce = sync.Once{}
 	channelMultiplierMonitor.cache = nil
+	channelMultiplierMonitor.sessions = map[string]*channelMultiplierSession{}
 	channelMultiplierMonitor.now = time.Now
 }
 
@@ -418,7 +436,20 @@ func probeChannelMultiplier(ctx context.Context, channel *model.Channel) (Channe
 	if err != nil {
 		return ChannelMultiplierSnapshot{}, err
 	}
+	snapshot, err := fetchChannelMultiplierWithSession(ctx, client, auth, channel, cfg)
+	if !isChannelMultiplierUnauthorized(err) {
+		return snapshot, err
+	}
 
+	invalidateChannelMultiplierSession(channel, cfg)
+	client, auth, loginErr := loginChannelMultiplierProvider(ctx, channel, cfg)
+	if loginErr != nil {
+		return ChannelMultiplierSnapshot{}, loginErr
+	}
+	return fetchChannelMultiplierWithSession(ctx, client, auth, channel, cfg)
+}
+
+func fetchChannelMultiplierWithSession(ctx context.Context, client *channelMultiplierMonitorClient, auth *channelMultiplierAuth, channel *model.Channel, cfg dto.ChannelMultiplierMonitorConfig) (ChannelMultiplierSnapshot, error) {
 	switch cfg.Format {
 	case dto.ChannelMultiplierProviderFormatSub2API:
 		return fetchSub2APIMultiplier(ctx, client, auth, channel, cfg)
@@ -445,15 +476,28 @@ func FetchChannelMultiplierAccountBalance(ctx context.Context, channel *model.Ch
 	if err != nil {
 		return 0, true, err
 	}
+	balance, err := fetchChannelMultiplierAccountBalanceWithSession(ctx, client, auth, cfg)
+	if !isChannelMultiplierUnauthorized(err) {
+		return balance, true, err
+	}
+
+	invalidateChannelMultiplierSession(channel, cfg)
+	client, auth, err = loginChannelMultiplierProvider(ctx, channel, cfg)
+	if err != nil {
+		return 0, true, err
+	}
+	balance, err = fetchChannelMultiplierAccountBalanceWithSession(ctx, client, auth, cfg)
+	return balance, true, err
+}
+
+func fetchChannelMultiplierAccountBalanceWithSession(ctx context.Context, client *channelMultiplierMonitorClient, auth *channelMultiplierAuth, cfg dto.ChannelMultiplierMonitorConfig) (float64, error) {
 	switch cfg.Format {
 	case dto.ChannelMultiplierProviderFormatSub2API:
-		balance, err := fetchSub2APIBalance(ctx, client, auth)
-		return balance, true, err
+		return fetchSub2APIBalance(ctx, client, auth)
 	case dto.ChannelMultiplierProviderFormatNewAPI:
-		balance, err := fetchNewAPIBalance(ctx, client, auth)
-		return balance, true, err
+		return fetchNewAPIBalance(ctx, client, auth)
 	default:
-		return 0, true, fmt.Errorf("unsupported monitor format: %s", cfg.Format)
+		return 0, fmt.Errorf("unsupported monitor format: %s", cfg.Format)
 	}
 }
 
@@ -466,6 +510,15 @@ func loginChannelMultiplierProvider(ctx context.Context, channel *model.Channel,
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return nil, nil, fmt.Errorf("invalid base_url: %s", baseURL)
 	}
+	cacheKey := channelMultiplierSessionCacheKey(channel, cfg, baseURL)
+	now := channelMultiplierNow()
+	channelMultiplierMonitor.Lock()
+	if session, ok := channelMultiplierMonitor.sessions[cacheKey]; ok && session != nil && now.Before(session.expiresAt) {
+		channelMultiplierMonitor.Unlock()
+		return session.client, session.auth, nil
+	}
+	channelMultiplierMonitor.Unlock()
+
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		return nil, nil, err
@@ -485,10 +538,38 @@ func loginChannelMultiplierProvider(ctx context.Context, channel *model.Channel,
 	if err != nil {
 		return nil, nil, err
 	}
-	return &channelMultiplierMonitorClient{
+	monitorClient := &channelMultiplierMonitorClient{
 		baseURL: baseURL,
 		client:  &client,
-	}, auth, nil
+	}
+	channelMultiplierMonitor.Lock()
+	channelMultiplierMonitor.sessions[cacheKey] = &channelMultiplierSession{
+		client:    monitorClient,
+		auth:      auth,
+		expiresAt: now.Add(channelMultiplierCacheTTL),
+	}
+	channelMultiplierMonitor.Unlock()
+	return monitorClient, auth, nil
+}
+
+func invalidateChannelMultiplierSession(channel *model.Channel, cfg dto.ChannelMultiplierMonitorConfig) {
+	baseURL := channelMultiplierBaseURL(channel, cfg)
+	if baseURL == "" {
+		return
+	}
+	cacheKey := channelMultiplierSessionCacheKey(channel, cfg, baseURL)
+	channelMultiplierMonitor.Lock()
+	delete(channelMultiplierMonitor.sessions, cacheKey)
+	channelMultiplierMonitor.Unlock()
+}
+
+func channelMultiplierSessionCacheKey(channel *model.Channel, cfg dto.ChannelMultiplierMonitorConfig, baseURL string) string {
+	channelID := 0
+	if channel != nil {
+		channelID = channel.Id
+	}
+	secretHash := common.HmacSha256(strings.TrimSpace(cfg.Password), "channel_multiplier_session")
+	return fmt.Sprintf("%d|%s|%s|%s|%s", channelID, cfg.Format, baseURL, strings.TrimSpace(cfg.Username), secretHash)
 }
 
 func loginChannelMultiplierSession(ctx context.Context, client *http.Client, baseURL string, cfg dto.ChannelMultiplierMonitorConfig) (*channelMultiplierAuth, error) {
@@ -869,7 +950,15 @@ func doJSONRequest(ctx context.Context, client *http.Client, method string, targ
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("upstream responded %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+		return nil, channelMultiplierHTTPError{statusCode: resp.StatusCode, body: string(raw)}
 	}
 	return raw, nil
+}
+
+func isChannelMultiplierUnauthorized(err error) bool {
+	var httpErr channelMultiplierHTTPError
+	if errors.As(err, &httpErr) {
+		return httpErr.statusCode == http.StatusUnauthorized || httpErr.statusCode == http.StatusForbidden
+	}
+	return false
 }

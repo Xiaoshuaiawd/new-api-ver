@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -442,6 +444,59 @@ func TestProbeSub2APIChannelMultiplierMatchesCurrentKey(t *testing.T) {
 	assert.Equal(t, "581", snapshot.ObservedTokenID)
 }
 
+func TestProbeSub2APIChannelMultiplierRelogsAfterUnauthorized(t *testing.T) {
+	ResetChannelMultiplierMonitorForTest()
+	t.Cleanup(ResetChannelMultiplierMonitorForTest)
+
+	var loginCount int32
+	var unauthorizedSent atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			count := atomic.AddInt32(&loginCount, 1)
+			assert.Equal(t, http.MethodPost, r.Method)
+			_, _ = fmt.Fprintf(w, `{"data":{"access_token":"token-%d"}}`, count)
+		case "/api/v1/keys":
+			auth := r.Header.Get("Authorization")
+			if auth == "Bearer token-1" && unauthorizedSent.CompareAndSwap(false, true) {
+				http.Error(w, `{"message":"expired"}`, http.StatusUnauthorized)
+				return
+			}
+			assert.Equal(t, "Bearer token-2", auth)
+			_, _ = w.Write([]byte(`{"data":{"items":[{"id":581,"key":"sk-current","group":{"name":"Pro","rate_multiplier":0.08}}]}}`))
+		case "/api/v1/auth/me":
+			assert.Equal(t, "Bearer token-2", r.Header.Get("Authorization"))
+			_, _ = w.Write([]byte(`{"data":{"balance":26.5}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	channel := &model.Channel{
+		Id:      1004,
+		Type:    constant.ChannelTypeCustom,
+		Key:     "sk-current",
+		Name:    "sub2api-relogin",
+		BaseURL: common.GetPointer("https://proxy.example.com"),
+		OtherSettings: channelMultiplierSettingsJSON(t, &dto.ChannelMultiplierMonitorConfig{
+			Enabled:  true,
+			Format:   dto.ChannelMultiplierProviderFormatSub2API,
+			BaseURL:  server.URL,
+			Username: "alice@example.com",
+			Password: "secret",
+		}),
+	}
+
+	snapshot, err := probeChannelMultiplier(context.Background(), channel)
+
+	require.NoError(t, err)
+	assert.Equal(t, ChannelMultiplierSnapshotHealthy, snapshot.State)
+	assert.Equal(t, 0.08, snapshot.Multiplier)
+	assert.True(t, unauthorizedSent.Load())
+	assert.Equal(t, int32(2), atomic.LoadInt32(&loginCount))
+}
+
 func TestProbeNewAPIChannelMultiplierUsesGroupRatioFallback(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -488,4 +543,109 @@ func TestProbeNewAPIChannelMultiplierUsesGroupRatioFallback(t *testing.T) {
 	assert.Equal(t, 2.0, snapshot.Balance)
 	assert.Equal(t, "gptproo", snapshot.ObservedGroup)
 	assert.Equal(t, "8889", snapshot.ObservedTokenID)
+}
+
+func TestProbeNewAPIChannelMultiplierReusesLoginSession(t *testing.T) {
+	ResetChannelMultiplierMonitorForTest()
+	t.Cleanup(ResetChannelMultiplierMonitorForTest)
+
+	var loginCount int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/user/login":
+			count := atomic.AddInt32(&loginCount, 1)
+			assert.Equal(t, http.MethodPost, r.Method)
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "session-123", Path: "/"})
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":4718}}`))
+			assert.Equal(t, int32(1), count)
+		case "/api/token/":
+			assert.Equal(t, "4718", r.Header.Get("new-api-user"))
+			assert.Contains(t, r.Header.Get("Cookie"), "session=session-123")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":8889,"key":"sk-current","group":{"name":"pro","ratio":0.07}}]}}`))
+		case "/api/user/self":
+			assert.Equal(t, "4718", r.Header.Get("new-api-user"))
+			assert.Contains(t, r.Header.Get("Cookie"), "session=session-123")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"quota":1000000}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	channel := &model.Channel{
+		Id:   1003,
+		Type: constant.ChannelTypeCustom,
+		Key:  "sk-current",
+		Name: "new-api-session-cache",
+		OtherSettings: channelMultiplierSettingsJSON(t, &dto.ChannelMultiplierMonitorConfig{
+			Enabled:  true,
+			Format:   dto.ChannelMultiplierProviderFormatNewAPI,
+			BaseURL:  server.URL,
+			Username: "alice",
+			Password: "secret",
+		}),
+	}
+
+	first, err := probeChannelMultiplier(context.Background(), channel)
+	require.NoError(t, err)
+	second, err := probeChannelMultiplier(context.Background(), channel)
+
+	require.NoError(t, err)
+	assert.Equal(t, ChannelMultiplierSnapshotHealthy, first.State)
+	assert.Equal(t, ChannelMultiplierSnapshotHealthy, second.State)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&loginCount))
+}
+
+func TestProbeNewAPIChannelMultiplierRelogsAfterUnauthorized(t *testing.T) {
+	ResetChannelMultiplierMonitorForTest()
+	t.Cleanup(ResetChannelMultiplierMonitorForTest)
+
+	var loginCount int32
+	var unauthorizedSent atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/user/login":
+			count := atomic.AddInt32(&loginCount, 1)
+			assert.Equal(t, http.MethodPost, r.Method)
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: fmt.Sprintf("session-%d", count), Path: "/"})
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":4718}}`))
+		case "/api/token/":
+			if strings.Contains(r.Header.Get("Cookie"), "session=session-1") && unauthorizedSent.CompareAndSwap(false, true) {
+				http.Error(w, `{"message":"expired"}`, http.StatusUnauthorized)
+				return
+			}
+			assert.Equal(t, "4718", r.Header.Get("new-api-user"))
+			assert.Contains(t, r.Header.Get("Cookie"), "session=session-2")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":8889,"key":"sk-current","group":{"name":"pro","ratio":0.07}}]}}`))
+		case "/api/user/self":
+			assert.Equal(t, "4718", r.Header.Get("new-api-user"))
+			assert.Contains(t, r.Header.Get("Cookie"), "session=session-2")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"quota":1000000}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	channel := &model.Channel{
+		Id:   1005,
+		Type: constant.ChannelTypeCustom,
+		Key:  "sk-current",
+		Name: "new-api-relogin",
+		OtherSettings: channelMultiplierSettingsJSON(t, &dto.ChannelMultiplierMonitorConfig{
+			Enabled:  true,
+			Format:   dto.ChannelMultiplierProviderFormatNewAPI,
+			BaseURL:  server.URL,
+			Username: "alice",
+			Password: "secret",
+		}),
+	}
+
+	snapshot, err := probeChannelMultiplier(context.Background(), channel)
+
+	require.NoError(t, err)
+	assert.Equal(t, ChannelMultiplierSnapshotHealthy, snapshot.State)
+	assert.Equal(t, 0.07, snapshot.Multiplier)
+	assert.True(t, unauthorizedSent.Load())
+	assert.Equal(t, int32(2), atomic.LoadInt32(&loginCount))
 }
