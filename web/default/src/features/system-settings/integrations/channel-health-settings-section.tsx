@@ -107,12 +107,30 @@ const channelHealthSchema = z.object({
       enabled: z.boolean(),
       min_weight: z.coerce.number().int().min(1),
       max_weight: z.coerce.number().int().min(1),
+      latency_guard_enabled: z.boolean(),
+      latency_threshold_seconds: z.coerce.number().int().min(1),
+      latency_window_minutes: z.coerce.number().int().min(1),
+      latency_min_samples: z.coerce.number().int().min(1),
+      latency_slow_ratio_threshold: z.coerce.number().min(0).max(1),
+      latency_recovery_ratio_threshold: z.coerce.number().min(0).max(1),
+      latency_retained_weight_percent: z.coerce.number().int().min(1).max(100),
+      latency_priority_penalty: z.coerce.number().int().min(0),
     })
     .refine((value) => value.max_weight >= value.min_weight, {
       path: ['max_weight'],
       message:
         'Maximum adaptive weight must be greater than or equal to minimum adaptive weight',
-    }),
+    })
+    .refine(
+      (value) =>
+        value.latency_recovery_ratio_threshold <=
+        value.latency_slow_ratio_threshold,
+      {
+        path: ['latency_recovery_ratio_threshold'],
+        message:
+          'Recovery slow-first-response ratio must be less than or equal to trigger ratio',
+      }
+    ),
 })
 
 type ChannelHealthFormValues = z.output<typeof channelHealthSchema>
@@ -180,6 +198,24 @@ function buildFormDefaults(
       enabled: defaults['channel_auto_priority_setting.enabled'],
       min_weight: defaults['channel_auto_priority_setting.min_weight'],
       max_weight: defaults['channel_auto_priority_setting.max_weight'],
+      latency_guard_enabled:
+        defaults['channel_auto_priority_setting.latency_guard_enabled'],
+      latency_threshold_seconds:
+        defaults['channel_auto_priority_setting.latency_threshold_seconds'],
+      latency_window_minutes:
+        defaults['channel_auto_priority_setting.latency_window_minutes'],
+      latency_min_samples:
+        defaults['channel_auto_priority_setting.latency_min_samples'],
+      latency_slow_ratio_threshold:
+        defaults['channel_auto_priority_setting.latency_slow_ratio_threshold'],
+      latency_recovery_ratio_threshold:
+        defaults[
+          'channel_auto_priority_setting.latency_recovery_ratio_threshold'
+        ],
+      latency_retained_weight_percent:
+        defaults['channel_auto_priority_setting.latency_retained_weight_percent'],
+      latency_priority_penalty:
+        defaults['channel_auto_priority_setting.latency_priority_penalty'],
     },
   }
 }
@@ -206,6 +242,22 @@ function normalizeFormValues(
       values.channel_auto_priority_setting.min_weight,
     'channel_auto_priority_setting.max_weight':
       values.channel_auto_priority_setting.max_weight,
+    'channel_auto_priority_setting.latency_guard_enabled':
+      values.channel_auto_priority_setting.latency_guard_enabled,
+    'channel_auto_priority_setting.latency_threshold_seconds':
+      values.channel_auto_priority_setting.latency_threshold_seconds,
+    'channel_auto_priority_setting.latency_window_minutes':
+      values.channel_auto_priority_setting.latency_window_minutes,
+    'channel_auto_priority_setting.latency_min_samples':
+      values.channel_auto_priority_setting.latency_min_samples,
+    'channel_auto_priority_setting.latency_slow_ratio_threshold':
+      values.channel_auto_priority_setting.latency_slow_ratio_threshold,
+    'channel_auto_priority_setting.latency_recovery_ratio_threshold':
+      values.channel_auto_priority_setting.latency_recovery_ratio_threshold,
+    'channel_auto_priority_setting.latency_retained_weight_percent':
+      values.channel_auto_priority_setting.latency_retained_weight_percent,
+    'channel_auto_priority_setting.latency_priority_penalty':
+      values.channel_auto_priority_setting.latency_priority_penalty,
   } as Partial<ChannelHealthPanelSettings>
 
   for (const field of CHANNEL_HEALTH_SETTING_FIELDS) {
@@ -571,6 +623,198 @@ export function ChannelHealthSettingsSection({
                       </FormControl>
                       <FormDescription>
                         {t('Highest weight assigned to stable channels.')}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <FormField
+                control={form.control}
+                name='channel_auto_priority_setting.latency_guard_enabled'
+                render={({ field }) => (
+                  <SettingsSwitchItem>
+                    <SettingsSwitchContent>
+                      <FormLabel>{t('Slow first response guard')}</FormLabel>
+                      <FormDescription>
+                        {t(
+                          'Reduce priority and retain a small traffic share when recent first responses are too slow.'
+                        )}
+                      </FormDescription>
+                    </SettingsSwitchContent>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </SettingsSwitchItem>
+                )}
+              />
+              <div className='grid gap-6 md:grid-cols-2'>
+                <FormField
+                  control={form.control}
+                  name='channel_auto_priority_setting.latency_threshold_seconds'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        {t('Slow first response threshold (seconds)')}
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={1}
+                          step={1}
+                          {...safeNumberFieldProps(field)}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Requests above this first response time count as slow.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name='channel_auto_priority_setting.latency_window_minutes'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Latency window (minutes)')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={1}
+                          step={1}
+                          {...safeNumberFieldProps(field)}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Recent log window used to calculate slow first responses.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name='channel_auto_priority_setting.latency_min_samples'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Latency minimum samples')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={1}
+                          step={1}
+                          {...safeNumberFieldProps(field)}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Minimum valid first response samples before applying latency protection.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name='channel_auto_priority_setting.latency_slow_ratio_threshold'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Slow ratio trigger')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          {...safeNumberFieldProps(field)}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Slow first response ratio from 0 to 1 required to reduce traffic.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name='channel_auto_priority_setting.latency_recovery_ratio_threshold'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Slow ratio recovery')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          {...safeNumberFieldProps(field)}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Degraded channels recover when the slow ratio falls to this value.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name='channel_auto_priority_setting.latency_retained_weight_percent'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        {t('Retained traffic weight percent')}
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={1}
+                          max={100}
+                          step={1}
+                          {...safeNumberFieldProps(field)}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Weight percentage kept for slow channels during latency protection.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name='channel_auto_priority_setting.latency_priority_penalty'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Latency priority penalty')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={0}
+                          step={1}
+                          {...safeNumberFieldProps(field)}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Priority levels removed from slow channels while protection is active.'
+                        )}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>

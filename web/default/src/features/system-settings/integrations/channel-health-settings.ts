@@ -66,6 +66,14 @@ export const CHANNEL_AUTO_PRIORITY_SETTING_KEYS = [
   'channel_auto_priority_setting.enabled',
   'channel_auto_priority_setting.min_weight',
   'channel_auto_priority_setting.max_weight',
+  'channel_auto_priority_setting.latency_guard_enabled',
+  'channel_auto_priority_setting.latency_threshold_seconds',
+  'channel_auto_priority_setting.latency_window_minutes',
+  'channel_auto_priority_setting.latency_min_samples',
+  'channel_auto_priority_setting.latency_slow_ratio_threshold',
+  'channel_auto_priority_setting.latency_recovery_ratio_threshold',
+  'channel_auto_priority_setting.latency_retained_weight_percent',
+  'channel_auto_priority_setting.latency_priority_penalty',
 ] as const
 
 export type ChannelAutoPrioritySettingKey =
@@ -75,6 +83,14 @@ export type ChannelAutoPrioritySettings = {
   'channel_auto_priority_setting.enabled': boolean
   'channel_auto_priority_setting.min_weight': number
   'channel_auto_priority_setting.max_weight': number
+  'channel_auto_priority_setting.latency_guard_enabled': boolean
+  'channel_auto_priority_setting.latency_threshold_seconds': number
+  'channel_auto_priority_setting.latency_window_minutes': number
+  'channel_auto_priority_setting.latency_min_samples': number
+  'channel_auto_priority_setting.latency_slow_ratio_threshold': number
+  'channel_auto_priority_setting.latency_recovery_ratio_threshold': number
+  'channel_auto_priority_setting.latency_retained_weight_percent': number
+  'channel_auto_priority_setting.latency_priority_penalty': number
 }
 
 export type ChannelHealthPanelSettings = ChannelHealthSettings &
@@ -303,6 +319,14 @@ export const CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES = {
   'channel_auto_priority_setting.enabled': false,
   'channel_auto_priority_setting.min_weight': 20,
   'channel_auto_priority_setting.max_weight': 100,
+  'channel_auto_priority_setting.latency_guard_enabled': false,
+  'channel_auto_priority_setting.latency_threshold_seconds': 10,
+  'channel_auto_priority_setting.latency_window_minutes': 10,
+  'channel_auto_priority_setting.latency_min_samples': 20,
+  'channel_auto_priority_setting.latency_slow_ratio_threshold': 0.3,
+  'channel_auto_priority_setting.latency_recovery_ratio_threshold': 0.1,
+  'channel_auto_priority_setting.latency_retained_weight_percent': 20,
+  'channel_auto_priority_setting.latency_priority_penalty': 1,
 } as const satisfies ChannelAutoPrioritySettings
 
 export const CHANNEL_HEALTH_PRESET_VALUES = {

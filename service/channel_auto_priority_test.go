@@ -177,20 +177,181 @@ func TestApplyChannelAutoPrioritySkipsInvalidSnapshotsAndUnconfiguredChannels(t 
 	assert.Equal(t, uint(66), loadAutoPriorityAbility(t, 1203).Weight)
 }
 
+func TestChannelAutoPriorityLatencyStatsUseRecentFRTLogs(t *testing.T) {
+	withChannelAutoPriorityTestDB(t)
+
+	setting := operation_setting.ChannelAutoPrioritySetting{
+		LatencyGuardEnabled:       true,
+		LatencyThresholdSeconds:   10,
+		LatencyWindowMinutes:      10,
+		LatencyMinSamples:         2,
+		LatencySlowRatioThreshold: 0.30,
+	}
+	now := time.Unix(1_700_000_000, 0)
+	seedAutoPriorityConsumeLog(t, 1301, now.Add(-time.Minute), 12_000)
+	seedAutoPriorityConsumeLog(t, 1301, now.Add(-2*time.Minute), 11_000)
+	seedAutoPriorityConsumeLog(t, 1301, now.Add(-3*time.Minute), 5_000)
+	seedAutoPriorityConsumeLog(t, 1301, now.Add(-4*time.Minute), 0)
+	seedAutoPriorityConsumeLog(t, 1301, now.Add(-5*time.Minute), -1)
+	seedAutoPriorityConsumeLogOther(t, 1301, now.Add(-6*time.Minute), `{"frt":"oops"}`)
+	seedAutoPriorityConsumeLogOther(t, 1301, now.Add(-7*time.Minute), `not-json`)
+	seedAutoPriorityConsumeLog(t, 1301, now.Add(-20*time.Minute), 20_000)
+	seedAutoPriorityConsumeLog(t, 1302, now.Add(-time.Minute), 20_000)
+
+	stats, err := loadChannelAutoPriorityLatencyStats(context.Background(), []int{1301}, setting, now)
+
+	require.NoError(t, err)
+	require.Contains(t, stats, 1301)
+	assert.Equal(t, 3, stats[1301].Samples)
+	assert.Equal(t, 2, stats[1301].SlowSamples)
+	assert.InDelta(t, 2.0/3.0, stats[1301].SlowRatio, 0.0001)
+}
+
+func TestApplyChannelAutoPriorityDegradesAndRecoversSlowFirstResponseChannel(t *testing.T) {
+	withChannelAutoPriorityTestDB(t)
+	withChannelHealthTestSettings(t)
+	ResetChannelMultiplierMonitorForTest()
+	resetChannelAutoPriorityLatencyGuardForTest()
+	t.Cleanup(ResetChannelMultiplierMonitorForTest)
+
+	setting := operation_setting.GetChannelAutoPrioritySetting()
+	originalSetting := *setting
+	*setting = operation_setting.ChannelAutoPrioritySetting{
+		Enabled:                       true,
+		MinWeight:                     20,
+		MaxWeight:                     100,
+		LatencyGuardEnabled:           true,
+		LatencyThresholdSeconds:       10,
+		LatencyWindowMinutes:          10,
+		LatencyMinSamples:             4,
+		LatencySlowRatioThreshold:     0.50,
+		LatencyRecoveryRatioThreshold: 0.20,
+		LatencyRetainedWeightPercent:  20,
+		LatencyPriorityPenalty:        1,
+	}
+	t.Cleanup(func() {
+		*setting = originalSetting
+		resetChannelAutoPriorityLatencyGuardForTest()
+	})
+
+	seedAutoPriorityChannel(t, 1301, "cheap-slow", 9, 9)
+	seedAutoPriorityChannel(t, 1302, "expensive-stable", 9, 9)
+	model.InitChannelCache()
+
+	now := time.Now()
+	setHealthyMultiplierSnapshot(1301, 0.2, now)
+	setHealthyMultiplierSnapshot(1302, 1.0, now)
+	for _, frtMs := range []float64{12_000, 13_000, 11_000, 3_000} {
+		seedAutoPriorityConsumeLog(t, 1301, now.Add(-time.Minute), frtMs)
+	}
+	for _, frtMs := range []float64{2_000, 2_500, 3_000, 3_500} {
+		seedAutoPriorityConsumeLog(t, 1302, now.Add(-time.Minute), frtMs)
+	}
+
+	_, err := ApplyChannelAutoPriority(context.Background())
+	require.NoError(t, err)
+
+	degradedCheap := loadAutoPriorityChannel(t, 1301)
+	stableExpensive := loadAutoPriorityChannel(t, 1302)
+	assert.Equal(t, stableExpensive.GetPriority(), degradedCheap.GetPriority())
+	assert.Equal(t, 20, degradedCheap.GetWeight())
+	assert.Equal(t, uint(degradedCheap.GetWeight()), loadAutoPriorityAbility(t, 1301).Weight)
+
+	require.NoError(t, model.LOG_DB.Where("channel_id = ?", 1301).Delete(&model.Log{}).Error)
+	for _, frtMs := range []float64{2_000, 2_500, 3_000, 3_500} {
+		seedAutoPriorityConsumeLog(t, 1301, time.Now().Add(-time.Minute), frtMs)
+	}
+
+	_, err = ApplyChannelAutoPriority(context.Background())
+	require.NoError(t, err)
+
+	recoveredCheap := loadAutoPriorityChannel(t, 1301)
+	assert.Greater(t, recoveredCheap.GetPriority(), loadAutoPriorityChannel(t, 1302).GetPriority())
+	assert.Greater(t, recoveredCheap.GetWeight(), degradedCheap.GetWeight())
+	assert.Equal(t, recoveredCheap.GetPriority(), *loadAutoPriorityAbility(t, 1301).Priority)
+}
+
+func TestApplyChannelAutoPriorityLatencyGuardChangesRoutePreference(t *testing.T) {
+	withChannelAutoPriorityTestDB(t)
+	withChannelHealthTestSettings(t)
+	ResetChannelMultiplierMonitorForTest()
+	resetChannelAutoPriorityLatencyGuardForTest()
+	t.Cleanup(ResetChannelMultiplierMonitorForTest)
+
+	setting := operation_setting.GetChannelAutoPrioritySetting()
+	originalSetting := *setting
+	*setting = operation_setting.ChannelAutoPrioritySetting{
+		Enabled:                       true,
+		MinWeight:                     20,
+		MaxWeight:                     100,
+		LatencyGuardEnabled:           true,
+		LatencyThresholdSeconds:       10,
+		LatencyWindowMinutes:          10,
+		LatencyMinSamples:             4,
+		LatencySlowRatioThreshold:     0.50,
+		LatencyRecoveryRatioThreshold: 0.20,
+		LatencyRetainedWeightPercent:  20,
+		LatencyPriorityPenalty:        2,
+	}
+	t.Cleanup(func() {
+		*setting = originalSetting
+		resetChannelAutoPriorityLatencyGuardForTest()
+	})
+
+	seedAutoPriorityChannel(t, 1311, "cheap-slow", 1, 50)
+	seedAutoPriorityChannel(t, 1312, "middle-stable", 1, 50)
+	seedAutoPriorityChannel(t, 1313, "expensive-stable", 1, 50)
+	model.InitChannelCache()
+
+	now := time.Now()
+	setHealthyMultiplierSnapshot(1311, 0.2, now)
+	setHealthyMultiplierSnapshot(1312, 0.5, now)
+	setHealthyMultiplierSnapshot(1313, 1.0, now)
+	for _, frtMs := range []float64{12_000, 13_000, 11_000, 14_000} {
+		seedAutoPriorityConsumeLog(t, 1311, now.Add(-time.Minute), frtMs)
+	}
+
+	_, err := ApplyChannelAutoPriority(context.Background())
+	require.NoError(t, err)
+
+	channel, group, err := CacheGetRandomSatisfiedChannel(&RetryParam{
+		TokenGroup: "default",
+		ModelName:  "gpt-auto-priority",
+		Retry:      common.GetPointer(0),
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "default", group)
+	require.NotNil(t, channel)
+	assert.Equal(t, 1312, channel.Id)
+	assert.Greater(t, loadAutoPriorityChannel(t, 1312).GetPriority(), loadAutoPriorityChannel(t, 1311).GetPriority())
+}
+
 func withChannelAutoPriorityTestDB(t *testing.T) {
 	t.Helper()
 
 	oldDB := model.DB
+	oldLogDB := model.LOG_DB
 	oldMemoryCacheEnabled := common.MemoryCacheEnabled
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	oldMainDatabaseType := common.MainDatabaseType()
+	oldLogDatabaseType := common.LogDatabaseType()
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
 	model.DB = db
+	model.LOG_DB = db
 	common.MemoryCacheEnabled = true
-	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}))
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.Log{}))
 
 	t.Cleanup(func() {
 		model.DB = oldDB
+		model.LOG_DB = oldLogDB
 		common.MemoryCacheEnabled = oldMemoryCacheEnabled
+		common.SetDatabaseTypes(oldMainDatabaseType, oldLogDatabaseType)
+		_ = sqlDB.Close()
 		model.InitChannelCache()
 	})
 }
@@ -262,4 +423,25 @@ func loadAutoPriorityAbility(t *testing.T, channelID int) model.Ability {
 	var ability model.Ability
 	require.NoError(t, model.DB.Where("channel_id = ? AND model = ?", channelID, "gpt-auto-priority").First(&ability).Error)
 	return ability
+}
+
+func seedAutoPriorityConsumeLog(t *testing.T, channelID int, createdAt time.Time, firstResponseMs float64) {
+	t.Helper()
+
+	other := map[string]any{}
+	if firstResponseMs >= 0 {
+		other["frt"] = firstResponseMs
+	}
+	seedAutoPriorityConsumeLogOther(t, channelID, createdAt, common.MapToJsonStr(other))
+}
+
+func seedAutoPriorityConsumeLogOther(t *testing.T, channelID int, createdAt time.Time, other string) {
+	t.Helper()
+
+	require.NoError(t, model.LOG_DB.Create(&model.Log{
+		CreatedAt: createdAt.Unix(),
+		Type:      model.LogTypeConsume,
+		ChannelId: channelID,
+		Other:     other,
+	}).Error)
 }

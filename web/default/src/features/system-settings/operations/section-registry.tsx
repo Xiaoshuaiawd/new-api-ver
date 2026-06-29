@@ -93,6 +93,52 @@ const OPERATIONS_SECTIONS = [
             CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
               'channel_auto_priority_setting.max_weight'
             ],
+          'channel_auto_priority_setting.latency_guard_enabled':
+            settings['channel_auto_priority_setting.latency_guard_enabled'] ??
+            CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
+              'channel_auto_priority_setting.latency_guard_enabled'
+            ],
+          'channel_auto_priority_setting.latency_threshold_seconds':
+            settings['channel_auto_priority_setting.latency_threshold_seconds'] ??
+            CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
+              'channel_auto_priority_setting.latency_threshold_seconds'
+            ],
+          'channel_auto_priority_setting.latency_window_minutes':
+            settings['channel_auto_priority_setting.latency_window_minutes'] ??
+            CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
+              'channel_auto_priority_setting.latency_window_minutes'
+            ],
+          'channel_auto_priority_setting.latency_min_samples':
+            settings['channel_auto_priority_setting.latency_min_samples'] ??
+            CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
+              'channel_auto_priority_setting.latency_min_samples'
+            ],
+          'channel_auto_priority_setting.latency_slow_ratio_threshold':
+            settings[
+              'channel_auto_priority_setting.latency_slow_ratio_threshold'
+            ] ??
+            CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
+              'channel_auto_priority_setting.latency_slow_ratio_threshold'
+            ],
+          'channel_auto_priority_setting.latency_recovery_ratio_threshold':
+            settings[
+              'channel_auto_priority_setting.latency_recovery_ratio_threshold'
+            ] ??
+            CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
+              'channel_auto_priority_setting.latency_recovery_ratio_threshold'
+            ],
+          'channel_auto_priority_setting.latency_retained_weight_percent':
+            settings[
+              'channel_auto_priority_setting.latency_retained_weight_percent'
+            ] ??
+            CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
+              'channel_auto_priority_setting.latency_retained_weight_percent'
+            ],
+          'channel_auto_priority_setting.latency_priority_penalty':
+            settings['channel_auto_priority_setting.latency_priority_penalty'] ??
+            CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
+              'channel_auto_priority_setting.latency_priority_penalty'
+            ],
         }}
       />
     ),
