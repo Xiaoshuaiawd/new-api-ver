@@ -723,6 +723,9 @@ func AddChannel(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	for _, channel := range channels {
+		service.RefreshChannelMultiplierSnapshotAsync(channel.Id)
+	}
 	service.ResetProxyClientCache()
 	recordManageAudit(c, "channel.create", map[string]interface{}{
 		"name":  addChannelRequest.Channel.Name,
@@ -1093,6 +1096,7 @@ func UpdateChannel(c *gin.Context) {
 	}
 	model.InitChannelCache()
 	service.ResetProxyClientCache()
+	service.RefreshChannelMultiplierSnapshotAsync(channel.Id)
 	// 记录变更的字段名（语言无关的字段标识），密钥仅记录"已更换"绝不记录内容。
 	changedFields := make([]string, 0)
 	if channel.Models != originChannel.Models {
@@ -1124,6 +1128,36 @@ func UpdateChannel(c *gin.Context) {
 		"data":    channel,
 	})
 	return
+}
+
+func RefreshChannelMultiplier(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	channel, err := model.GetChannelById(id, true)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "获取渠道信息失败，请稍后重试",
+		})
+		return
+	}
+	snapshot, err := service.RefreshChannelMultiplierSnapshot(c.Request.Context(), channel)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+			"data":    snapshot,
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    snapshot,
+	})
 }
 
 func UpdateChannelStatus(c *gin.Context) {

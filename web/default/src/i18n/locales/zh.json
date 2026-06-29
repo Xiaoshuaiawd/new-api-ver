@@ -5151,6 +5151,15 @@
     "Zoom": "缩放",
     "Upstream key multiplier monitor": "上游 Key 倍率监控",
     "Multiplier probe interval (minutes)": "倍率探测间隔（分钟）",
-    "How often the background worker logs in to upstream consoles to refresh key multipliers.": "后台任务登录上游控制台并刷新 Key 倍率的频率。"
+    "How often the background worker logs in to upstream consoles to refresh key multipliers.": "后台任务登录上游控制台并刷新 Key 倍率的频率。",
+    "Stale": "已过期",
+    "Waiting for first probe": "等待首次探测",
+    "Probe status:": "探测状态：",
+    "Last probe:": "上次探测：",
+    "Error reason:": "错误原因：",
+    "Multiplier refreshed": "倍率已刷新",
+    "Multiplier refresh failed": "倍率刷新失败",
+    "Refreshing multiplier...": "正在刷新倍率...",
+    "Refresh multiplier": "立即刷新倍率"
   }
 }

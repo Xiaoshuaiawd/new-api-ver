@@ -5151,6 +5151,15 @@
     "Zoom": "ズーム",
     "Upstream key multiplier monitor": "上流キー倍率モニター",
     "Multiplier probe interval (minutes)": "倍率プローブ間隔（分）",
-    "How often the background worker logs in to upstream consoles to refresh key multipliers.": "バックグラウンドワーカーが上流コンソールにログインしてキー倍率を更新する頻度です。"
+    "How often the background worker logs in to upstream consoles to refresh key multipliers.": "バックグラウンドワーカーが上流コンソールにログインしてキー倍率を更新する頻度です。",
+    "Stale": "期限切れ",
+    "Waiting for first probe": "初回プローブ待ち",
+    "Probe status:": "プローブ状態：",
+    "Last probe:": "前回のプローブ：",
+    "Error reason:": "エラー理由：",
+    "Multiplier refreshed": "倍率を更新しました",
+    "Multiplier refresh failed": "倍率の更新に失敗しました",
+    "Refreshing multiplier...": "倍率を更新中...",
+    "Refresh multiplier": "倍率を今すぐ更新"
   }
 }

@@ -5151,6 +5151,15 @@
     "Zoom": "Zoom",
     "Upstream key multiplier monitor": "Giám sát hệ số khóa thượng nguồn",
     "Multiplier probe interval (minutes)": "Khoảng thăm dò hệ số (phút)",
-    "How often the background worker logs in to upstream consoles to refresh key multipliers.": "Tần suất tác vụ nền đăng nhập vào bảng điều khiển thượng nguồn để làm mới hệ số khóa."
+    "How often the background worker logs in to upstream consoles to refresh key multipliers.": "Tần suất tác vụ nền đăng nhập vào bảng điều khiển thượng nguồn để làm mới hệ số khóa.",
+    "Stale": "Đã cũ",
+    "Waiting for first probe": "Đang chờ lần thăm dò đầu tiên",
+    "Probe status:": "Trạng thái thăm dò:",
+    "Last probe:": "Lần thăm dò cuối:",
+    "Error reason:": "Lý do lỗi:",
+    "Multiplier refreshed": "Đã làm mới hệ số",
+    "Multiplier refresh failed": "Làm mới hệ số thất bại",
+    "Refreshing multiplier...": "Đang làm mới hệ số...",
+    "Refresh multiplier": "Làm mới hệ số"
   }
 }

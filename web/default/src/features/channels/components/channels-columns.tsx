@@ -25,6 +25,7 @@ import {
   ChevronRight,
   Gauge,
   ListOrdered,
+  RefreshCw,
   Shuffle,
   SlidersHorizontal,
 } from 'lucide-react'
@@ -59,9 +60,10 @@ import {
 import { formatTimestampToDate } from '@/lib/format'
 import { truncateText } from '@/lib/utils'
 
-import { getCodexUsage } from '../api'
+import { getCodexUsage, refreshChannelMultiplier } from '../api'
 import { CHANNEL_STATUS_CONFIG, MODEL_FETCHABLE_TYPES } from '../constants'
 import {
+  channelsQueryKeys,
   formatRelativeTime,
   formatResponseTime,
   getBalanceVariant,
@@ -173,6 +175,16 @@ function getUpstreamMultiplierBadgeConfig(
     return { label: t('Multiplier error'), variant: 'danger' }
   }
   return { label: t('Multiplier pending'), variant: 'neutral', pulse: true }
+}
+
+function getUpstreamMultiplierStatusLabel(
+  snapshot: ChannelUpstreamMultiplier,
+  t: (key: string) => string
+): string {
+  if (snapshot.state === 'healthy') return t('Healthy')
+  if (snapshot.state === 'stale') return t('Stale')
+  if (snapshot.state === 'error') return t('Error')
+  return t('Waiting for first probe')
 }
 
 function getRuntimeHealthBadgeConfig(
@@ -336,6 +348,8 @@ function RuntimeHealthCell({ channel }: { channel: Channel }) {
 function UpstreamMultiplierBadge({ channel }: { channel: Channel }) {
   const { t } = useTranslation()
   const { sensitiveVisible } = useChannels()
+  const queryClient = useQueryClient()
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const snapshot = getUpstreamMultiplier(channel)
 
   if (!snapshot.enabled) {
@@ -354,6 +368,24 @@ function UpstreamMultiplierBadge({ channel }: { channel: Channel }) {
       })
     : SENSITIVE_MASK
   const username = sensitiveVisible ? snapshot.username || '-' : SENSITIVE_MASK
+  const statusLabel = getUpstreamMultiplierStatusLabel(snapshot, t)
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true)
+    try {
+      const res = await refreshChannelMultiplier(channel.id)
+      if (res.success) {
+        toast.success(t('Multiplier refreshed'))
+      } else {
+        toast.error(res.message || t('Multiplier refresh failed'))
+      }
+      await queryClient.invalidateQueries({
+        queryKey: channelsQueryKeys.lists(),
+      })
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
 
   return (
     <TooltipProvider delay={100}>
@@ -373,6 +405,9 @@ function UpstreamMultiplierBadge({ channel }: { channel: Channel }) {
         />
         <TooltipContent side='top' className='max-w-xs'>
           <div className='space-y-1 text-xs'>
+            <div>
+              {t('Probe status:')} {statusLabel}
+            </div>
             <div>
               {t('Upstream format:')} {snapshot.format || '-'}
             </div>
@@ -397,13 +432,28 @@ function UpstreamMultiplierBadge({ channel }: { channel: Channel }) {
               {t('Upstream balance:')} {balance}
             </div>
             <div>
-              {t('Observed at:')} {observedAt}
+              {t('Last probe:')} {observedAt}
             </div>
             {snapshot.reason && (
               <div>
-                {t('Reason:')} {snapshot.reason}
+                {t('Error reason:')} {snapshot.reason}
               </div>
             )}
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              className='mt-2 h-7 w-full gap-1.5 text-xs'
+              disabled={isRefreshing}
+              onClick={handleRefresh}
+            >
+              <RefreshCw
+                className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`}
+              />
+              {isRefreshing
+                ? t('Refreshing multiplier...')
+                : t('Refresh multiplier')}
+            </Button>
           </div>
         </TooltipContent>
       </Tooltip>

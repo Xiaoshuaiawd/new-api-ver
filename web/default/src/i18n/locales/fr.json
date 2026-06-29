@@ -5151,6 +5151,15 @@
     "Zoom": "Zoom",
     "Upstream key multiplier monitor": "Surveillance du multiplicateur de clé amont",
     "Multiplier probe interval (minutes)": "Intervalle de sonde du multiplicateur (minutes)",
-    "How often the background worker logs in to upstream consoles to refresh key multipliers.": "Fréquence à laquelle la tâche en arrière-plan se connecte aux consoles amont pour actualiser les multiplicateurs de clé."
+    "How often the background worker logs in to upstream consoles to refresh key multipliers.": "Fréquence à laquelle la tâche en arrière-plan se connecte aux consoles amont pour actualiser les multiplicateurs de clé.",
+    "Stale": "Obsolète",
+    "Waiting for first probe": "En attente de la première sonde",
+    "Probe status:": "État de la sonde :",
+    "Last probe:": "Dernière sonde :",
+    "Error reason:": "Raison de l’erreur :",
+    "Multiplier refreshed": "Multiplicateur actualisé",
+    "Multiplier refresh failed": "Échec de l’actualisation du multiplicateur",
+    "Refreshing multiplier...": "Actualisation du multiplicateur...",
+    "Refresh multiplier": "Actualiser le multiplicateur"
   }
 }

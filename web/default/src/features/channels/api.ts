@@ -32,6 +32,7 @@ import type {
   GetChannelResponse,
   GetChannelsParams,
   GetChannelsResponse,
+  ChannelUpstreamMultiplier,
   MultiKeyManageParams,
   MultiKeyStatusResponse,
   SearchChannelsParams,
@@ -115,6 +116,19 @@ export async function runChannelRuntimeAction(
   const res = await api.post(
     `/api/channel/${id}/runtime_action`,
     data,
+    channelActionConfig()
+  )
+  return res.data
+}
+
+export async function refreshChannelMultiplier(id: number): Promise<{
+  success: boolean
+  message?: string
+  data?: ChannelUpstreamMultiplier
+}> {
+  const res = await api.post(
+    `/api/channel/${id}/multiplier/refresh`,
+    {},
     channelActionConfig()
   )
   return res.data

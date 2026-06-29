@@ -5151,6 +5151,15 @@
     "Zoom": "Zoom",
     "Upstream key multiplier monitor": "Upstream key multiplier monitor",
     "Multiplier probe interval (minutes)": "Multiplier probe interval (minutes)",
-    "How often the background worker logs in to upstream consoles to refresh key multipliers.": "How often the background worker logs in to upstream consoles to refresh key multipliers."
+    "How often the background worker logs in to upstream consoles to refresh key multipliers.": "How often the background worker logs in to upstream consoles to refresh key multipliers.",
+    "Stale": "Stale",
+    "Waiting for first probe": "Waiting for first probe",
+    "Probe status:": "Probe status:",
+    "Last probe:": "Last probe:",
+    "Error reason:": "Error reason:",
+    "Multiplier refreshed": "Multiplier refreshed",
+    "Multiplier refresh failed": "Multiplier refresh failed",
+    "Refreshing multiplier...": "Refreshing multiplier...",
+    "Refresh multiplier": "Refresh multiplier"
   }
 }

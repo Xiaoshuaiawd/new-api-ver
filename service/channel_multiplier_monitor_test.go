@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -99,6 +101,119 @@ func TestChannelMultiplierMonitorIntervalUsesSystemSetting(t *testing.T) {
 
 	setting.IntervalMinutes = 0
 	assert.Equal(t, 2, int(channelMultiplierMonitorInterval().Minutes()))
+}
+
+func TestRefreshChannelMultiplierSnapshotStoresResult(t *testing.T) {
+	ResetChannelMultiplierMonitorForTest()
+	t.Cleanup(ResetChannelMultiplierMonitorForTest)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/user/login":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":4718}}`))
+		case "/api/token/":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":8889,"key":"sk-current","group":{"name":"pro","ratio":0.07}}]}}`))
+		case "/api/user/self":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"quota":1000000}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	channel := &model.Channel{
+		Id:   1201,
+		Type: constant.ChannelTypeCustom,
+		Key:  "sk-current",
+		Name: "refresh-now",
+		OtherSettings: channelMultiplierSettingsJSON(t, &dto.ChannelMultiplierMonitorConfig{
+			Enabled:  true,
+			Format:   dto.ChannelMultiplierProviderFormatNewAPI,
+			BaseURL:  server.URL,
+			Username: "alice",
+			Password: "secret",
+		}),
+	}
+
+	snapshot, err := RefreshChannelMultiplierSnapshot(context.Background(), channel)
+
+	require.NoError(t, err)
+	assert.Equal(t, ChannelMultiplierSnapshotHealthy, snapshot.State)
+	assert.Equal(t, 0.07, snapshot.Multiplier)
+
+	stored, ok := GetChannelMultiplierSnapshot(channel.Id)
+	require.True(t, ok)
+	assert.Equal(t, snapshot.Multiplier, stored.Multiplier)
+	assert.Equal(t, snapshot.ObservedAt, stored.ObservedAt)
+}
+
+func TestProbeChannelMultipliersRunsWithBoundedConcurrency(t *testing.T) {
+	ResetChannelMultiplierMonitorForTest()
+	t.Cleanup(ResetChannelMultiplierMonitorForTest)
+
+	originalProbe := channelMultiplierProbe
+	t.Cleanup(func() {
+		channelMultiplierProbe = originalProbe
+	})
+
+	var active int32
+	var maxActive int32
+	var total int32
+	started := make(chan int, 6)
+	release := make(chan struct{})
+	channelMultiplierProbe = func(ctx context.Context, channel *model.Channel) (ChannelMultiplierSnapshot, error) {
+		current := atomic.AddInt32(&active, 1)
+		for {
+			previous := atomic.LoadInt32(&maxActive)
+			if current <= previous || atomic.CompareAndSwapInt32(&maxActive, previous, current) {
+				break
+			}
+		}
+		started <- channel.Id
+		<-release
+		atomic.AddInt32(&active, -1)
+		atomic.AddInt32(&total, 1)
+		return buildHealthyMultiplierSnapshot(channel, GetChannelMultiplierMonitorConfig(channel), 0.5, 1, "default", "1"), nil
+	}
+
+	channels := make([]*model.Channel, 0, 6)
+	for i := 1; i <= 6; i++ {
+		channels = append(channels, &model.Channel{
+			Id:   i,
+			Type: constant.ChannelTypeCustom,
+			Key:  "sk-current",
+			Name: "concurrent",
+			OtherSettings: channelMultiplierSettingsJSON(t, &dto.ChannelMultiplierMonitorConfig{
+				Enabled:  true,
+				Format:   dto.ChannelMultiplierProviderFormatNewAPI,
+				BaseURL:  "https://upstream.example.com",
+				Username: "alice",
+				Password: "secret",
+			}),
+		})
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		probeChannelMultipliers(context.Background(), channels, 3)
+	}()
+
+	for i := 0; i < 3; i++ {
+		<-started
+	}
+	assert.Equal(t, int32(3), atomic.LoadInt32(&maxActive))
+	select {
+	case id := <-started:
+		t.Fatalf("probe %d started before a worker slot was released", id)
+	default:
+	}
+
+	close(release)
+	wg.Wait()
+	assert.Equal(t, int32(6), atomic.LoadInt32(&total))
+	assert.Equal(t, int32(3), atomic.LoadInt32(&maxActive))
 }
 
 func TestProbeSub2APIChannelMultiplierMatchesCurrentKey(t *testing.T) {

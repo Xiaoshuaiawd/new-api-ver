@@ -27,10 +27,11 @@ import (
 )
 
 const (
-	channelMultiplierMonitorTimeout = 15 * time.Second
-	channelMultiplierSnapshotTTL    = 5 * time.Minute
-	channelMultiplierCacheTTL       = 15 * time.Minute
-	channelMultiplierCacheNamespace = "new-api:channel_multiplier:v1"
+	channelMultiplierMonitorConcurrency = 4
+	channelMultiplierMonitorTimeout     = 15 * time.Second
+	channelMultiplierSnapshotTTL        = 5 * time.Minute
+	channelMultiplierCacheTTL           = 15 * time.Minute
+	channelMultiplierCacheNamespace     = "new-api:channel_multiplier:v1"
 )
 
 type ChannelMultiplierSnapshotState string
@@ -94,6 +95,8 @@ var channelMultiplierMonitor = struct {
 }{
 	now: time.Now,
 }
+
+var channelMultiplierProbe = probeChannelMultiplier
 
 func StartChannelMultiplierMonitorWorker() {
 	channelMultiplierMonitor.once.Do(func() {
@@ -173,29 +176,43 @@ func runChannelMultiplierMonitorOnce() {
 		return
 	}
 
+	probeChannelMultipliers(ctx, channels, channelMultiplierMonitorConcurrency)
+}
+
+func probeChannelMultipliers(ctx context.Context, channels []*model.Channel, concurrency int) {
+	candidates := make([]*model.Channel, 0, len(channels))
 	for _, channel := range channels {
 		if channel == nil || !shouldMonitorChannelMultiplier(channel) {
 			continue
 		}
-		snapshot, err := probeChannelMultiplier(ctx, channel)
-		if err != nil {
-			cfg := GetChannelMultiplierMonitorConfig(channel)
-			now := channelMultiplierNow()
-			snapshot = ChannelMultiplierSnapshot{
-				ChannelID:  channel.Id,
-				Enabled:    true,
-				Format:     cfg.Format,
-				BaseURL:    channelMultiplierBaseURL(channel, cfg),
-				State:      ChannelMultiplierSnapshotError,
-				Username:   cfg.Username,
-				Reason:     err.Error(),
-				ObservedAt: now.Unix(),
-				ExpiresAt:  now.Add(channelMultiplierSnapshotTTL).Unix(),
-			}
-			logger.LogWarn(ctx, fmt.Sprintf("channel multiplier monitor: probe failed: channel_id=%d, err=%v", channel.Id, err))
-		}
-		setChannelMultiplierSnapshot(snapshot)
+		candidates = append(candidates, channel)
 	}
+	if len(candidates) == 0 {
+		return
+	}
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	if concurrency > len(candidates) {
+		concurrency = len(candidates)
+	}
+
+	jobs := make(chan *model.Channel)
+	var wg sync.WaitGroup
+	wg.Add(concurrency)
+	for i := 0; i < concurrency; i++ {
+		go func() {
+			defer wg.Done()
+			for channel := range jobs {
+				_, _ = refreshChannelMultiplierSnapshot(ctx, channel, false)
+			}
+		}()
+	}
+	for _, channel := range candidates {
+		jobs <- channel
+	}
+	close(jobs)
+	wg.Wait()
 }
 
 func shouldMonitorChannelMultiplier(channel *model.Channel) bool {
@@ -206,6 +223,57 @@ func shouldMonitorChannelMultiplier(channel *model.Channel) bool {
 		strings.TrimSpace(cfg.Username) != "" &&
 		strings.TrimSpace(cfg.Password) != "" &&
 		firstChannelKey(channel) != ""
+}
+
+func RefreshChannelMultiplierSnapshot(ctx context.Context, channel *model.Channel) (ChannelMultiplierSnapshot, error) {
+	return refreshChannelMultiplierSnapshot(ctx, channel, true)
+}
+
+func RefreshChannelMultiplierSnapshotAsync(channelID int) {
+	if channelID <= 0 {
+		return
+	}
+	gopool.Go(func() {
+		channel, err := model.GetChannelById(channelID, true)
+		if err != nil {
+			logger.LogWarn(context.Background(), fmt.Sprintf("channel multiplier monitor: async load failed: channel_id=%d, err=%v", channelID, err))
+			return
+		}
+		_, _ = refreshChannelMultiplierSnapshot(context.Background(), channel, false)
+	})
+}
+
+func refreshChannelMultiplierSnapshot(ctx context.Context, channel *model.Channel, requireConfigured bool) (ChannelMultiplierSnapshot, error) {
+	if channel == nil {
+		return ChannelMultiplierSnapshot{State: ChannelMultiplierSnapshotEmpty}, errors.New("channel is required")
+	}
+	if !shouldMonitorChannelMultiplier(channel) {
+		snapshot := GetChannelMultiplierSnapshotForDisplay(channel)
+		if requireConfigured {
+			return snapshot, errors.New("channel multiplier monitor is not enabled or is missing base URL, account, password, or key")
+		}
+		return snapshot, nil
+	}
+
+	snapshot, err := channelMultiplierProbe(ctx, channel)
+	if err != nil {
+		cfg := GetChannelMultiplierMonitorConfig(channel)
+		now := channelMultiplierNow()
+		snapshot = ChannelMultiplierSnapshot{
+			ChannelID:  channel.Id,
+			Enabled:    true,
+			Format:     cfg.Format,
+			BaseURL:    channelMultiplierBaseURL(channel, cfg),
+			State:      ChannelMultiplierSnapshotError,
+			Username:   cfg.Username,
+			Reason:     err.Error(),
+			ObservedAt: now.Unix(),
+			ExpiresAt:  now.Add(channelMultiplierSnapshotTTL).Unix(),
+		}
+		logger.LogWarn(ctx, fmt.Sprintf("channel multiplier monitor: probe failed: channel_id=%d, err=%v", channel.Id, err))
+	}
+	setChannelMultiplierSnapshot(snapshot)
+	return snapshot, err
 }
 
 func GetChannelMultiplierMonitorConfig(channel *model.Channel) dto.ChannelMultiplierMonitorConfig {

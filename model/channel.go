@@ -437,10 +437,14 @@ func BatchInsertChannels(channels []Channel) error {
 		}
 	}()
 
+	offset := 0
 	for _, chunk := range lo.Chunk(channels, 50) {
 		if err := tx.Create(&chunk).Error; err != nil {
 			tx.Rollback()
 			return err
+		}
+		for i := range chunk {
+			channels[offset+i].Id = chunk[i].Id
 		}
 		for _, channel_ := range chunk {
 			if err := channel_.AddAbilities(tx); err != nil {
@@ -448,6 +452,7 @@ func BatchInsertChannels(channels []Channel) error {
 				return err
 			}
 		}
+		offset += len(chunk)
 	}
 	return tx.Commit().Error
 }
