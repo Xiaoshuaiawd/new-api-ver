@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -361,6 +362,14 @@ func updateChannelBalance(channel *model.Channel) (float64, error) {
 	if channel.GetBaseURL() == "" {
 		channel.BaseURL = &baseURL
 	}
+	if balance, configured, err := service.FetchChannelMultiplierAccountBalance(context.Background(), channel); configured {
+		if err != nil {
+			return 0, err
+		}
+		channel.UpdateBalance(balance)
+		return balance, nil
+	}
+
 	switch channel.Type {
 	case constant.ChannelTypeOpenAI:
 		if channel.GetBaseURL() != "" {

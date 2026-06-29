@@ -414,6 +414,34 @@ func probeChannelMultiplier(ctx context.Context, channel *model.Channel) (Channe
 	}
 }
 
+func FetchChannelMultiplierAccountBalance(ctx context.Context, channel *model.Channel) (float64, bool, error) {
+	if channel == nil {
+		return 0, false, nil
+	}
+	cfg := GetChannelMultiplierMonitorConfig(channel)
+	if cfg.Format == "" ||
+		strings.TrimSpace(channelMultiplierBaseURL(channel, cfg)) == "" ||
+		strings.TrimSpace(cfg.Username) == "" ||
+		strings.TrimSpace(cfg.Password) == "" {
+		return 0, false, nil
+	}
+
+	client, auth, err := loginChannelMultiplierProvider(ctx, channel, cfg)
+	if err != nil {
+		return 0, true, err
+	}
+	switch cfg.Format {
+	case dto.ChannelMultiplierProviderFormatSub2API:
+		balance, err := fetchSub2APIBalance(ctx, client, auth)
+		return balance, true, err
+	case dto.ChannelMultiplierProviderFormatNewAPI:
+		balance, err := fetchNewAPIBalance(ctx, client, auth)
+		return balance, true, err
+	default:
+		return 0, true, fmt.Errorf("unsupported monitor format: %s", cfg.Format)
+	}
+}
+
 func loginChannelMultiplierProvider(ctx context.Context, channel *model.Channel, cfg dto.ChannelMultiplierMonitorConfig) (*channelMultiplierMonitorClient, *channelMultiplierAuth, error) {
 	baseURL := channelMultiplierBaseURL(channel, cfg)
 	if baseURL == "" {

@@ -443,7 +443,7 @@ function UpstreamMultiplierBadge({ channel }: { channel: Channel }) {
               type='button'
               variant='outline'
               size='sm'
-              className='mt-2 h-7 w-full gap-1.5 text-xs'
+              className='mt-2 h-7 w-full gap-1.5 text-xs text-foreground hover:text-foreground'
               disabled={isRefreshing}
               onClick={handleRefresh}
             >

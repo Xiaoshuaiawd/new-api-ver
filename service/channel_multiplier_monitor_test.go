@@ -147,6 +147,92 @@ func TestRefreshChannelMultiplierSnapshotStoresResult(t *testing.T) {
 	assert.Equal(t, snapshot.ObservedAt, stored.ObservedAt)
 }
 
+func TestFetchChannelMultiplierAccountBalanceUsesSub2APIAccount(t *testing.T) {
+	var sawKeysEndpoint bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			assert.Equal(t, http.MethodPost, r.Method)
+			_, _ = w.Write([]byte(`{"data":{"access_token":"token-123"}}`))
+		case "/api/v1/auth/me":
+			assert.Equal(t, "Bearer token-123", r.Header.Get("Authorization"))
+			_, _ = w.Write([]byte(`{"data":{"balance":26.54674067}}`))
+		case "/api/v1/keys":
+			sawKeysEndpoint = true
+			http.NotFound(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	channel := &model.Channel{
+		Id:      1301,
+		Type:    constant.ChannelTypeCustom,
+		Key:     "sk-current",
+		Name:    "sub2api-account-balance",
+		BaseURL: common.GetPointer(server.URL),
+		OtherSettings: channelMultiplierSettingsJSON(t, &dto.ChannelMultiplierMonitorConfig{
+			Enabled:  false,
+			Format:   dto.ChannelMultiplierProviderFormatSub2API,
+			BaseURL:  server.URL,
+			Username: "alice@example.com",
+			Password: "secret",
+		}),
+	}
+
+	balance, configured, err := FetchChannelMultiplierAccountBalance(context.Background(), channel)
+
+	require.NoError(t, err)
+	assert.True(t, configured)
+	assert.False(t, sawKeysEndpoint)
+	assert.Equal(t, 26.54674067, balance)
+}
+
+func TestFetchChannelMultiplierAccountBalanceUsesNewAPIAccount(t *testing.T) {
+	var sawTokenEndpoint bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/user/login":
+			assert.Equal(t, http.MethodPost, r.Method)
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "session-123", Path: "/"})
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":4718}}`))
+		case "/api/user/self":
+			assert.Equal(t, "4718", r.Header.Get("new-api-user"))
+			assert.Contains(t, r.Header.Get("Cookie"), "session=session-123")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"quota":6749186}}`))
+		case "/api/token/":
+			sawTokenEndpoint = true
+			http.NotFound(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	channel := &model.Channel{
+		Id:      1302,
+		Type:    constant.ChannelTypeCustom,
+		Key:     "sk-current",
+		Name:    "new-api-account-balance",
+		BaseURL: common.GetPointer(server.URL),
+		OtherSettings: channelMultiplierSettingsJSON(t, &dto.ChannelMultiplierMonitorConfig{
+			Enabled:  false,
+			Format:   dto.ChannelMultiplierProviderFormatNewAPI,
+			BaseURL:  server.URL,
+			Username: "alice",
+			Password: "secret",
+		}),
+	}
+
+	balance, configured, err := FetchChannelMultiplierAccountBalance(context.Background(), channel)
+
+	require.NoError(t, err)
+	assert.True(t, configured)
+	assert.False(t, sawTokenEndpoint)
+	assert.Equal(t, 6749186.0/500000.0, balance)
+}
+
 func TestProbeChannelMultipliersRunsWithBoundedConcurrency(t *testing.T) {
 	ResetChannelMultiplierMonitorForTest()
 	t.Cleanup(ResetChannelMultiplierMonitorForTest)
