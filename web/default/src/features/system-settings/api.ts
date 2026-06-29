@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
 import type {
+  ChannelAutoPriorityApplyResponse,
   ConfirmPaymentComplianceResponse,
   FetchUpstreamRatiosRequest,
   LogCleanupTask,
@@ -37,6 +38,13 @@ export async function getSystemOptions() {
 
 export async function updateSystemOption(request: UpdateOptionRequest) {
   const res = await api.put<UpdateOptionResponse>('/api/option/', request)
+  return res.data
+}
+
+export async function applyChannelAutoPriority() {
+  const res = await api.post<ChannelAutoPriorityApplyResponse>(
+    '/api/channel/auto_priority/apply'
+  )
   return res.data
 }
 

@@ -62,8 +62,24 @@ export type ChannelMultiplierMonitorSettings = {
   [CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY]: number
 }
 
+export const CHANNEL_AUTO_PRIORITY_SETTING_KEYS = [
+  'channel_auto_priority_setting.enabled',
+  'channel_auto_priority_setting.min_weight',
+  'channel_auto_priority_setting.max_weight',
+] as const
+
+export type ChannelAutoPrioritySettingKey =
+  (typeof CHANNEL_AUTO_PRIORITY_SETTING_KEYS)[number]
+
+export type ChannelAutoPrioritySettings = {
+  'channel_auto_priority_setting.enabled': boolean
+  'channel_auto_priority_setting.min_weight': number
+  'channel_auto_priority_setting.max_weight': number
+}
+
 export type ChannelHealthPanelSettings = ChannelHealthSettings &
-  ChannelMultiplierMonitorSettings
+  ChannelMultiplierMonitorSettings &
+  ChannelAutoPrioritySettings
 
 export const CHANNEL_HEALTH_PRESETS = [
   'conservative',
@@ -282,6 +298,12 @@ export const CHANNEL_HEALTH_DEFAULT_VALUES = {
 export const CHANNEL_MULTIPLIER_MONITOR_DEFAULT_VALUES = {
   [CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY]: 2,
 } as const satisfies ChannelMultiplierMonitorSettings
+
+export const CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES = {
+  'channel_auto_priority_setting.enabled': false,
+  'channel_auto_priority_setting.min_weight': 20,
+  'channel_auto_priority_setting.max_weight': 100,
+} as const satisfies ChannelAutoPrioritySettings
 
 export const CHANNEL_HEALTH_PRESET_VALUES = {
   conservative: {

@@ -19,6 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import {
+  CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES,
+  CHANNEL_AUTO_PRIORITY_SETTING_KEYS,
   applyChannelHealthPreset,
   CHANNEL_HEALTH_DEFAULT_VALUES,
   CHANNEL_HEALTH_PRESET_VALUES,
@@ -81,6 +83,16 @@ describe('channel health setting metadata', () => {
     })
     assert.deepEqual(CHANNEL_MULTIPLIER_MONITOR_DEFAULT_VALUES, {
       [CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY]: 2,
+    })
+    assert.deepEqual(CHANNEL_AUTO_PRIORITY_SETTING_KEYS, [
+      'channel_auto_priority_setting.enabled',
+      'channel_auto_priority_setting.min_weight',
+      'channel_auto_priority_setting.max_weight',
+    ])
+    assert.deepEqual(CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES, {
+      'channel_auto_priority_setting.enabled': false,
+      'channel_auto_priority_setting.min_weight': 20,
+      'channel_auto_priority_setting.max_weight': 100,
     })
   })
 

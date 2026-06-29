@@ -50,6 +50,7 @@ var channelPermissionRoutes = []permissionRoute{
 	{method: http.MethodPost, path: "/", permission: authz.ChannelSensitiveWrite, handler: controller.AddChannel},
 	{method: http.MethodPut, path: "/", permission: authz.ChannelWrite, handler: controller.UpdateChannel},
 	{method: http.MethodPost, path: "/:id/multiplier/refresh", permission: authz.ChannelOperate, handler: controller.RefreshChannelMultiplier},
+	{method: http.MethodPost, path: "/auto_priority/apply", permission: authz.ChannelOperate, handler: controller.ApplyChannelAutoPriority},
 	{method: http.MethodPost, path: "/status/batch", permission: authz.ChannelOperate, handler: controller.BatchUpdateChannelStatus},
 	{method: http.MethodPost, path: "/:id/status", permission: authz.ChannelOperate, handler: controller.UpdateChannelStatus},
 	{method: http.MethodDelete, path: "/disabled", permission: authz.ChannelSensitiveWrite, handler: controller.DeleteDisabledChannel},

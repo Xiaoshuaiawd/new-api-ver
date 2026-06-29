@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type {
+  ChannelAutoPrioritySettings,
   ChannelHealthSettings,
   ChannelMultiplierMonitorSettings,
 } from './integrations/channel-health-settings'
@@ -42,6 +43,25 @@ export type UpdateOptionRequest = {
 export type UpdateOptionResponse = {
   success: boolean
   message: string
+}
+
+export type ChannelAutoPriorityApplySummary = {
+  updated_channels: number
+  skipped_channels: number
+  items?: Array<{
+    channel_id: number
+    name: string
+    multiplier?: number
+    priority?: number
+    weight?: number
+    reason?: string
+  }>
+}
+
+export type ChannelAutoPriorityApplyResponse = {
+  success: boolean
+  message: string
+  data?: ChannelAutoPriorityApplySummary
 }
 
 export type ConfirmPaymentComplianceResponse = {
@@ -371,7 +391,8 @@ export type OperationsSettings = {
   'perf_metrics_setting.bucket_time': 'hour' | 'minute' | '5min'
   'perf_metrics_setting.retention_days': number
 } & ChannelHealthSettings &
-  ChannelMultiplierMonitorSettings
+  ChannelMultiplierMonitorSettings &
+  ChannelAutoPrioritySettings
 
 export type SecuritySettings = {
   ModelRequestRateLimitEnabled: boolean

@@ -21,9 +21,11 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   type ChangeEvent,
   type FormEvent,
 } from 'react'
+import { RefreshCw } from 'lucide-react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -38,6 +40,7 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
   Select,
@@ -55,10 +58,12 @@ import {
 } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
+import { applyChannelAutoPriority } from '../api'
 import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 import { safeNumberFieldProps } from '../utils/numeric-field'
 import {
+  CHANNEL_AUTO_PRIORITY_SETTING_KEYS,
   applyChannelHealthPreset,
   CHANNEL_HEALTH_PRESETS,
   CHANNEL_HEALTH_SETTING_FIELDS,
@@ -97,6 +102,17 @@ const channelHealthSchema = z.object({
   channel_multiplier_monitor_setting: z.object({
     interval_minutes: z.coerce.number().int().min(1),
   }),
+  channel_auto_priority_setting: z
+    .object({
+      enabled: z.boolean(),
+      min_weight: z.coerce.number().int().min(1),
+      max_weight: z.coerce.number().int().min(1),
+    })
+    .refine((value) => value.max_weight >= value.min_weight, {
+      path: ['max_weight'],
+      message:
+        'Maximum adaptive weight must be greater than or equal to minimum adaptive weight',
+    }),
 })
 
 type ChannelHealthFormValues = z.output<typeof channelHealthSchema>
@@ -160,6 +176,11 @@ function buildFormDefaults(
     channel_multiplier_monitor_setting: {
       interval_minutes: defaults[CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY],
     },
+    channel_auto_priority_setting: {
+      enabled: defaults['channel_auto_priority_setting.enabled'],
+      min_weight: defaults['channel_auto_priority_setting.min_weight'],
+      max_weight: defaults['channel_auto_priority_setting.max_weight'],
+    },
   }
 }
 
@@ -179,6 +200,12 @@ function normalizeFormValues(
       values.channel_health_setting.warmup_enabled,
     [CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY]:
       values.channel_multiplier_monitor_setting.interval_minutes,
+    'channel_auto_priority_setting.enabled':
+      values.channel_auto_priority_setting.enabled,
+    'channel_auto_priority_setting.min_weight':
+      values.channel_auto_priority_setting.min_weight,
+    'channel_auto_priority_setting.max_weight':
+      values.channel_auto_priority_setting.max_weight,
   } as Partial<ChannelHealthPanelSettings>
 
   for (const field of CHANNEL_HEALTH_SETTING_FIELDS) {
@@ -199,6 +226,7 @@ export function ChannelHealthSettingsSection({
 }: ChannelHealthSettingsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const [isApplyingAutoPriority, setIsApplyingAutoPriority] = useState(false)
   const baselineRef = useRef<ChannelHealthPanelSettings>(defaultValues)
 
   const formDefaults = useMemo(
@@ -247,6 +275,7 @@ export function ChannelHealthSettingsSection({
       const updates = [
         ...CHANNEL_HEALTH_SETTING_KEYS,
         CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY,
+        ...CHANNEL_AUTO_PRIORITY_SETTING_KEYS,
       ].filter((key) => normalized[key] !== baselineRef.current[key])
 
       if (updates.length === 0) {
@@ -276,6 +305,29 @@ export function ChannelHealthSettingsSection({
   const handleSave = useCallback(() => {
     void form.handleSubmit(onSubmit)()
   }, [form, onSubmit])
+
+  const handleApplyAutoPriority = useCallback(async () => {
+    setIsApplyingAutoPriority(true)
+    try {
+      const response = await applyChannelAutoPriority()
+      if (response.success) {
+        toast.success(
+          t('Auto priority applied: {{updated}} updated, {{skipped}} skipped', {
+            updated: response.data?.updated_channels ?? 0,
+            skipped: response.data?.skipped_channels ?? 0,
+          })
+        )
+      } else {
+        toast.error(response.message || t('Auto priority apply failed'))
+      }
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : t('Auto priority apply failed')
+      )
+    } finally {
+      setIsApplyingAutoPriority(false)
+    }
+  }, [t])
 
   return (
     <SettingsSection title={t('Channel Health Guard')}>
@@ -451,6 +503,94 @@ export function ChannelHealthSettingsSection({
                   )}
                 />
               </div>
+            </section>
+
+            <section className='space-y-4'>
+              <h3 className='text-sm font-medium'>
+                {t('Automatic channel priority')}
+              </h3>
+              <FormField
+                control={form.control}
+                name='channel_auto_priority_setting.enabled'
+                render={({ field }) => (
+                  <SettingsSwitchItem>
+                    <SettingsSwitchContent>
+                      <FormLabel>
+                        {t('Sort channels by upstream multiplier')}
+                      </FormLabel>
+                      <FormDescription>
+                        {t(
+                          'Lower multipliers get higher priority. Channels with the same multiplier receive adaptive weights from runtime health.'
+                        )}
+                      </FormDescription>
+                    </SettingsSwitchContent>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </SettingsSwitchItem>
+                )}
+              />
+              <div className='grid gap-6 md:grid-cols-2'>
+                <FormField
+                  control={form.control}
+                  name='channel_auto_priority_setting.min_weight'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Minimum adaptive weight')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={1}
+                          step={1}
+                          {...safeNumberFieldProps(field)}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t('Lowest weight assigned to eligible channels.')}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name='channel_auto_priority_setting.max_weight'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Maximum adaptive weight')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={1}
+                          step={1}
+                          {...safeNumberFieldProps(field)}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t('Highest weight assigned to stable channels.')}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <Button
+                type='button'
+                variant='outline'
+                disabled={isApplyingAutoPriority}
+                onClick={handleApplyAutoPriority}
+              >
+                <RefreshCw
+                  className={isApplyingAutoPriority ? 'animate-spin' : ''}
+                  aria-hidden='true'
+                />
+                {isApplyingAutoPriority
+                  ? t('Applying...')
+                  : t('Apply auto priority now')}
+              </Button>
             </section>
 
             <section className='space-y-4'>

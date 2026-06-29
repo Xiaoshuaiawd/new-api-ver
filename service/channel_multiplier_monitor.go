@@ -177,6 +177,13 @@ func runChannelMultiplierMonitorOnce() {
 	}
 
 	probeChannelMultipliers(ctx, channels, channelMultiplierMonitorConcurrency)
+	if summary, applied, err := ApplyChannelAutoPriorityIfEnabled(ctx); applied {
+		if err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("channel auto priority: apply failed: %v", err))
+		} else if summary.UpdatedChannels > 0 {
+			common.SysLog(fmt.Sprintf("channel auto priority applied: updated=%d skipped=%d", summary.UpdatedChannels, summary.SkippedChannels))
+		}
+	}
 }
 
 func probeChannelMultipliers(ctx context.Context, channels []*model.Channel, concurrency int) {

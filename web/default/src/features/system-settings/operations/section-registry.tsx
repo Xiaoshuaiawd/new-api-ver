@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { SystemBehaviorSection } from '../general/system-behavior-section'
 import {
+  CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES,
   CHANNEL_MULTIPLIER_MONITOR_DEFAULT_VALUES,
   CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY,
   pickChannelHealthSettings,
@@ -76,6 +77,21 @@ const OPERATIONS_SECTIONS = [
             settings[CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY] ??
             CHANNEL_MULTIPLIER_MONITOR_DEFAULT_VALUES[
               CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY
+            ],
+          'channel_auto_priority_setting.enabled':
+            settings['channel_auto_priority_setting.enabled'] ??
+            CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
+              'channel_auto_priority_setting.enabled'
+            ],
+          'channel_auto_priority_setting.min_weight':
+            settings['channel_auto_priority_setting.min_weight'] ??
+            CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
+              'channel_auto_priority_setting.min_weight'
+            ],
+          'channel_auto_priority_setting.max_weight':
+            settings['channel_auto_priority_setting.max_weight'] ??
+            CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
+              'channel_auto_priority_setting.max_weight'
             ],
         }}
       />
