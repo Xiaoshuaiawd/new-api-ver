@@ -55,7 +55,17 @@ type OpenAIModelsResponse struct {
 
 type channelRuntimeHealthItem struct {
 	*model.Channel
-	RuntimeHealth service.ChannelHealthSnapshot `json:"runtime_health"`
+	RuntimeHealth      service.ChannelHealthSnapshot     `json:"runtime_health"`
+	UpstreamMultiplier service.ChannelMultiplierSnapshot `json:"upstream_multiplier"`
+}
+
+func sanitizeChannelForResponse(channel *model.Channel) *model.Channel {
+	if channel == nil {
+		return nil
+	}
+	safe := *channel
+	safe.OtherSettings = service.RedactChannelMultiplierMonitorSettings(channel.OtherSettings)
+	return &safe
 }
 
 func withChannelRuntimeHealth(channel *model.Channel) channelRuntimeHealthItem {
@@ -63,8 +73,9 @@ func withChannelRuntimeHealth(channel *model.Channel) channelRuntimeHealthItem {
 		return channelRuntimeHealthItem{}
 	}
 	return channelRuntimeHealthItem{
-		Channel:       channel,
-		RuntimeHealth: service.GetChannelHealthSnapshotForDisplay(channel.Id),
+		Channel:            sanitizeChannelForResponse(channel),
+		RuntimeHealth:      service.GetChannelHealthSnapshotForDisplay(channel.Id),
+		UpstreamMultiplier: service.GetChannelMultiplierSnapshotForDisplay(channel),
 	}
 }
 
@@ -980,6 +991,9 @@ func UpdateChannel(c *gin.Context) {
 
 	// Always copy the original ChannelInfo so that fields like IsMultiKey and MultiKeySize are retained.
 	channel.ChannelInfo = originChannel.ChannelInfo
+	if _, ok := requestData["settings"]; ok {
+		channel.OtherSettings = service.MergeChannelMultiplierMonitorSecret(channel.OtherSettings, originChannel.OtherSettings)
+	}
 
 	if channelHasSensitiveChanges(&channel, originChannel, requestData) &&
 		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite) {
@@ -1103,6 +1117,7 @@ func UpdateChannel(c *gin.Context) {
 	})
 	channel.Key = ""
 	clearChannelInfo(&channel.Channel)
+	channel.OtherSettings = service.RedactChannelMultiplierMonitorSettings(channel.OtherSettings)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",

@@ -74,6 +74,35 @@ export const channelRuntimeHealthSchema = z
 
 export type ChannelRuntimeHealth = z.infer<typeof channelRuntimeHealthSchema>
 
+export const channelUpstreamMultiplierSchema = z
+  .object({
+    channel_id: z.number().default(0),
+    enabled: z.boolean().default(false),
+    format: z.enum(['sub2api', 'new-api']).or(z.string()).optional(),
+    base_url: z.string().optional(),
+    state: z.enum(['healthy', 'stale', 'error', 'empty']).or(z.string()),
+    multiplier: z.number().default(0),
+    balance: z.number().default(0),
+    username: z.string().optional(),
+    observed_group: z.string().optional(),
+    observed_token_id: z.string().optional(),
+    reason: z.string().optional(),
+    observed_at: z.number().default(0),
+    expires_at: z.number().optional(),
+  })
+  .default({
+    channel_id: 0,
+    enabled: false,
+    state: 'empty',
+    multiplier: 0,
+    balance: 0,
+    observed_at: 0,
+  })
+
+export type ChannelUpstreamMultiplier = z.infer<
+  typeof channelUpstreamMultiplierSchema
+>
+
 export const channelSchema = z.object({
   id: z.number(),
   type: z.number(),
@@ -112,6 +141,7 @@ export const channelSchema = z.object({
   }),
   settings: z.string().default('{}'), // other_settings JSON
   runtime_health: channelRuntimeHealthSchema.nullish(),
+  upstream_multiplier: channelUpstreamMultiplierSchema.nullish(),
 })
 
 export type Channel = z.infer<typeof channelSchema>
@@ -147,7 +177,16 @@ export interface ChannelOtherSettings {
   upstream_model_update_ignored_models?: string[]
   upstream_model_update_last_check_time?: number
   upstream_model_update_last_detected_models?: string[]
+  upstream_key_multiplier?: ChannelMultiplierMonitorConfig
   advanced_custom?: AdvancedCustomConfig
+}
+
+export interface ChannelMultiplierMonitorConfig {
+  enabled?: boolean
+  format?: 'sub2api' | 'new-api'
+  base_url?: string
+  username?: string
+  password?: string
 }
 
 export interface AdvancedCustomConfig {

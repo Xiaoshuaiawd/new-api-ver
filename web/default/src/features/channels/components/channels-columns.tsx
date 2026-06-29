@@ -23,6 +23,7 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
+  Gauge,
   ListOrdered,
   Shuffle,
   SlidersHorizontal,
@@ -79,7 +80,11 @@ import {
 } from '../lib'
 import { parseUpstreamUpdateMeta } from '../lib/upstream-update-utils'
 import { ChannelRowActionsLayoutContext } from './channel-row-actions-context'
-import type { Channel, ChannelRuntimeHealth } from '../types'
+import type {
+  Channel,
+  ChannelRuntimeHealth,
+  ChannelUpstreamMultiplier,
+} from '../types'
 import { useChannels } from './channels-provider'
 import { DataTableRowActions } from './data-table-row-actions'
 import { DataTableTagRowActions } from './data-table-tag-row-actions'
@@ -128,6 +133,46 @@ function getRuntimeHealth(channel: Channel): ChannelRuntimeHealth {
       warmup_percent: 100,
     }
   )
+}
+
+function getUpstreamMultiplier(channel: Channel): ChannelUpstreamMultiplier {
+  return (
+    channel.upstream_multiplier ?? {
+      channel_id: channel.id,
+      enabled: false,
+      state: 'empty',
+      multiplier: 0,
+      balance: 0,
+      observed_at: 0,
+    }
+  )
+}
+
+function formatMultiplierValue(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '-'
+  return `x${Number(value.toFixed(4)).toString()}`
+}
+
+function getUpstreamMultiplierBadgeConfig(
+  snapshot: ChannelUpstreamMultiplier,
+  t: (key: string) => string
+): { label: string; variant: StatusVariant; pulse?: boolean } {
+  if (snapshot.state === 'healthy') {
+    return {
+      label: formatMultiplierValue(snapshot.multiplier),
+      variant: 'cyan',
+    }
+  }
+  if (snapshot.state === 'stale') {
+    return {
+      label: formatMultiplierValue(snapshot.multiplier),
+      variant: 'warning',
+    }
+  }
+  if (snapshot.state === 'error') {
+    return { label: t('Multiplier error'), variant: 'danger' }
+  }
+  return { label: t('Multiplier pending'), variant: 'neutral', pulse: true }
 }
 
 function getRuntimeHealthBadgeConfig(
@@ -279,6 +324,84 @@ function RuntimeHealthCell({ channel }: { channel: Channel }) {
             {health.state === 'warming' && (
               <div>
                 {t('Warm-up:')} {health.warmup_percent}%
+              </div>
+            )}
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
+function UpstreamMultiplierBadge({ channel }: { channel: Channel }) {
+  const { t } = useTranslation()
+  const { sensitiveVisible } = useChannels()
+  const snapshot = getUpstreamMultiplier(channel)
+
+  if (!snapshot.enabled) {
+    return null
+  }
+
+  const config = getUpstreamMultiplierBadgeConfig(snapshot, t)
+  const observedAt = snapshot.observed_at
+    ? formatTimestampToDate(snapshot.observed_at)
+    : '-'
+  const balance = sensitiveVisible
+    ? formatCurrencyFromUSD(snapshot.balance, {
+        digitsLarge: 2,
+        digitsSmall: 4,
+        abbreviate: false,
+      })
+    : SENSITIVE_MASK
+  const username = sensitiveVisible ? snapshot.username || '-' : SENSITIVE_MASK
+
+  return (
+    <TooltipProvider delay={100}>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <StatusBadge
+              icon={Gauge}
+              label={config.label}
+              variant={config.variant}
+              size='sm'
+              pulse={config.pulse}
+              copyable={false}
+              className='cursor-help'
+            />
+          }
+        />
+        <TooltipContent side='top' className='max-w-xs'>
+          <div className='space-y-1 text-xs'>
+            <div>
+              {t('Upstream format:')} {snapshot.format || '-'}
+            </div>
+            <div>
+              {t('Upstream account:')} {username}
+            </div>
+            <div>
+              {t('Current multiplier:')}{' '}
+              {formatMultiplierValue(snapshot.multiplier)}
+            </div>
+            {snapshot.observed_group && (
+              <div>
+                {t('Observed group:')} {snapshot.observed_group}
+              </div>
+            )}
+            {snapshot.observed_token_id && (
+              <div>
+                {t('Observed token:')} {snapshot.observed_token_id}
+              </div>
+            )}
+            <div>
+              {t('Upstream balance:')} {balance}
+            </div>
+            <div>
+              {t('Observed at:')} {observedAt}
+            </div>
+            {snapshot.reason && (
+              <div>
+                {t('Reason:')} {snapshot.reason}
               </div>
             )}
           </div>
@@ -846,6 +969,7 @@ export function useChannelsColumns(
                       </Tooltip>
                     </TooltipProvider>
                   )}
+                  <UpstreamMultiplierBadge channel={channel} />
                   <UpstreamUpdateTags channel={channel} />
                 </div>
                 {channel.remark && (
