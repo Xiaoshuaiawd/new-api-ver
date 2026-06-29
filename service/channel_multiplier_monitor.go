@@ -280,7 +280,15 @@ func refreshChannelMultiplierSnapshot(ctx context.Context, channel *model.Channe
 		logger.LogWarn(ctx, fmt.Sprintf("channel multiplier monitor: probe failed: channel_id=%d, err=%v", channel.Id, err))
 	}
 	setChannelMultiplierSnapshot(snapshot)
+	updateChannelBalanceFromMultiplierSnapshot(channel, snapshot)
 	return snapshot, err
+}
+
+func updateChannelBalanceFromMultiplierSnapshot(channel *model.Channel, snapshot ChannelMultiplierSnapshot) {
+	if channel == nil || snapshot.State != ChannelMultiplierSnapshotHealthy {
+		return
+	}
+	channel.UpdateBalance(snapshot.Balance)
 }
 
 func GetChannelMultiplierMonitorConfig(channel *model.Channel) dto.ChannelMultiplierMonitorConfig {

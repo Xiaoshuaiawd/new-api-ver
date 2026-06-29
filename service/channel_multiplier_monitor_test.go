@@ -13,8 +13,10 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func channelMultiplierSettingsJSON(t *testing.T, cfg *dto.ChannelMultiplierMonitorConfig) string {
@@ -147,6 +149,51 @@ func TestRefreshChannelMultiplierSnapshotStoresResult(t *testing.T) {
 	assert.Equal(t, snapshot.ObservedAt, stored.ObservedAt)
 }
 
+func TestRunChannelMultiplierMonitorOnceUpdatesChannelBalances(t *testing.T) {
+	withChannelMultiplierMonitorTestDB(t)
+	ResetChannelMultiplierMonitorForTest()
+	t.Cleanup(ResetChannelMultiplierMonitorForTest)
+
+	originalProbe := channelMultiplierProbe
+	t.Cleanup(func() {
+		channelMultiplierProbe = originalProbe
+	})
+	autoPrioritySetting := operation_setting.GetChannelAutoPrioritySetting()
+	originalAutoPrioritySetting := *autoPrioritySetting
+	*autoPrioritySetting = operation_setting.ChannelAutoPrioritySetting{Enabled: false, MinWeight: 20, MaxWeight: 100}
+	t.Cleanup(func() {
+		*autoPrioritySetting = originalAutoPrioritySetting
+	})
+
+	channelMultiplierProbe = func(ctx context.Context, channel *model.Channel) (ChannelMultiplierSnapshot, error) {
+		return buildHealthyMultiplierSnapshot(
+			channel,
+			GetChannelMultiplierMonitorConfig(channel),
+			0.5,
+			float64(channel.Id)+0.25,
+			"default",
+			"token-1",
+		), nil
+	}
+
+	seedChannelMultiplierMonitorChannel(t, 1401)
+	seedChannelMultiplierMonitorChannel(t, 1402)
+
+	runChannelMultiplierMonitorOnce()
+
+	channelA := loadChannelMultiplierMonitorChannel(t, 1401)
+	channelB := loadChannelMultiplierMonitorChannel(t, 1402)
+	assert.Equal(t, 1401.25, channelA.Balance)
+	assert.Greater(t, channelA.BalanceUpdatedTime, int64(0))
+	assert.Equal(t, 1402.25, channelB.Balance)
+	assert.Greater(t, channelB.BalanceUpdatedTime, int64(0))
+
+	snapshot, ok := GetChannelMultiplierSnapshot(1401)
+	require.True(t, ok)
+	assert.Equal(t, ChannelMultiplierSnapshotHealthy, snapshot.State)
+	assert.Equal(t, 1401.25, snapshot.Balance)
+}
+
 func TestFetchChannelMultiplierAccountBalanceUsesSub2APIAccount(t *testing.T) {
 	var sawKeysEndpoint bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -231,6 +278,52 @@ func TestFetchChannelMultiplierAccountBalanceUsesNewAPIAccount(t *testing.T) {
 	assert.True(t, configured)
 	assert.False(t, sawTokenEndpoint)
 	assert.Equal(t, 6749186.0/500000.0, balance)
+}
+
+func withChannelMultiplierMonitorTestDB(t *testing.T) {
+	t.Helper()
+
+	oldDB := model.DB
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	model.DB = db
+	require.NoError(t, db.AutoMigrate(&model.Channel{}))
+
+	t.Cleanup(func() {
+		model.DB = oldDB
+		_ = sqlDB.Close()
+	})
+}
+
+func seedChannelMultiplierMonitorChannel(t *testing.T, id int) {
+	t.Helper()
+
+	channel := &model.Channel{
+		Id:     id,
+		Type:   constant.ChannelTypeCustom,
+		Key:    "sk-current",
+		Status: common.ChannelStatusEnabled,
+		Name:   "monitor-balance",
+		OtherSettings: channelMultiplierSettingsJSON(t, &dto.ChannelMultiplierMonitorConfig{
+			Enabled:  true,
+			Format:   dto.ChannelMultiplierProviderFormatNewAPI,
+			BaseURL:  "https://upstream.example.com",
+			Username: "alice",
+			Password: "secret",
+		}),
+	}
+	require.NoError(t, model.DB.Create(channel).Error)
+}
+
+func loadChannelMultiplierMonitorChannel(t *testing.T, id int) model.Channel {
+	t.Helper()
+
+	var channel model.Channel
+	require.NoError(t, model.DB.First(&channel, id).Error)
+	return channel
 }
 
 func TestProbeChannelMultipliersRunsWithBoundedConcurrency(t *testing.T) {
