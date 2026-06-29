@@ -5148,6 +5148,9 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Upstream key multiplier monitor": "Монитор множителя ключа апстрима",
+    "Multiplier probe interval (minutes)": "Интервал проверки множителя (минуты)",
+    "How often the background worker logs in to upstream consoles to refresh key multipliers.": "Как часто фоновый процесс входит в консоли апстрима, чтобы обновить множители ключей."
   }
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -84,6 +85,20 @@ func TestMergeChannelMultiplierMonitorSecretPreservesBlankPassword(t *testing.T)
 	var rawParsed map[string]any
 	require.NoError(t, common.UnmarshalJsonStr(merged, &rawParsed))
 	assert.Equal(t, "keep-me", rawParsed["unknown_vendor_setting"])
+}
+
+func TestChannelMultiplierMonitorIntervalUsesSystemSetting(t *testing.T) {
+	setting := operation_setting.GetChannelMultiplierMonitorSetting()
+	original := *setting
+	t.Cleanup(func() {
+		*setting = original
+	})
+
+	setting.IntervalMinutes = 7
+	assert.Equal(t, 7, int(channelMultiplierMonitorInterval().Minutes()))
+
+	setting.IntervalMinutes = 0
+	assert.Equal(t, 2, int(channelMultiplierMonitorInterval().Minutes()))
 }
 
 func TestProbeSub2APIChannelMultiplierMatchesCurrentKey(t *testing.T) {

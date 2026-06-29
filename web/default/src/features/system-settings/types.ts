@@ -16,7 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { ChannelHealthSettings } from './integrations/channel-health-settings'
+import type {
+  ChannelHealthSettings,
+  ChannelMultiplierMonitorSettings,
+} from './integrations/channel-health-settings'
 
 export type SystemOption = {
   key: string
@@ -367,7 +370,8 @@ export type OperationsSettings = {
   'perf_metrics_setting.flush_interval': number
   'perf_metrics_setting.bucket_time': 'hour' | 'minute' | '5min'
   'perf_metrics_setting.retention_days': number
-} & ChannelHealthSettings
+} & ChannelHealthSettings &
+  ChannelMultiplierMonitorSettings
 
 export type SecuritySettings = {
   ModelRequestRateLimitEnabled: boolean

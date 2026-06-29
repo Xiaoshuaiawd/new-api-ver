@@ -5148,6 +5148,9 @@
     "Zero retention": "Aucune rétention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Upstream key multiplier monitor": "Surveillance du multiplicateur de clé amont",
+    "Multiplier probe interval (minutes)": "Intervalle de sonde du multiplicateur (minutes)",
+    "How often the background worker logs in to upstream consoles to refresh key multipliers.": "Fréquence à laquelle la tâche en arrière-plan se connecte aux consoles amont pour actualiser les multiplicateurs de clé."
   }
 }

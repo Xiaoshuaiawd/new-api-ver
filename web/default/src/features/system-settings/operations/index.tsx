@@ -18,7 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useStatus } from '@/hooks/use-status'
 import { SettingsPage } from '../components/settings-page'
-import { CHANNEL_HEALTH_DEFAULT_VALUES } from '../integrations/channel-health-settings'
+import {
+  CHANNEL_HEALTH_DEFAULT_VALUES,
+  CHANNEL_MULTIPLIER_MONITOR_DEFAULT_VALUES,
+} from '../integrations/channel-health-settings'
 import type { OperationsSettings } from '../types'
 import {
   OPERATIONS_DEFAULT_SECTION,
@@ -57,6 +60,7 @@ const defaultOperationsSettings: OperationsSettings = {
   'perf_metrics_setting.bucket_time': 'hour',
   'perf_metrics_setting.retention_days': 0,
   ...CHANNEL_HEALTH_DEFAULT_VALUES,
+  ...CHANNEL_MULTIPLIER_MONITOR_DEFAULT_VALUES,
 }
 
 export function OperationsSettings() {

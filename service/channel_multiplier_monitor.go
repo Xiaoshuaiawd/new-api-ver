@@ -21,16 +21,16 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/cachex"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/samber/hot"
 )
 
 const (
-	channelMultiplierMonitorTickInterval = 2 * time.Minute
-	channelMultiplierMonitorTimeout      = 15 * time.Second
-	channelMultiplierSnapshotTTL         = 5 * time.Minute
-	channelMultiplierCacheTTL            = 15 * time.Minute
-	channelMultiplierCacheNamespace      = "new-api:channel_multiplier:v1"
+	channelMultiplierMonitorTimeout = 15 * time.Second
+	channelMultiplierSnapshotTTL    = 5 * time.Minute
+	channelMultiplierCacheTTL       = 15 * time.Minute
+	channelMultiplierCacheNamespace = "new-api:channel_multiplier:v1"
 )
 
 type ChannelMultiplierSnapshotState string
@@ -101,15 +101,22 @@ func StartChannelMultiplierMonitorWorker() {
 			return
 		}
 		gopool.Go(func() {
-			common.SysLog(fmt.Sprintf("channel multiplier monitor worker started: tick=%s", channelMultiplierMonitorTickInterval))
+			common.SysLog(fmt.Sprintf("channel multiplier monitor worker started: interval=%s", channelMultiplierMonitorInterval()))
 			runChannelMultiplierMonitorOnce()
-			ticker := time.NewTicker(channelMultiplierMonitorTickInterval)
-			defer ticker.Stop()
-			for range ticker.C {
+			for {
+				time.Sleep(channelMultiplierMonitorInterval())
 				runChannelMultiplierMonitorOnce()
 			}
 		})
 	})
+}
+
+func channelMultiplierMonitorInterval() time.Duration {
+	minutes := operation_setting.GetChannelMultiplierMonitorSetting().IntervalMinutes
+	if minutes < 1 {
+		minutes = operation_setting.ChannelMultiplierMonitorDefaultIntervalMinutes
+	}
+	return time.Duration(minutes) * time.Minute
 }
 
 func ResetChannelMultiplierMonitorForTest() {

@@ -55,6 +55,16 @@ export type ChannelHealthSettings = {
   'channel_health_setting.alert_min_interval_seconds': number
 } & Record<`channel_health_setting.${ChannelHealthNumberFieldKey}`, number>
 
+export const CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY =
+  'channel_multiplier_monitor_setting.interval_minutes' as const
+
+export type ChannelMultiplierMonitorSettings = {
+  [CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY]: number
+}
+
+export type ChannelHealthPanelSettings = ChannelHealthSettings &
+  ChannelMultiplierMonitorSettings
+
 export const CHANNEL_HEALTH_PRESETS = [
   'conservative',
   'balanced',
@@ -269,6 +279,10 @@ export const CHANNEL_HEALTH_DEFAULT_VALUES = {
   'channel_health_setting.warmup_step_percent': 30,
 } as const satisfies ChannelHealthSettings
 
+export const CHANNEL_MULTIPLIER_MONITOR_DEFAULT_VALUES = {
+  [CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY]: 2,
+} as const satisfies ChannelMultiplierMonitorSettings
+
 export const CHANNEL_HEALTH_PRESET_VALUES = {
   conservative: {
     'channel_health_setting.window_seconds': 300,
@@ -326,10 +340,10 @@ export const CHANNEL_HEALTH_PRESET_VALUES = {
   Record<`channel_health_setting.${ChannelHealthNumberFieldKey}`, number>
 >
 
-export function applyChannelHealthPreset(
-  current: ChannelHealthSettings,
+export function applyChannelHealthPreset<T extends ChannelHealthSettings>(
+  current: T,
   preset: ChannelHealthPreset
-): ChannelHealthSettings {
+): T {
   if (preset === 'custom') {
     return { ...current, 'channel_health_setting.preset': 'custom' }
   }
@@ -340,9 +354,9 @@ export function applyChannelHealthPreset(
   }
 }
 
-export function markChannelHealthPresetCustom(
-  current: ChannelHealthSettings
-): ChannelHealthSettings {
+export function markChannelHealthPresetCustom<T extends ChannelHealthSettings>(
+  current: T
+): T {
   if (current['channel_health_setting.preset'] === 'custom') return current
   return { ...current, 'channel_health_setting.preset': 'custom' }
 }

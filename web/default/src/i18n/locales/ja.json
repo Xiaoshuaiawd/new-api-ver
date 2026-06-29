@@ -5148,6 +5148,9 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "Upstream key multiplier monitor": "上流キー倍率モニター",
+    "Multiplier probe interval (minutes)": "倍率プローブ間隔（分）",
+    "How often the background worker logs in to upstream consoles to refresh key multipliers.": "バックグラウンドワーカーが上流コンソールにログインしてキー倍率を更新する頻度です。"
   }
 }

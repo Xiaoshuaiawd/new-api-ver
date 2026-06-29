@@ -5148,6 +5148,9 @@
     "Zero retention": "Zero retention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Upstream key multiplier monitor": "Upstream key multiplier monitor",
+    "Multiplier probe interval (minutes)": "Multiplier probe interval (minutes)",
+    "How often the background worker logs in to upstream consoles to refresh key multipliers.": "How often the background worker logs in to upstream consoles to refresh key multipliers."
   }
 }

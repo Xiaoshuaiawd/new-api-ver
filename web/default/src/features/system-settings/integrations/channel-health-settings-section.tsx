@@ -63,10 +63,11 @@ import {
   CHANNEL_HEALTH_PRESETS,
   CHANNEL_HEALTH_SETTING_FIELDS,
   CHANNEL_HEALTH_SETTING_KEYS,
+  CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY,
   markChannelHealthPresetCustom,
   type ChannelHealthPreset,
   type ChannelHealthFieldGroup,
-  type ChannelHealthSettings,
+  type ChannelHealthPanelSettings,
 } from './channel-health-settings'
 
 const channelHealthSchema = z.object({
@@ -93,6 +94,9 @@ const channelHealthSchema = z.object({
     warmup_start_percent: z.coerce.number().int().min(1).max(100),
     warmup_step_percent: z.coerce.number().int().min(1).max(100),
   }),
+  channel_multiplier_monitor_setting: z.object({
+    interval_minutes: z.coerce.number().int().min(1),
+  }),
 })
 
 type ChannelHealthFormValues = z.output<typeof channelHealthSchema>
@@ -109,11 +113,11 @@ const FIELD_GROUPS: Array<{
 ]
 
 type ChannelHealthSettingsSectionProps = {
-  defaultValues: ChannelHealthSettings
+  defaultValues: ChannelHealthPanelSettings
 }
 
 function buildFormDefaults(
-  defaults: ChannelHealthSettings
+  defaults: ChannelHealthPanelSettings
 ): ChannelHealthFormInput {
   return {
     channel_health_setting: {
@@ -153,12 +157,15 @@ function buildFormDefaults(
       warmup_step_percent:
         defaults['channel_health_setting.warmup_step_percent'],
     },
+    channel_multiplier_monitor_setting: {
+      interval_minutes: defaults[CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY],
+    },
   }
 }
 
 function normalizeFormValues(
   values: ChannelHealthFormValues
-): ChannelHealthSettings {
+): ChannelHealthPanelSettings {
   const flattened = {
     'channel_health_setting.enabled': values.channel_health_setting.enabled,
     'channel_health_setting.preset': values.channel_health_setting.preset,
@@ -170,18 +177,20 @@ function normalizeFormValues(
       values.channel_health_setting.alert_min_interval_seconds,
     'channel_health_setting.warmup_enabled':
       values.channel_health_setting.warmup_enabled,
-  } as Partial<ChannelHealthSettings>
+    [CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY]:
+      values.channel_multiplier_monitor_setting.interval_minutes,
+  } as Partial<ChannelHealthPanelSettings>
 
   for (const field of CHANNEL_HEALTH_SETTING_FIELDS) {
     flattened[field.optionKey] = values.channel_health_setting[field.key]
   }
 
-  return flattened as ChannelHealthSettings
+  return flattened as ChannelHealthPanelSettings
 }
 
 function formInputToSettings(
   values: ChannelHealthFormInput
-): ChannelHealthSettings {
+): ChannelHealthPanelSettings {
   return normalizeFormValues(channelHealthSchema.parse(values))
 }
 
@@ -190,7 +199,7 @@ export function ChannelHealthSettingsSection({
 }: ChannelHealthSettingsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
-  const baselineRef = useRef<ChannelHealthSettings>(defaultValues)
+  const baselineRef = useRef<ChannelHealthPanelSettings>(defaultValues)
 
   const formDefaults = useMemo(
     () => buildFormDefaults(defaultValues),
@@ -221,7 +230,10 @@ export function ChannelHealthSettingsSection({
   const markPresetCustom = () => {
     const current = formInputToSettings(form.getValues())
     const next = markChannelHealthPresetCustom(current)
-    if (next['channel_health_setting.preset'] !== current['channel_health_setting.preset']) {
+    if (
+      next['channel_health_setting.preset'] !==
+      current['channel_health_setting.preset']
+    ) {
       form.setValue('channel_health_setting.preset', 'custom', {
         shouldDirty: true,
         shouldValidate: true,
@@ -232,9 +244,10 @@ export function ChannelHealthSettingsSection({
   const onSubmit = useCallback(
     async (values: ChannelHealthFormValues) => {
       const normalized = normalizeFormValues(values)
-      const updates = CHANNEL_HEALTH_SETTING_KEYS.filter(
-        (key) => normalized[key] !== baselineRef.current[key]
-      )
+      const updates = [
+        ...CHANNEL_HEALTH_SETTING_KEYS,
+        CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY,
+      ].filter((key) => normalized[key] !== baselineRef.current[key])
 
       if (updates.length === 0) {
         toast.info(t('No changes to save'))
@@ -408,6 +421,39 @@ export function ChannelHealthSettingsSection({
 
           <div data-settings-form-span='full' className='space-y-7'>
             <section className='space-y-4'>
+              <h3 className='text-sm font-medium'>
+                {t('Upstream key multiplier monitor')}
+              </h3>
+              <div className='grid gap-6 md:grid-cols-2'>
+                <FormField
+                  control={form.control}
+                  name='channel_multiplier_monitor_setting.interval_minutes'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        {t('Multiplier probe interval (minutes)')}
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={1}
+                          step={1}
+                          {...safeNumberFieldProps(field)}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'How often the background worker logs in to upstream consoles to refresh key multipliers.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            </section>
+
+            <section className='space-y-4'>
               <h3 className='text-sm font-medium'>{t('Health alerts')}</h3>
               <div className='grid gap-6 md:grid-cols-2'>
                 <FormField
@@ -415,7 +461,9 @@ export function ChannelHealthSettingsSection({
                   name='channel_health_setting.alert_min_interval_seconds'
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>{t('Alert minimum interval (seconds)')}</FormLabel>
+                      <FormLabel>
+                        {t('Alert minimum interval (seconds)')}
+                      </FormLabel>
                       <FormControl>
                         <Input
                           type='number'

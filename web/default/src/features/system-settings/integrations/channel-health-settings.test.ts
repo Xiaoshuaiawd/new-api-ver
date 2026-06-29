@@ -24,6 +24,8 @@ import {
   CHANNEL_HEALTH_PRESET_VALUES,
   CHANNEL_HEALTH_SETTING_FIELDS,
   CHANNEL_HEALTH_SETTING_KEYS,
+  CHANNEL_MULTIPLIER_MONITOR_DEFAULT_VALUES,
+  CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY,
   markChannelHealthPresetCustom,
 } from './channel-health-settings.ts'
 
@@ -77,6 +79,9 @@ describe('channel health setting metadata', () => {
       'channel_health_setting.warmup_start_percent': 10,
       'channel_health_setting.warmup_step_percent': 30,
     })
+    assert.deepEqual(CHANNEL_MULTIPLIER_MONITOR_DEFAULT_VALUES, {
+      [CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY]: 2,
+    })
   })
 
   test('preset selection fills numeric values and manual edit marks custom', () => {
@@ -88,8 +93,8 @@ describe('channel health setting metadata', () => {
     assert.equal(aggressive['channel_health_setting.preset'], 'aggressive')
     assert.deepEqual(
       Object.fromEntries(
-        Object.entries(aggressive).filter(([key]) =>
-          key in CHANNEL_HEALTH_PRESET_VALUES.aggressive
+        Object.entries(aggressive).filter(
+          ([key]) => key in CHANNEL_HEALTH_PRESET_VALUES.aggressive
         )
       ),
       CHANNEL_HEALTH_PRESET_VALUES.aggressive
