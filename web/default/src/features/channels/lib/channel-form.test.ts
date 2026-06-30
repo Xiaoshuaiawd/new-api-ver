@@ -22,29 +22,44 @@ import { describe, test } from 'node:test'
 import type { Channel } from '../types.ts'
 import {
   transformChannelToFormDefaults,
+  transformFormDataToCreatePayload,
   transformFormDataToUpdatePayload,
 } from './channel-form.ts'
 
+function makeChannel(overrides: Partial<Channel> = {}): Channel {
+  return {
+    id: 1,
+    type: 8,
+    key: '',
+    status: 1,
+    name: 'test-channel',
+    created_time: 0,
+    test_time: 0,
+    response_time: 0,
+    other: '',
+    balance: 0,
+    balance_updated_time: 0,
+    models: 'gpt-test',
+    group: 'default',
+    used_quota: 0,
+    other_info: '',
+    remark: '',
+    max_input_tokens: 0,
+    settings: '{}',
+    channel_info: {
+      is_multi_key: false,
+      multi_key_size: 0,
+      multi_key_polling_index: 0,
+      multi_key_mode: 'random',
+    },
+    ...overrides,
+  } as Channel
+}
+
 describe('channel multiplier monitor form settings', () => {
   test('keeps redacted monitor password blank in update settings', () => {
-    const channel = {
-      id: 1,
-      type: 8,
-      key: '',
-      status: 1,
+    const channel = makeChannel({
       name: 'monitored-channel',
-      created_time: 0,
-      test_time: 0,
-      response_time: 0,
-      other: '',
-      balance: 0,
-      balance_updated_time: 0,
-      models: 'gpt-test',
-      group: 'default',
-      used_quota: 0,
-      other_info: '',
-      remark: '',
-      max_input_tokens: 0,
       settings: JSON.stringify({
         upstream_key_multiplier: {
           enabled: true,
@@ -54,13 +69,7 @@ describe('channel multiplier monitor form settings', () => {
           password: '',
         },
       }),
-      channel_info: {
-        is_multi_key: false,
-        multi_key_size: 0,
-        multi_key_polling_index: 0,
-        multi_key_mode: 'random',
-      },
-    } as Channel
+    })
 
     const defaults = transformChannelToFormDefaults(channel)
     const payload = transformFormDataToUpdatePayload(defaults, channel.id)
@@ -73,5 +82,42 @@ describe('channel multiplier monitor form settings', () => {
       'https://upstream.example.com'
     )
     assert.equal(settings.upstream_key_multiplier.password, '')
+  })
+})
+
+describe('channel image input support form settings', () => {
+  test('defaults existing channels to image input support', () => {
+    const defaults = transformChannelToFormDefaults(makeChannel())
+
+    assert.equal(defaults.supports_image_input, true)
+  })
+
+  test('stores explicit false when image input support is disabled', () => {
+    const defaults = transformChannelToFormDefaults(makeChannel())
+    const payload = transformFormDataToCreatePayload({
+      ...defaults,
+      supports_image_input: false,
+    })
+    const settings = JSON.parse(String(payload.channel.settings))
+
+    assert.equal(settings.supports_image_input, false)
+  })
+
+  test('omits image input support setting when enabled', () => {
+    const defaults = transformChannelToFormDefaults(
+      makeChannel({
+        settings: JSON.stringify({ supports_image_input: false }),
+      })
+    )
+    const payload = transformFormDataToUpdatePayload(
+      {
+        ...defaults,
+        supports_image_input: true,
+      },
+      1
+    )
+    const settings = JSON.parse(String(payload.settings))
+
+    assert.equal('supports_image_input' in settings, false)
   })
 })

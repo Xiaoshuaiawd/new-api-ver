@@ -1954,6 +1954,33 @@ export function ChannelMutateDrawer({
                           />
                         )}
 
+                        <FormField
+                          control={form.control}
+                          name='supports_image_input'
+                          render={({ field }) => (
+                            <FormItem
+                              className={sideDrawerSwitchItemClassName()}
+                            >
+                              <div className='flex flex-col gap-0.5'>
+                                <FormLabel>
+                                  {t('Supports image input')}
+                                </FormLabel>
+                                <FormDescription className='text-xs'>
+                                  {t(
+                                    'Requests containing images will only use channels with this enabled'
+                                  )}
+                                </FormDescription>
+                              </div>
+                              <FormControl>
+                                <Switch
+                                  checked={field.value !== false}
+                                  onCheckedChange={field.onChange}
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+
                         {currentType === 1 && (
                           <fieldset
                             disabled={sensitiveLocked}

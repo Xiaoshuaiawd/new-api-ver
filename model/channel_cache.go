@@ -23,6 +23,10 @@ var channelsIDM map[int]*Channel                     // all channels include dis
 var channel2advancedCustomConfig map[int]*dto.AdvancedCustomConfig
 var channelSyncLock sync.RWMutex
 
+type ChannelSelectionOptions struct {
+	RequireImageInputSupport bool
+}
+
 func InitChannelCache() {
 	if !common.MemoryCacheEnabled {
 		return
@@ -106,25 +110,29 @@ func SyncChannelCache(frequency int) {
 }
 
 func GetRandomSatisfiedChannel(group string, model string, retry int, requestPath string) (*Channel, error) {
-	return GetRandomSatisfiedChannelWithTrace(group, model, retry, requestPath, nil)
+	return GetRandomSatisfiedChannelWithTrace(group, model, retry, requestPath, nil, nil)
 }
 
-func GetRandomSatisfiedChannelWithTrace(group string, model string, retry int, requestPath string, traceFn ChannelSelectionTraceFunc) (*Channel, error) {
+func GetRandomSatisfiedChannelWithTrace(group string, model string, retry int, requestPath string, excludedChannelIDs map[int]struct{}, traceFn ChannelSelectionTraceFunc, selectionOptions ...ChannelSelectionOptions) (*Channel, error) {
+	options := ChannelSelectionOptions{}
+	if len(selectionOptions) > 0 {
+		options = selectionOptions[0]
+	}
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
-		return GetChannel(group, model, retry, requestPath)
+		return GetChannelWithOptions(group, model, retry, requestPath, excludedChannelIDs, options)
 	}
 
 	channelSyncLock.RLock()
 	defer channelSyncLock.RUnlock()
 
 	// First, try to find channels with the exact model name.
-	channels := filterChannelsByRequestPath(group2model2channels[group][model], requestPath)
+	channels := filterChannelsBySelectionOptions(filterExcludedChannels(filterChannelsByRequestPath(group2model2channels[group][model], requestPath), excludedChannelIDs), options, traceFn, group, model)
 
 	// If no channels found, try to find channels with the normalized model name.
 	if len(channels) == 0 {
 		normalizedModel := ratio_setting.FormatMatchingModelName(model)
-		channels = filterChannelsByRequestPath(group2model2channels[group][normalizedModel], requestPath)
+		channels = filterChannelsBySelectionOptions(filterExcludedChannels(filterChannelsByRequestPath(group2model2channels[group][normalizedModel], requestPath), excludedChannelIDs), options, traceFn, group, normalizedModel)
 	}
 
 	if len(channels) == 0 {
@@ -333,6 +341,48 @@ func filterChannelsByRequestPath(channels []int, requestPath string) []int {
 		if config := channel2advancedCustomConfig[channelId]; config != nil && config.SupportsPath(requestPath) {
 			filtered = append(filtered, channelId)
 		}
+	}
+	return filtered
+}
+
+func filterExcludedChannels(channels []int, excludedChannelIDs map[int]struct{}) []int {
+	if len(channels) == 0 || len(excludedChannelIDs) == 0 {
+		return channels
+	}
+	filtered := make([]int, 0, len(channels))
+	for _, channelId := range channels {
+		if _, excluded := excludedChannelIDs[channelId]; excluded {
+			continue
+		}
+		filtered = append(filtered, channelId)
+	}
+	return filtered
+}
+
+func filterChannelsBySelectionOptions(channels []int, options ChannelSelectionOptions, traceFn ChannelSelectionTraceFunc, group string, modelName string) []int {
+	if !options.RequireImageInputSupport || len(channels) == 0 {
+		return channels
+	}
+	filtered := make([]int, 0, len(channels))
+	for _, channelId := range channels {
+		channel, ok := channelsIDM[channelId]
+		if !ok {
+			filtered = append(filtered, channelId)
+			continue
+		}
+		if channel.SupportsImageInput() {
+			filtered = append(filtered, channelId)
+			continue
+		}
+		recordChannelSelectionTrace(traceFn, ChannelSelectionTraceEvent{
+			Stage:     "capability",
+			Action:    "skip",
+			Group:     group,
+			Model:     modelName,
+			ChannelID: channel.Id,
+			Priority:  channel.GetPriority(),
+			Reason:    "image input unsupported",
+		})
 	}
 	return filtered
 }

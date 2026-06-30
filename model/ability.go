@@ -105,11 +105,16 @@ func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
 	return channelQuery, nil
 }
 
-func GetChannel(group string, model string, retry int, requestPath string) (*Channel, error) {
-	var abilities []Ability
+func GetChannel(group string, model string, retry int, requestPath string, excludedChannelIDs ...map[int]struct{}) (*Channel, error) {
+	var excluded map[int]struct{}
+	if len(excludedChannelIDs) > 0 {
+		excluded = excludedChannelIDs[0]
+	}
+	return GetChannelWithOptions(group, model, retry, requestPath, excluded, ChannelSelectionOptions{})
+}
 
-	var err error = nil
-	abilities, err = getHealthyAbilities(group, model, retry)
+func GetChannelWithOptions(group string, model string, retry int, requestPath string, excludedChannelIDs map[int]struct{}, options ChannelSelectionOptions) (*Channel, error) {
+	abilities, err := getHealthyAbilities(group, model, retry, excludedChannelIDs, options)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +145,7 @@ func GetChannel(group string, model string, retry int, requestPath string) (*Cha
 	return &channel, err
 }
 
-func getHealthyAbilities(group string, modelName string, retry int) ([]Ability, error) {
+func getHealthyAbilities(group string, modelName string, retry int, excludedChannelIDs map[int]struct{}, options ChannelSelectionOptions) ([]Ability, error) {
 	var priorities []int
 	err := DB.Model(&Ability{}).
 		Select("DISTINCT(priority)").
@@ -165,8 +170,15 @@ func getHealthyAbilities(group string, modelName string, retry int) ([]Ability, 
 		if err != nil {
 			return nil, err
 		}
+		abilities, err = filterAbilitiesBySelectionOptions(abilities, options)
+		if err != nil {
+			return nil, err
+		}
 		filtered := abilities[:0]
 		for _, ability := range abilities {
+			if _, excluded := excludedChannelIDs[ability.ChannelId]; excluded {
+				continue
+			}
 			available, _ := getChannelRuntimeState(ability.ChannelId, modelName)
 			if available {
 				filtered = append(filtered, ability)
@@ -185,8 +197,15 @@ func getHealthyAbilities(group string, modelName string, retry int) ([]Ability, 
 		if err != nil {
 			return nil, err
 		}
+		abilities, err = filterAbilitiesBySelectionOptions(abilities, options)
+		if err != nil {
+			return nil, err
+		}
 		filtered := abilities[:0]
 		for _, ability := range abilities {
+			if _, excluded := excludedChannelIDs[ability.ChannelId]; excluded {
+				continue
+			}
 			available, _ := getChannelProbeRuntimeState(ability.ChannelId, modelName)
 			if available {
 				filtered = append(filtered, ability)
@@ -204,6 +223,39 @@ func getHealthyAbilities(group string, modelName string, retry int) ([]Ability, 
 		}
 	}
 	return nil, nil
+}
+
+func filterAbilitiesBySelectionOptions(abilities []Ability, options ChannelSelectionOptions) ([]Ability, error) {
+	if !options.RequireImageInputSupport || len(abilities) == 0 {
+		return abilities, nil
+	}
+
+	channelIds := make([]int, 0, len(abilities))
+	seen := make(map[int]struct{}, len(abilities))
+	for _, ability := range abilities {
+		if _, ok := seen[ability.ChannelId]; ok {
+			continue
+		}
+		seen[ability.ChannelId] = struct{}{}
+		channelIds = append(channelIds, ability.ChannelId)
+	}
+
+	var channels []*Channel
+	if err := DB.Select("id", "settings").Where("id IN ?", channelIds).Find(&channels).Error; err != nil {
+		return nil, err
+	}
+	supportsImageInputByID := make(map[int]bool, len(channels))
+	for _, channel := range channels {
+		supportsImageInputByID[channel.Id] = channel.SupportsImageInput()
+	}
+
+	filtered := make([]Ability, 0, len(abilities))
+	for _, ability := range abilities {
+		if supportsImageInputByID[ability.ChannelId] {
+			filtered = append(filtered, ability)
+		}
+	}
+	return filtered, nil
 }
 
 func weightedAbilityIndex(abilities []Ability, probe bool) int {

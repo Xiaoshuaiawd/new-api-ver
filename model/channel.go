@@ -1014,6 +1014,11 @@ func (channel *Channel) SetOtherSettings(setting dto.ChannelOtherSettings) {
 	channel.OtherSettings = string(settingBytes)
 }
 
+func (channel *Channel) SupportsImageInput() bool {
+	settings := channel.GetOtherSettings()
+	return settings.SupportsImageInput == nil || *settings.SupportsImageInput
+}
+
 func (channel *Channel) GetParamOverride() map[string]interface{} {
 	paramOverride := make(map[string]interface{})
 	if channel.ParamOverride != nil && *channel.ParamOverride != "" {

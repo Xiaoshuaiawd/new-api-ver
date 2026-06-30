@@ -90,6 +90,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if newAPIError != nil {
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
+			if responseBody, marshalErr := common.Marshal(gin.H{"error": newAPIError.ToOpenAIError()}); marshalErr == nil {
+				service.SetLogResponseBody(c, responseBody)
+			}
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				helper.WssError(c, ws, newAPIError.ToOpenAIError())
@@ -132,6 +135,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	} else {
 		meta = fastTokenCountMetaForPricing(request)
 	}
+	requireImageInputSupport := service.TokenMetaRequiresImageInputSupport(meta) || service.RequestRequiresImageInputSupport(request)
 
 	if needSensitiveCheck && meta != nil {
 		contains, words := service.CheckSensitiveText(meta.CombineText)
@@ -179,11 +183,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}()
 
 	retryParam := &service.RetryParam{
-		Ctx:         c,
-		TokenGroup:  relayInfo.TokenGroup,
-		ModelName:   relayInfo.OriginModelName,
-		RequestPath: c.Request.URL.Path,
-		Retry:       common.GetPointer(0),
+		Ctx:                      c,
+		TokenGroup:               relayInfo.TokenGroup,
+		ModelName:                relayInfo.OriginModelName,
+		RequestPath:              c.Request.URL.Path,
+		Retry:                    common.GetPointer(0),
+		ExcludedChannelIDs:       make(map[int]struct{}),
+		RequireImageInputSupport: requireImageInputSupport,
 	}
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
@@ -254,11 +260,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		relayInfo.LastError = newAPIError
 		service.FinishChannelHealthAttemptForContext(c, service.ChannelAttemptResult{Error: newAPIError})
 
+		setRelayErrorLogResponseBody(c, newAPIError)
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 
 		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
 			break
 		}
+		retryParam.ExcludedChannelIDs[channel.Id] = struct{}{}
 	}
 
 	useChannel := c.GetStringSlice("use_channel")
@@ -284,6 +292,17 @@ func addUsedChannel(c *gin.Context, channelId int) {
 	useChannel := c.GetStringSlice("use_channel")
 	useChannel = append(useChannel, fmt.Sprintf("%d", channelId))
 	c.Set("use_channel", useChannel)
+}
+
+func setRelayErrorLogResponseBody(c *gin.Context, err *types.NewAPIError) {
+	if c == nil || err == nil {
+		return
+	}
+	body, marshalErr := common.Marshal(gin.H{"error": err.ToOpenAIError()})
+	if marshalErr != nil {
+		return
+	}
+	service.SetLogResponseBody(c, body)
 }
 
 func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
@@ -317,13 +336,24 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 
 func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
 	if info.ChannelMeta == nil {
+		channelId := c.GetInt("channel_id")
+		if retryParam != nil && retryParam.RequireImageInputSupport {
+			channel, err := model.CacheGetChannel(channelId)
+			if err != nil {
+				return nil, types.NewError(fmt.Errorf("获取指定渠道 %d 失败: %s", channelId, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+			}
+			if !channel.SupportsImageInput() {
+				return nil, types.NewErrorWithStatusCode(fmt.Errorf("当前请求需要图片能力，但渠道 %d 未开启图片输入支持", channelId), types.ErrorCodeGetChannelFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+			}
+			return channel, nil
+		}
 		autoBan := c.GetBool("auto_ban")
 		autoBanInt := 1
 		if !autoBan {
 			autoBanInt = 0
 		}
 		return &model.Channel{
-			Id:      c.GetInt("channel_id"),
+			Id:      channelId,
 			Type:    c.GetInt("channel_type"),
 			Name:    c.GetString("channel_name"),
 			AutoBan: &autoBanInt,
@@ -424,6 +454,7 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		service.AppendChannelAffinityAdminInfo(c, adminInfo)
 		service.AppendChannelSelectionTraceAdminInfo(c, adminInfo)
 		other["admin_info"] = adminInfo
+		service.AppendLogBodyDetails(c, other)
 		startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
 		if startTime.IsZero() {
 			startTime = time.Now()
@@ -548,11 +579,12 @@ func RelayTask(c *gin.Context) {
 	}()
 
 	retryParam := &service.RetryParam{
-		Ctx:         c,
-		TokenGroup:  relayInfo.TokenGroup,
-		ModelName:   relayInfo.OriginModelName,
-		RequestPath: c.Request.URL.Path,
-		Retry:       common.GetPointer(0),
+		Ctx:                c,
+		TokenGroup:         relayInfo.TokenGroup,
+		ModelName:          relayInfo.OriginModelName,
+		RequestPath:        c.Request.URL.Path,
+		Retry:              common.GetPointer(0),
+		ExcludedChannelIDs: make(map[int]struct{}),
 	}
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
@@ -625,6 +657,7 @@ func RelayTask(c *gin.Context) {
 		service.FinishChannelHealthAttemptForContext(c, service.ChannelAttemptResult{Error: channelHealthErr})
 
 		if !taskErr.LocalError {
+			setRelayErrorLogResponseBody(c, channelHealthErr)
 			processChannelError(c,
 				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
 					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
@@ -634,6 +667,7 @@ func RelayTask(c *gin.Context) {
 		if !shouldRetryTaskRelay(c, channel.Id, taskErr, common.RetryTimes-retryParam.GetRetry()) {
 			break
 		}
+		retryParam.ExcludedChannelIDs[channel.Id] = struct{}{}
 	}
 
 	useChannel := c.GetStringSlice("use_channel")

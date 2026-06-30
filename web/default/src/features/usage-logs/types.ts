@@ -112,6 +112,14 @@ export interface LogOtherData {
     admin_role?: number
     auth_method?: 'session' | 'access_token' | string
   }
+  log_detail?: {
+    request_body?: string
+    request_body_truncated?: boolean
+    request_body_size?: number
+    response_body?: string
+    response_body_truncated?: boolean
+    response_body_size?: number
+  }
   // Language-independent operation descriptor (audit/login logs).
   // Frontend renders localized content from action + params via i18n templates.
   op?: {

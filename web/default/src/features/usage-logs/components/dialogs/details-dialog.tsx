@@ -38,6 +38,13 @@ import { cn } from '@/lib/utils'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs'
 import { Dialog } from '@/components/dialog'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { DynamicPricingBreakdown } from '@/features/pricing/components/dynamic-pricing-breakdown'
@@ -133,6 +140,142 @@ function DetailSection(props: {
         {props.children}
       </div>
     </div>
+  )
+}
+
+function formatBodyText(body: string): string {
+  if (!body) return ''
+  try {
+    return JSON.stringify(JSON.parse(body), null, 2)
+  } catch {
+    return body
+  }
+}
+
+function formatBodySize(size: number | undefined): string {
+  if (!size || size <= 0) return ''
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KiB`
+  return `${(size / 1024 / 1024).toFixed(2)} MiB`
+}
+
+function hasCapturedBodyField(
+  detail: LogOtherData['log_detail'],
+  field: 'request_body' | 'response_body'
+): boolean {
+  return !!detail && Object.prototype.hasOwnProperty.call(detail, field)
+}
+
+function getCapturedBody(
+  detail: LogOtherData['log_detail'],
+  field: 'request_body' | 'response_body'
+): string {
+  const value = detail?.[field]
+  return typeof value === 'string' ? value : ''
+}
+
+function BodyDetailBlock(props: {
+  label: string
+  body: string
+  copiedText: string | null
+  copyToClipboard: (text: string) => void
+  truncated?: boolean
+  size?: number
+}) {
+  const { t } = useTranslation()
+  const formatted = formatBodyText(props.body)
+  const displayText = formatted || t('Empty body')
+  return (
+    <div className='min-w-0 space-y-2'>
+      <div className='flex min-w-0 items-center justify-between gap-2'>
+        <div className='min-w-0 text-xs font-medium'>{props.label}</div>
+        <Button
+          variant='ghost'
+          size='sm'
+          className='h-8 px-2'
+          onClick={() => props.copyToClipboard(formatted)}
+          title={t('Copy to clipboard')}
+          aria-label={t('Copy to clipboard')}
+        >
+          {props.copiedText === formatted ? (
+            <Check className='size-3.5 text-green-600' />
+          ) : (
+            <Copy className='size-3.5' />
+          )}
+        </Button>
+      </div>
+      {props.truncated && (
+        <div className='text-muted-foreground text-xs'>
+          {t('Body truncated')}
+          {props.size ? ` · ${t('Original size')}: ${formatBodySize(props.size)}` : ''}
+        </div>
+      )}
+      <ScrollArea className='max-h-72 min-h-28 rounded-md border bg-background'>
+        <pre
+          className={cn(
+            'min-w-0 whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed',
+            !formatted && 'text-muted-foreground'
+          )}
+        >
+          {displayText}
+        </pre>
+      </ScrollArea>
+    </div>
+  )
+}
+
+function LogBodyDetailsSection(props: {
+  other: LogOtherData
+  copiedText: string | null
+  copyToClipboard: (text: string) => void
+}) {
+  const { t } = useTranslation()
+  const detail = props.other.log_detail
+  const hasRequestBody = hasCapturedBodyField(detail, 'request_body')
+  const hasResponseBody = hasCapturedBodyField(detail, 'response_body')
+  const requestBody = getCapturedBody(detail, 'request_body')
+  const responseBody = getCapturedBody(detail, 'response_body')
+  if (!hasRequestBody && !hasResponseBody) return null
+
+  const defaultTab = hasRequestBody ? 'request' : 'response'
+
+  return (
+    <DetailSection label={t('Request / Response Bodies')}>
+      <Tabs defaultValue={defaultTab} className='min-w-0'>
+        <TabsList className='h-8'>
+          {hasRequestBody && (
+            <TabsTrigger value='request'>{t('Request Body')}</TabsTrigger>
+          )}
+          {hasResponseBody && (
+            <TabsTrigger value='response'>{t('Response Body')}</TabsTrigger>
+          )}
+        </TabsList>
+        {hasRequestBody && (
+          <TabsContent value='request' className='mt-2 min-w-0'>
+            <BodyDetailBlock
+              label={t('Request Body')}
+              body={requestBody}
+              copiedText={props.copiedText}
+              copyToClipboard={props.copyToClipboard}
+              truncated={detail?.request_body_truncated}
+              size={detail?.request_body_size}
+            />
+          </TabsContent>
+        )}
+        {hasResponseBody && (
+          <TabsContent value='response' className='mt-2 min-w-0'>
+            <BodyDetailBlock
+              label={t('Response Body')}
+              body={responseBody}
+              copiedText={props.copiedText}
+              copyToClipboard={props.copyToClipboard}
+              truncated={detail?.response_body_truncated}
+              size={detail?.response_body_size}
+            />
+          </TabsContent>
+        )}
+      </Tabs>
+    </DetailSection>
   )
 }
 
@@ -532,6 +675,11 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const useChannel = other?.admin_info?.use_channel
   const channelChain =
     useChannel && useChannel.length > 0 ? useChannel.join(' → ') : undefined
+  const bodyDetails = other?.log_detail
+  const showBodyDetails =
+    !!bodyDetails &&
+    (hasCapturedBodyField(bodyDetails, 'request_body') ||
+      hasCapturedBodyField(bodyDetails, 'response_body'))
 
   return (
     <Dialog
@@ -700,6 +848,14 @@ export function DetailsDialog(props: DetailsDialogProps) {
               </div>
             </div>
           </DetailSection>
+        )}
+
+        {showBodyDetails && (
+          <LogBodyDetailsSection
+            other={other as LogOtherData}
+            copiedText={copiedText}
+            copyToClipboard={copyToClipboard}
+          />
         )}
 
         {/* Reject reason (admin only) */}

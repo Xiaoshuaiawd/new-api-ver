@@ -4,8 +4,12 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -130,4 +134,90 @@ func TestChannelSelectionTraceDoesNotLeakBetweenConcurrentSelections(t *testing.
 	require.NotEmpty(t, eventsB)
 	require.Equal(t, 9101, eventsB[0].ChannelID)
 	require.Equal(t, ChannelSelectionTraceStageRuntime, eventsB[0].Stage)
+}
+
+func TestCacheGetRandomSatisfiedChannelExcludesFailedChannelsDuringRetry(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withChannelHealthSelectionDB(t)
+	pFallback := int64(0)
+	weight := uint(100)
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:       9103,
+		Type:     constant.ChannelTypeOpenAI,
+		Key:      "sk-fallback",
+		Status:   common.ChannelStatusEnabled,
+		Name:     "fallback-priority",
+		Priority: &pFallback,
+		Weight:   &weight,
+		Models:   "gpt-health-test",
+		Group:    "default",
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.Ability{
+		Group:     "default",
+		Model:     "gpt-health-test",
+		ChannelId: 9103,
+		Enabled:   true,
+		Priority:  &pFallback,
+		Weight:    weight,
+	}).Error)
+	model.InitChannelCache()
+
+	param := &RetryParam{
+		TokenGroup:         "default",
+		ModelName:          "gpt-health-test",
+		Retry:              common.GetPointer(0),
+		ExcludedChannelIDs: map[int]struct{}{9101: {}},
+	}
+
+	channel, group, err := CacheGetRandomSatisfiedChannel(param)
+
+	require.NoError(t, err)
+	require.Equal(t, "default", group)
+	require.NotNil(t, channel)
+	assert.Equal(t, 9102, channel.Id)
+
+	param.ExcludedChannelIDs[9102] = struct{}{}
+	channel, _, err = CacheGetRandomSatisfiedChannel(param)
+
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, 9103, channel.Id)
+}
+
+func TestCacheGetRandomSatisfiedChannelSkipsChannelsWithoutImageInputSupport(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withChannelHealthSelectionDB(t)
+
+	supportsImageInput := false
+	settings, err := common.Marshal(dto.ChannelOtherSettings{
+		SupportsImageInput: &supportsImageInput,
+	})
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", 9101).Update("settings", string(settings)).Error)
+	model.InitChannelCache()
+
+	channel, group, err := CacheGetRandomSatisfiedChannel(&RetryParam{
+		TokenGroup:               "default",
+		ModelName:                "gpt-health-test",
+		Retry:                    common.GetPointer(0),
+		RequireImageInputSupport: true,
+		ExcludedChannelIDs:       map[int]struct{}{},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "default", group)
+	require.NotNil(t, channel)
+	assert.Equal(t, 9102, channel.Id)
+
+	channel, _, err = CacheGetRandomSatisfiedChannel(&RetryParam{
+		TokenGroup:               "default",
+		ModelName:                "gpt-health-test",
+		Retry:                    common.GetPointer(0),
+		RequireImageInputSupport: false,
+		ExcludedChannelIDs:       map[int]struct{}{},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, 9101, channel.Id)
 }
