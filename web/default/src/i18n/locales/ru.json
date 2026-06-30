@@ -3649,6 +3649,7 @@
     "Received": "Получено",
     "Received amount": "Полученная сумма",
     "Recent": "Недавно",
+    "Recent 60 checks": "Последние 60 проверок",
     "Recent log window used to calculate slow first responses.": "Недавнее окно журналов для расчета медленных первых ответов.",
     "Recent maintenance tasks running across instances and their execution status.": "Недавние задачи обслуживания, выполняемые на всех экземплярах, и их статус выполнения.",
     "Recent request window used to calculate failure rate": "Окно последних запросов для расчета доли ошибок",

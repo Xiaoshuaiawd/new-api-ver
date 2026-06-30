@@ -3649,6 +3649,7 @@
     "Received": "Reçu",
     "Received amount": "Montant reçu",
     "Recent": "Récent",
+    "Recent 60 checks": "60 derniers contrôles",
     "Recent log window used to calculate slow first responses.": "Fenêtre de journaux récente utilisée pour calculer les premiers retours lents.",
     "Recent maintenance tasks running across instances and their execution status.": "Tâches de maintenance récentes exécutées sur les instances et leur état d'exécution.",
     "Recent request window used to calculate failure rate": "Fenêtre de requêtes récentes utilisée pour calculer le taux d’échec",

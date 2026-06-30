@@ -3649,6 +3649,7 @@
     "Received": "受信済み",
     "Received amount": "受け取り額",
     "Recent": "直近",
+    "Recent 60 checks": "直近60回のチェック",
     "Recent log window used to calculate slow first responses.": "低速な初回応答を計算する最近のログ時間です。",
     "Recent maintenance tasks running across instances and their execution status.": "各インスタンスで実行された最近のメンテナンスタスクとその実行状態。",
     "Recent request window used to calculate failure rate": "失敗率の計算に使用する直近リクエストの期間",

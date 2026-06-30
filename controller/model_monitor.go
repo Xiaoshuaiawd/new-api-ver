@@ -16,7 +16,7 @@ import (
 )
 
 type modelMonitorSummary struct {
-	RequestCount int64   `json:"request_count"`
+	RequestCount int64   `json:"-"`
 	SuccessRate  float64 `json:"success_rate"`
 	AvgTtftMs    int64   `json:"avg_ttft_ms"`
 	AvgLatencyMs int64   `json:"avg_latency_ms"`
@@ -29,7 +29,7 @@ type modelMonitorModel struct {
 	Icon               string    `json:"icon,omitempty"`
 	VendorName         string    `json:"vendor_name,omitempty"`
 	VendorIcon         string    `json:"vendor_icon,omitempty"`
-	RequestCount       int64     `json:"request_count"`
+	RequestCount       int64     `json:"-"`
 	SuccessRate        float64   `json:"success_rate"`
 	AvgTtftMs          int64     `json:"avg_ttft_ms"`
 	AvgLatencyMs       int64     `json:"avg_latency_ms"`
@@ -74,6 +74,19 @@ func modelMonitorStatus(summary perfmetrics.ModelGroupSummary) string {
 		return "degraded"
 	}
 	return "healthy"
+}
+
+func modelMonitorStatusRank(status string) int {
+	switch status {
+	case "critical":
+		return 0
+	case "degraded":
+		return 1
+	case "healthy":
+		return 2
+	default:
+		return 3
+	}
 }
 
 func modelMonitorSummaryFor(models []modelMonitorModel) modelMonitorSummary {
@@ -197,8 +210,10 @@ func GetModelMonitorSelf(c *gin.Context) {
 			modelItems = append(modelItems, item)
 		}
 		sort.Slice(modelItems, func(i, j int) bool {
-			if modelItems[i].RequestCount != modelItems[j].RequestCount {
-				return modelItems[i].RequestCount > modelItems[j].RequestCount
+			leftRank := modelMonitorStatusRank(modelItems[i].Status)
+			rightRank := modelMonitorStatusRank(modelItems[j].Status)
+			if leftRank != rightRank {
+				return leftRank < rightRank
 			}
 			return modelItems[i].ModelName < modelItems[j].ModelName
 		})

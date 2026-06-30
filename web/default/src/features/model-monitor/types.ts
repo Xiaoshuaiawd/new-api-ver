@@ -19,7 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 export type ModelMonitorStatus = 'healthy' | 'degraded' | 'critical' | 'idle'
 
 export type ModelMonitorSummary = {
-  request_count: number
   success_rate: number
   avg_ttft_ms: number
   avg_latency_ms: number

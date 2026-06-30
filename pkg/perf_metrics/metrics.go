@@ -187,7 +187,7 @@ func QuerySummaryAll(hours int, groups []string) (SummaryAllResult, error) {
 			AvgLatencyMs:       avgLatency,
 			SuccessRate:        math.Round(successRate*100) / 100,
 			AvgTps:             math.Round(avgTps*100) / 100,
-			RecentSuccessRates: recentSuccessRates(modelBuckets[name], 3),
+			RecentSuccessRates: recentSuccessRates(modelBuckets[name], 60),
 			RequestCount:       total.requestCount,
 		})
 	}
@@ -281,7 +281,7 @@ func QueryModelGroupSummaryAll(hours int, groups []string) (ModelGroupSummaryAll
 			AvgLatencyMs:       avg(total.totalLatencyMs, total.requestCount),
 			SuccessRate:        math.Round(successRate(total)*100) / 100,
 			AvgTps:             math.Round(avgTps(total)*100) / 100,
-			RecentSuccessRates: recentSuccessRates(recentBuckets[key], 3),
+			RecentSuccessRates: recentSuccessRates(recentBuckets[key], 60),
 			RequestCount:       total.requestCount,
 			LastBucketTs:       lastBucketTs[key],
 		})

@@ -3649,6 +3649,7 @@
     "Received": "获得",
     "Received amount": "已收额度",
     "Recent": "近期",
+    "Recent 60 checks": "最近 60 次检测",
     "Recent log window used to calculate slow first responses.": "用于计算慢首字比例的近期日志窗口。",
     "Recent maintenance tasks running across instances and their execution status.": "跨实例运行的近期维护任务及其执行状态。",
     "Recent request window used to calculate failure rate": "用于计算失败率的近期请求窗口",

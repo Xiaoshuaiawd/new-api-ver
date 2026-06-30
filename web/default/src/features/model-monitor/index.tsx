@@ -52,14 +52,6 @@ import {
 } from '@/components/ui/input-group'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import {
   formatLatency,
   formatThroughput,
   formatUptimePct,
@@ -112,34 +104,44 @@ function statusClassName(status: ModelMonitorStatus) {
   }
 }
 
+function statusDotClassName(status: ModelMonitorStatus) {
+  switch (status) {
+    case 'healthy':
+      return 'bg-emerald-500'
+    case 'degraded':
+      return 'bg-amber-500'
+    case 'critical':
+      return 'bg-red-500'
+    default:
+      return 'bg-muted-foreground/35'
+  }
+}
+
 function weightedSummary(groups: ModelMonitorGroup[]): ModelMonitorSummary {
   const summary: ModelMonitorSummary = {
-    request_count: 0,
     success_rate: 0,
     avg_ttft_ms: 0,
     avg_latency_ms: 0,
     avg_tps: 0,
   }
-  let successWeighted = 0
-  let ttftWeighted = 0
-  let latencyWeighted = 0
-  let tpsWeighted = 0
+  let activeModels = 0
 
   for (const group of groups) {
-    const count = group.summary.request_count
-    if (!Number.isFinite(count) || count <= 0) continue
-    summary.request_count += count
-    successWeighted += group.summary.success_rate * count
-    ttftWeighted += group.summary.avg_ttft_ms * count
-    latencyWeighted += group.summary.avg_latency_ms * count
-    tpsWeighted += group.summary.avg_tps * count
+    for (const model of group.models) {
+      if (model.status === 'idle') continue
+      activeModels += 1
+      summary.success_rate += model.success_rate
+      summary.avg_ttft_ms += model.avg_ttft_ms
+      summary.avg_latency_ms += model.avg_latency_ms
+      summary.avg_tps += model.avg_tps
+    }
   }
 
-  if (summary.request_count <= 0) return summary
-  summary.success_rate = successWeighted / summary.request_count
-  summary.avg_ttft_ms = Math.round(ttftWeighted / summary.request_count)
-  summary.avg_latency_ms = Math.round(latencyWeighted / summary.request_count)
-  summary.avg_tps = tpsWeighted / summary.request_count
+  if (activeModels <= 0) return summary
+  summary.success_rate = summary.success_rate / activeModels
+  summary.avg_ttft_ms = Math.round(summary.avg_ttft_ms / activeModels)
+  summary.avg_latency_ms = Math.round(summary.avg_latency_ms / activeModels)
+  summary.avg_tps = summary.avg_tps / activeModels
   return summary
 }
 
@@ -190,19 +192,24 @@ function SummaryMetric(props: {
   )
 }
 
-function RecentBars(props: { rates?: number[]; status: ModelMonitorStatus }) {
-  const rates = props.rates?.filter(Number.isFinite).slice(-3) ?? []
-  const bars = [...Array(Math.max(0, 3 - rates.length)).fill(null), ...rates]
+function RecentBars(props: {
+  rates?: number[]
+  status: ModelMonitorStatus
+  label: string
+}) {
+  const rates = props.rates?.filter(Number.isFinite).slice(-60) ?? []
+  const bars = [...Array(Math.max(0, 60 - rates.length)).fill(null), ...rates]
   return (
-    <div className='flex h-5 items-center gap-1' aria-hidden='true'>
+    <div
+      className='flex h-6 min-w-[18rem] items-end gap-1'
+      aria-label={props.label}
+      role='img'
+    >
       {bars.map((rate, index) => (
         <span
           key={`${index}-${rate ?? 'empty'}`}
           className={cn(
-            'w-1.5 rounded-full',
-            index === 0 && 'h-2',
-            index === 1 && 'h-3',
-            index === 2 && 'h-4',
+            'h-5 flex-1 rounded-sm',
             rate == null && 'bg-muted-foreground/15',
             rate != null && rate >= 90 && 'bg-emerald-500',
             rate != null && rate < 90 && rate >= 70 && 'bg-amber-500',
@@ -215,82 +222,115 @@ function RecentBars(props: { rates?: number[]; status: ModelMonitorStatus }) {
   )
 }
 
-function ModelRows(props: { models: ModelMonitorModel[] }) {
+function ModelMetric(props: {
+  icon: LucideIcon
+  label: string
+  value: string
+  valueClassName?: string
+}) {
+  const Icon = props.icon
+  return (
+    <div className='bg-muted/45 min-w-0 rounded-md px-3 py-2'>
+      <div className='text-muted-foreground flex items-center gap-1.5 text-xs'>
+        <Icon className='size-3.5 shrink-0' aria-hidden='true' />
+        <span className='truncate'>{props.label}</span>
+      </div>
+      <div
+        className={cn(
+          'mt-1 truncate font-mono text-sm font-semibold tabular-nums',
+          props.valueClassName
+        )}
+      >
+        {props.value}
+      </div>
+    </div>
+  )
+}
+
+function ModelCard(props: { model: ModelMonitorModel }) {
   const { t } = useTranslation()
+  const model = props.model
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow className='hover:bg-transparent'>
-          <TableHead className='min-w-[260px]'>{t('Model')}</TableHead>
-          <TableHead>{t('Status')}</TableHead>
-          <TableHead className='text-right'>{t('Calls')}</TableHead>
-          <TableHead className='text-right'>{t('Success rate')}</TableHead>
-          <TableHead className='text-right'>{t('TTFT')}</TableHead>
-          <TableHead className='text-right'>{t('Latency')}</TableHead>
-          <TableHead className='text-right'>{t('Throughput')}</TableHead>
-          <TableHead>{t('Recent')}</TableHead>
-          <TableHead className='text-right'>{t('Last sample')}</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {props.models.map((model) => (
-          <TableRow key={model.model_name}>
-            <TableCell>
-              <div className='flex min-w-0 flex-col gap-0.5'>
-                <div className='min-w-0 truncate font-mono font-medium'>
-                  {model.model_name}
-                </div>
-                {model.vendor_name != null && model.vendor_name !== '' && (
-                  <div className='text-muted-foreground truncate text-xs'>
-                    {model.vendor_name}
-                  </div>
-                )}
-              </div>
-            </TableCell>
-            <TableCell>
-              <Badge
-                variant='outline'
-                className={cn('h-5', statusClassName(model.status))}
-              >
-                {statusLabel(model.status, t)}
-              </Badge>
-            </TableCell>
-            <TableCell className='text-right font-mono font-medium'>
-              {formatCount(model.request_count)}
-            </TableCell>
-            <TableCell
+    <article className='bg-card rounded-lg border p-3 sm:p-4'>
+      <div className='flex min-w-0 items-start justify-between gap-3'>
+        <div className='min-w-0'>
+          <div className='flex min-w-0 items-center gap-2'>
+            <span
               className={cn(
-                'text-right font-mono font-medium',
-                getSuccessRateTextClass(model.success_rate)
+                'size-2.5 shrink-0 rounded-full',
+                statusDotClassName(model.status)
               )}
-            >
-              {model.request_count > 0
-                ? formatUptimePct(model.success_rate)
-                : '—'}
-            </TableCell>
-            <TableCell className='text-right font-mono'>
-              {formatLatency(model.avg_ttft_ms)}
-            </TableCell>
-            <TableCell className='text-right font-mono'>
-              {formatLatency(model.avg_latency_ms)}
-            </TableCell>
-            <TableCell className='text-right font-mono'>
-              {formatThroughput(model.avg_tps)}
-            </TableCell>
-            <TableCell>
-              <RecentBars
-                rates={model.recent_success_rates}
-                status={model.status}
-              />
-            </TableCell>
-            <TableCell className='text-right font-mono text-xs'>
-              {formatLastSample(model.last_bucket_ts)}
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+              aria-hidden='true'
+            />
+            <h3 className='min-w-0 truncate font-mono text-sm font-semibold'>
+              {model.model_name}
+            </h3>
+          </div>
+          {model.vendor_name != null && model.vendor_name !== '' && (
+            <div className='text-muted-foreground mt-1 truncate text-xs'>
+              {model.vendor_name}
+            </div>
+          )}
+        </div>
+        <Badge
+          variant='outline'
+          className={cn('h-6 shrink-0', statusClassName(model.status))}
+        >
+          {statusLabel(model.status, t)}
+        </Badge>
+      </div>
+
+      <div className='mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4'>
+        <ModelMetric
+          icon={Timer}
+          label={t('TTFT')}
+          value={formatLatency(model.avg_ttft_ms)}
+        />
+        <ModelMetric
+          icon={Clock3}
+          label={t('Latency')}
+          value={formatLatency(model.avg_latency_ms)}
+        />
+        <ModelMetric
+          icon={Activity}
+          label={t('Success rate')}
+          value={
+            model.status !== 'idle' ? formatUptimePct(model.success_rate) : '—'
+          }
+          valueClassName={getSuccessRateTextClass(model.success_rate)}
+        />
+        <ModelMetric
+          icon={Gauge}
+          label={t('Throughput')}
+          value={formatThroughput(model.avg_tps)}
+        />
+      </div>
+
+      <div className='mt-4 space-y-2'>
+        <div className='flex items-center justify-between gap-3 text-xs'>
+          <span className='text-muted-foreground'>{t('Recent 60 checks')}</span>
+          <span className='text-muted-foreground font-mono'>
+            {t('Last sample')}: {formatLastSample(model.last_bucket_ts)}
+          </span>
+        </div>
+        <RecentBars
+          rates={model.recent_success_rates}
+          status={model.status}
+          label={t('Recent 60 checks')}
+        />
+      </div>
+    </article>
+  )
+}
+
+function ModelRows(props: { models: ModelMonitorModel[] }) {
+  return (
+    <div className='grid gap-3 p-3 xl:grid-cols-2'>
+      {props.models.map((model) => (
+        <ModelCard key={model.model_name} model={model} />
+      ))}
+    </div>
   )
 }
 
@@ -326,9 +366,6 @@ function GroupSection(props: {
           <div className='text-muted-foreground mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs'>
             <span>
               {t('Models')}: {props.group.models.length}
-            </span>
-            <span>
-              {t('Calls')}: {formatCount(summary.request_count)}
             </span>
             <span>
               {t('Success rate')}: {formatUptimePct(summary.success_rate)}
@@ -472,11 +509,6 @@ export function ModelMonitor() {
                 icon={Gauge}
                 label={t('Models')}
                 value={formatCount(totalModels)}
-              />
-              <SummaryMetric
-                icon={Clock3}
-                label={t('Calls')}
-                value={formatCount(summary.request_count)}
               />
               <SummaryMetric
                 icon={Timer}

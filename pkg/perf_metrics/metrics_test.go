@@ -87,3 +87,28 @@ func TestQueryModelGroupSummaryAllMergesBucketsByGroup(t *testing.T) {
 	assert.InDelta(t, 20, summary.AvgTps, 0.01)
 	assert.NotEmpty(t, summary.RecentSuccessRates)
 }
+
+func TestQueryModelGroupSummaryAllKeepsRecentSixtyBuckets(t *testing.T) {
+	setupPerfMetricsTestDB(t)
+
+	base := bucketStart(time.Now().Unix())
+	for i := 0; i < 65; i++ {
+		successCount := int64(1)
+		if i%10 == 0 {
+			successCount = 0
+		}
+		require.NoError(t, model.DB.Create(&model.PerfMetric{
+			ModelName:      "gpt-monitor-trend",
+			Group:          "default",
+			BucketTs:       base - int64(i)*3600,
+			RequestCount:   1,
+			SuccessCount:   successCount,
+			TotalLatencyMs: 100,
+		}).Error)
+	}
+
+	result, err := QueryModelGroupSummaryAll(72, []string{"default"})
+	require.NoError(t, err)
+	require.Len(t, result.Models, 1)
+	assert.Len(t, result.Models[0].RecentSuccessRates, 60)
+}

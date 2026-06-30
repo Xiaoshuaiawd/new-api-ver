@@ -3649,6 +3649,7 @@
     "Received": "Đã nhận",
     "Received amount": "Số tiền đã nhận",
     "Recent": "Gần đây",
+    "Recent 60 checks": "60 lần kiểm tra gần đây",
     "Recent log window used to calculate slow first responses.": "Cửa sổ nhật ký gần đây dùng để tính phản hồi đầu tiên chậm.",
     "Recent maintenance tasks running across instances and their execution status.": "Các tác vụ bảo trì gần đây chạy trên các phiên bản và trạng thái thực thi của chúng.",
     "Recent request window used to calculate failure rate": "Cửa sổ yêu cầu gần đây dùng để tính tỷ lệ lỗi",

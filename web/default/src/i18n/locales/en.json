@@ -3649,6 +3649,7 @@
     "Received": "Received",
     "Received amount": "Received amount",
     "Recent": "Recent",
+    "Recent 60 checks": "Recent 60 checks",
     "Recent log window used to calculate slow first responses.": "Recent log window used to calculate slow first responses.",
     "Recent maintenance tasks running across instances and their execution status.": "Recent maintenance tasks running across instances and their execution status.",
     "Recent request window used to calculate failure rate": "Recent request window used to calculate failure rate",
