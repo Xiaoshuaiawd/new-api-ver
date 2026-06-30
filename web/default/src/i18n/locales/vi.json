@@ -5243,6 +5243,12 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Healthy groups": "Nhóm khỏe mạnh",
+    "Degraded groups": "Nhóm suy giảm",
+    "Critical groups": "Nhóm nghiêm trọng",
+    "Idle groups": "Nhóm nhàn rỗi",
+    "No matching groups": "Không có nhóm phù hợp",
+    "No group monitor data": "Chưa có dữ liệu giám sát nhóm"
   }
 }

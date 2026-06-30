@@ -5243,6 +5243,12 @@
     "Zero retention": "零数据保留",
     "Zhipu": "智谱",
     "Zhipu V4": "智谱 V4",
-    "Zoom": "缩放"
+    "Zoom": "缩放",
+    "Healthy groups": "正常分组",
+    "Degraded groups": "波动分组",
+    "Critical groups": "异常分组",
+    "Idle groups": "空闲分组",
+    "No matching groups": "没有匹配的分组",
+    "No group monitor data": "暂无分组监控数据"
   }
 }

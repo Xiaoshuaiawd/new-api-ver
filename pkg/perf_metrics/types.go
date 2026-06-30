@@ -76,6 +76,21 @@ type ModelGroupSummaryAllResult struct {
 	Models []ModelGroupSummary `json:"models"`
 }
 
+type GroupSummary struct {
+	Group              string    `json:"group"`
+	AvgTtftMs          int64     `json:"avg_ttft_ms"`
+	AvgLatencyMs       int64     `json:"avg_latency_ms"`
+	SuccessRate        float64   `json:"success_rate"`
+	AvgTps             float64   `json:"avg_tps"`
+	RecentSuccessRates []float64 `json:"recent_success_rates,omitempty"`
+	RequestCount       int64     `json:"-"`
+	LastBucketTs       int64     `json:"last_bucket_ts"`
+}
+
+type GroupSummaryAllResult struct {
+	Groups []GroupSummary `json:"groups"`
+}
+
 type bucketKey struct {
 	model    string
 	group    string

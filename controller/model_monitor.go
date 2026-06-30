@@ -23,28 +23,18 @@ type modelMonitorSummary struct {
 	AvgTps       float64 `json:"avg_tps"`
 }
 
-type modelMonitorModel struct {
-	ModelName          string    `json:"model_name"`
-	Description        string    `json:"description,omitempty"`
-	Icon               string    `json:"icon,omitempty"`
-	VendorName         string    `json:"vendor_name,omitempty"`
-	VendorIcon         string    `json:"vendor_icon,omitempty"`
-	RequestCount       int64     `json:"-"`
-	SuccessRate        float64   `json:"success_rate"`
-	AvgTtftMs          int64     `json:"avg_ttft_ms"`
-	AvgLatencyMs       int64     `json:"avg_latency_ms"`
-	AvgTps             float64   `json:"avg_tps"`
-	RecentSuccessRates []float64 `json:"recent_success_rates,omitempty"`
-	LastBucketTs       int64     `json:"last_bucket_ts"`
-	Status             string    `json:"status"`
-}
-
 type modelMonitorGroup struct {
-	Name        string              `json:"name"`
-	Description string              `json:"description"`
-	Ratio       float64             `json:"ratio"`
-	Summary     modelMonitorSummary `json:"summary"`
-	Models      []modelMonitorModel `json:"models"`
+	Name         string    `json:"name"`
+	Description  string    `json:"description"`
+	Ratio        float64   `json:"ratio"`
+	SuccessRate  float64   `json:"success_rate"`
+	AvgTtftMs    int64     `json:"avg_ttft_ms"`
+	AvgLatencyMs int64     `json:"avg_latency_ms"`
+	AvgTps       float64   `json:"avg_tps"`
+	RecentRates  []float64 `json:"recent_success_rates,omitempty"`
+	LastBucketTs int64     `json:"last_bucket_ts"`
+	Status       string    `json:"status"`
+	RequestCount int64     `json:"-"`
 }
 
 func parseModelMonitorHours(raw string) int {
@@ -63,14 +53,14 @@ func parseModelMonitorHours(raw string) int {
 	return hours
 }
 
-func modelMonitorStatus(summary perfmetrics.ModelGroupSummary) string {
-	if summary.RequestCount == 0 {
+func modelMonitorStatus(requestCount int64, successRate float64) string {
+	if requestCount == 0 {
 		return "idle"
 	}
-	if summary.SuccessRate < 70 {
+	if successRate < 70 {
 		return "critical"
 	}
-	if summary.SuccessRate < 90 {
+	if successRate < 90 {
 		return "degraded"
 	}
 	return "healthy"
@@ -89,12 +79,12 @@ func modelMonitorStatusRank(status string) int {
 	}
 }
 
-func modelMonitorSummaryFor(models []modelMonitorModel) modelMonitorSummary {
+func modelMonitorSummaryFor(groups []modelMonitorGroup) modelMonitorSummary {
 	total := modelMonitorSummary{}
 	var latencySum int64
 	var ttftSum int64
 	var tpsSum float64
-	for _, item := range models {
+	for _, item := range groups {
 		if item.RequestCount <= 0 {
 			continue
 		}
@@ -137,13 +127,14 @@ func GetModelMonitorSelf(c *gin.Context) {
 			"data": gin.H{
 				"updated_at":   time.Now().Unix(),
 				"window_hours": hours,
+				"summary":      modelMonitorSummary{},
 				"groups":       []modelMonitorGroup{},
 			},
 		})
 		return
 	}
 
-	summaries, err := perfmetrics.QueryModelGroupSummaryAll(hours, allowedGroups)
+	summaries, err := perfmetrics.QueryGroupSummaryAll(hours, allowedGroups)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -152,85 +143,46 @@ func GetModelMonitorSelf(c *gin.Context) {
 		return
 	}
 
-	statsByGroupModel := map[string]map[string]perfmetrics.ModelGroupSummary{}
-	for _, summary := range summaries.Models {
-		if _, ok := statsByGroupModel[summary.Group]; !ok {
-			statsByGroupModel[summary.Group] = map[string]perfmetrics.ModelGroupSummary{}
-		}
-		statsByGroupModel[summary.Group][summary.ModelName] = summary
-	}
-
-	vendorByID := map[int]model.PricingVendor{}
-	for _, vendor := range model.GetVendors() {
-		vendorByID[vendor.ID] = vendor
-	}
-
-	modelsByGroup := map[string]map[string]modelMonitorModel{}
-	allowedGroupSet := map[string]struct{}{}
-	for _, group := range allowedGroups {
-		allowedGroupSet[group] = struct{}{}
-		modelsByGroup[group] = map[string]modelMonitorModel{}
-	}
-
-	for _, pricing := range filterPricingByUsableGroups(model.GetPricing(), usableGroups) {
-		targetGroups := pricing.EnableGroup
-		if common.StringsContains(targetGroups, "all") {
-			targetGroups = allowedGroups
-		}
-		for _, group := range targetGroups {
-			if _, ok := allowedGroupSet[group]; !ok {
-				continue
-			}
-			vendor := vendorByID[pricing.VendorID]
-			modelsByGroup[group][pricing.ModelName] = modelMonitorModel{
-				ModelName:   pricing.ModelName,
-				Description: pricing.Description,
-				Icon:        pricing.Icon,
-				VendorName:  vendor.Name,
-				VendorIcon:  vendor.Icon,
-				Status:      "idle",
-			}
-		}
+	statsByGroup := map[string]perfmetrics.GroupSummary{}
+	for _, summary := range summaries.Groups {
+		statsByGroup[summary.Group] = summary
 	}
 
 	groups := make([]modelMonitorGroup, 0, len(allowedGroups))
 	for _, group := range allowedGroups {
-		modelItems := make([]modelMonitorModel, 0, len(modelsByGroup[group]))
-		for modelName, item := range modelsByGroup[group] {
-			if summary, ok := statsByGroupModel[group][modelName]; ok {
-				item.RequestCount = summary.RequestCount
-				item.SuccessRate = summary.SuccessRate
-				item.AvgTtftMs = summary.AvgTtftMs
-				item.AvgLatencyMs = summary.AvgLatencyMs
-				item.AvgTps = summary.AvgTps
-				item.RecentSuccessRates = summary.RecentSuccessRates
-				item.LastBucketTs = summary.LastBucketTs
-				item.Status = modelMonitorStatus(summary)
-			}
-			modelItems = append(modelItems, item)
-		}
-		sort.Slice(modelItems, func(i, j int) bool {
-			leftRank := modelMonitorStatusRank(modelItems[i].Status)
-			rightRank := modelMonitorStatusRank(modelItems[j].Status)
-			if leftRank != rightRank {
-				return leftRank < rightRank
-			}
-			return modelItems[i].ModelName < modelItems[j].ModelName
-		})
-		groups = append(groups, modelMonitorGroup{
+		item := modelMonitorGroup{
 			Name:        group,
 			Description: usableGroups[group],
 			Ratio:       service.GetUserGroupRatio(user.Group, group),
-			Summary:     modelMonitorSummaryFor(modelItems),
-			Models:      modelItems,
-		})
+			Status:      "idle",
+		}
+		if summary, ok := statsByGroup[group]; ok {
+			item.RequestCount = summary.RequestCount
+			item.SuccessRate = summary.SuccessRate
+			item.AvgTtftMs = summary.AvgTtftMs
+			item.AvgLatencyMs = summary.AvgLatencyMs
+			item.AvgTps = summary.AvgTps
+			item.RecentRates = summary.RecentSuccessRates
+			item.LastBucketTs = summary.LastBucketTs
+			item.Status = modelMonitorStatus(summary.RequestCount, summary.SuccessRate)
+		}
+		groups = append(groups, item)
 	}
+	sort.Slice(groups, func(i, j int) bool {
+		leftRank := modelMonitorStatusRank(groups[i].Status)
+		rightRank := modelMonitorStatusRank(groups[j].Status)
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+		return groups[i].Name < groups[j].Name
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
 			"updated_at":   time.Now().Unix(),
 			"window_hours": hours,
+			"summary":      modelMonitorSummaryFor(groups),
 			"groups":       groups,
 		},
 	})

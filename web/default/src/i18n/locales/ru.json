@@ -5243,6 +5243,12 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Healthy groups": "Здоровые группы",
+    "Degraded groups": "Группы со снижением",
+    "Critical groups": "Критичные группы",
+    "Idle groups": "Ожидающие группы",
+    "No matching groups": "Нет подходящих групп",
+    "No group monitor data": "Нет данных мониторинга групп"
   }
 }

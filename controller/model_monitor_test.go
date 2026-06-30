@@ -17,15 +17,10 @@ func TestModelMonitorJSONDoesNotExposeRequestCounts(t *testing.T) {
 		Summary: modelMonitorSummary{RequestCount: 123, SuccessRate: 99.9},
 		Groups: []modelMonitorGroup{
 			{
-				Name:    "default",
-				Summary: modelMonitorSummary{RequestCount: 456, SuccessRate: 98.8},
-				Models: []modelMonitorModel{
-					{
-						ModelName:    "gpt-monitor-private",
-						RequestCount: 789,
-						SuccessRate:  97.7,
-					},
-				},
+				Name:         "default",
+				RequestCount: 456,
+				SuccessRate:  98.8,
+				Status:       "degraded",
 			},
 		},
 	}
@@ -33,23 +28,25 @@ func TestModelMonitorJSONDoesNotExposeRequestCounts(t *testing.T) {
 	data, err := common.Marshal(payload)
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "request_count")
+	assert.NotContains(t, string(data), "models")
+	assert.NotContains(t, string(data), "model_name")
 }
 
-func TestModelMonitorSortsModelsByStatusWithoutUsingRequestCount(t *testing.T) {
-	models := []modelMonitorModel{
-		{ModelName: "z-idle", Status: "idle", RequestCount: 9000},
-		{ModelName: "b-healthy", Status: "healthy", RequestCount: 7000},
-		{ModelName: "c-critical", Status: "critical", RequestCount: 1},
-		{ModelName: "a-degraded", Status: "degraded", RequestCount: 2},
+func TestModelMonitorSortsGroupsByStatusWithoutUsingRequestCount(t *testing.T) {
+	groups := []modelMonitorGroup{
+		{Name: "z-idle", Status: "idle", RequestCount: 9000},
+		{Name: "b-healthy", Status: "healthy", RequestCount: 7000},
+		{Name: "c-critical", Status: "critical", RequestCount: 1},
+		{Name: "a-degraded", Status: "degraded", RequestCount: 2},
 	}
 
-	sort.Slice(models, func(i, j int) bool {
-		leftRank := modelMonitorStatusRank(models[i].Status)
-		rightRank := modelMonitorStatusRank(models[j].Status)
+	sort.Slice(groups, func(i, j int) bool {
+		leftRank := modelMonitorStatusRank(groups[i].Status)
+		rightRank := modelMonitorStatusRank(groups[j].Status)
 		if leftRank != rightRank {
 			return leftRank < rightRank
 		}
-		return models[i].ModelName < models[j].ModelName
+		return groups[i].Name < groups[j].Name
 	})
 
 	assert.Equal(t, []string{
@@ -58,9 +55,9 @@ func TestModelMonitorSortsModelsByStatusWithoutUsingRequestCount(t *testing.T) {
 		"b-healthy",
 		"z-idle",
 	}, []string{
-		models[0].ModelName,
-		models[1].ModelName,
-		models[2].ModelName,
-		models[3].ModelName,
+		groups[0].Name,
+		groups[1].Name,
+		groups[2].Name,
+		groups[3].Name,
 	})
 }

@@ -5243,6 +5243,12 @@
     "Zero retention": "Zero retention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Healthy groups": "Healthy groups",
+    "Degraded groups": "Degraded groups",
+    "Critical groups": "Critical groups",
+    "Idle groups": "Idle groups",
+    "No matching groups": "No matching groups",
+    "No group monitor data": "No group monitor data"
   }
 }

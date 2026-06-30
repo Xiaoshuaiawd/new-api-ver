@@ -25,28 +25,19 @@ export type ModelMonitorSummary = {
   avg_tps: number
 }
 
-export type ModelMonitorModel = ModelMonitorSummary & {
-  model_name: string
-  description?: string
-  icon?: string
-  vendor_name?: string
-  vendor_icon?: string
+export type ModelMonitorGroup = ModelMonitorSummary & {
+  name: string
+  description: string
+  ratio: number
   recent_success_rates?: number[]
   last_bucket_ts: number
   status: ModelMonitorStatus
 }
 
-export type ModelMonitorGroup = {
-  name: string
-  description: string
-  ratio: number
-  summary: ModelMonitorSummary
-  models: ModelMonitorModel[]
-}
-
 export type ModelMonitorData = {
   updated_at: number
   window_hours: number
+  summary: ModelMonitorSummary
   groups: ModelMonitorGroup[]
 }
 

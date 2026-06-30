@@ -112,3 +112,72 @@ func TestQueryModelGroupSummaryAllKeepsRecentSixtyBuckets(t *testing.T) {
 	require.Len(t, result.Models, 1)
 	assert.Len(t, result.Models[0].RecentSuccessRates, 60)
 }
+
+func TestQueryGroupSummaryAllAggregatesModelsByGroup(t *testing.T) {
+	setupPerfMetricsTestDB(t)
+
+	now := time.Now().Unix()
+	require.NoError(t, model.DB.Create(&model.PerfMetric{
+		ModelName:      "gpt-group-a",
+		Group:          "default",
+		BucketTs:       now - 120,
+		RequestCount:   2,
+		SuccessCount:   1,
+		TotalLatencyMs: 400,
+		TtftSumMs:      100,
+		TtftCount:      1,
+		OutputTokens:   40,
+		GenerationMs:   2000,
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.PerfMetric{
+		ModelName:      "gpt-group-b",
+		Group:          "default",
+		BucketTs:       now - 120,
+		RequestCount:   1,
+		SuccessCount:   1,
+		TotalLatencyMs: 200,
+		TtftSumMs:      50,
+		TtftCount:      1,
+		OutputTokens:   20,
+		GenerationMs:   1000,
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.PerfMetric{
+		ModelName:      "gpt-group-hidden",
+		Group:          "hidden",
+		BucketTs:       now - 120,
+		RequestCount:   10,
+		SuccessCount:   10,
+		TotalLatencyMs: 100,
+	}).Error)
+
+	current := &atomicBucket{}
+	current.add(Sample{
+		Model:        "gpt-group-live",
+		Group:        "default",
+		LatencyMs:    100,
+		TtftMs:       50,
+		HasTtft:      true,
+		Success:      true,
+		OutputTokens: 10,
+		GenerationMs: 500,
+	})
+	hotBuckets.Store(bucketKey{
+		model:    "gpt-group-live",
+		group:    "default",
+		bucketTs: bucketStart(now),
+	}, current)
+
+	result, err := QueryGroupSummaryAll(1, []string{"default"})
+	require.NoError(t, err)
+	require.Len(t, result.Groups, 1)
+
+	summary := result.Groups[0]
+	assert.Equal(t, "default", summary.Group)
+	assert.EqualValues(t, 4, summary.RequestCount)
+	assert.InDelta(t, 75, summary.SuccessRate, 0.01)
+	assert.EqualValues(t, 175, summary.AvgLatencyMs)
+	assert.EqualValues(t, 66, summary.AvgTtftMs)
+	assert.InDelta(t, 20, summary.AvgTps, 0.01)
+	assert.Len(t, summary.RecentSuccessRates, 2)
+	assert.NotZero(t, summary.LastBucketTs)
+}

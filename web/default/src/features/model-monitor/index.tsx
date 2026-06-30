@@ -20,9 +20,6 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Activity,
-  ChevronsDownUp,
-  ChevronsUpDown,
-  ChevronDown,
   Clock3,
   Gauge,
   RefreshCw,
@@ -41,11 +38,6 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ButtonGroup } from '@/components/ui/button-group'
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible'
-import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
@@ -60,7 +52,6 @@ import {
 import { getModelMonitor } from './api'
 import type {
   ModelMonitorGroup,
-  ModelMonitorModel,
   ModelMonitorStatus,
   ModelMonitorSummary,
 } from './types'
@@ -76,6 +67,15 @@ function formatCount(value: number): string {
 function formatLastSample(timestamp: number): string {
   if (!Number.isFinite(timestamp) || timestamp <= 0) return '—'
   return dayjs.unix(timestamp).fromNow()
+}
+
+function emptySummary(): ModelMonitorSummary {
+  return {
+    success_rate: 0,
+    avg_ttft_ms: 0,
+    avg_latency_ms: 0,
+    avg_tps: 0,
+  }
 }
 
 function statusLabel(status: ModelMonitorStatus, t: (key: string) => string) {
@@ -117,54 +117,16 @@ function statusDotClassName(status: ModelMonitorStatus) {
   }
 }
 
-function weightedSummary(groups: ModelMonitorGroup[]): ModelMonitorSummary {
-  const summary: ModelMonitorSummary = {
-    success_rate: 0,
-    avg_ttft_ms: 0,
-    avg_latency_ms: 0,
-    avg_tps: 0,
-  }
-  let activeModels = 0
-
-  for (const group of groups) {
-    for (const model of group.models) {
-      if (model.status === 'idle') continue
-      activeModels += 1
-      summary.success_rate += model.success_rate
-      summary.avg_ttft_ms += model.avg_ttft_ms
-      summary.avg_latency_ms += model.avg_latency_ms
-      summary.avg_tps += model.avg_tps
-    }
-  }
-
-  if (activeModels <= 0) return summary
-  summary.success_rate = summary.success_rate / activeModels
-  summary.avg_ttft_ms = Math.round(summary.avg_ttft_ms / activeModels)
-  summary.avg_latency_ms = Math.round(summary.avg_latency_ms / activeModels)
-  summary.avg_tps = summary.avg_tps / activeModels
-  return summary
-}
-
 function filterGroups(groups: ModelMonitorGroup[], search: string) {
   const keyword = search.trim().toLowerCase()
   if (!keyword) return groups
 
-  return groups
-    .map((group) => {
-      const groupMatched =
-        group.name.toLowerCase().includes(keyword) ||
-        group.description.toLowerCase().includes(keyword)
-      const models = groupMatched
-        ? group.models
-        : group.models.filter((model) => {
-            return (
-              model.model_name.toLowerCase().includes(keyword) ||
-              (model.vendor_name ?? '').toLowerCase().includes(keyword)
-            )
-          })
-      return { ...group, models }
-    })
-    .filter((group) => group.models.length > 0)
+  return groups.filter((group) => {
+    return (
+      group.name.toLowerCase().includes(keyword) ||
+      group.description.toLowerCase().includes(keyword)
+    )
+  })
 }
 
 function SummaryMetric(props: {
@@ -222,7 +184,7 @@ function RecentBars(props: {
   )
 }
 
-function ModelMetric(props: {
+function GroupMetric(props: {
   icon: LucideIcon
   label: string
   value: string
@@ -247,9 +209,9 @@ function ModelMetric(props: {
   )
 }
 
-function ModelCard(props: { model: ModelMonitorModel }) {
+function GroupCard(props: { group: ModelMonitorGroup }) {
   const { t } = useTranslation()
-  const model = props.model
+  const group = props.group
 
   return (
     <article className='bg-card rounded-lg border p-3 sm:p-4'>
@@ -259,51 +221,47 @@ function ModelCard(props: { model: ModelMonitorModel }) {
             <span
               className={cn(
                 'size-2.5 shrink-0 rounded-full',
-                statusDotClassName(model.status)
+                statusDotClassName(group.status)
               )}
               aria-hidden='true'
             />
-            <h3 className='min-w-0 truncate font-mono text-sm font-semibold'>
-              {model.model_name}
-            </h3>
+            <GroupBadge group={group.name} ratio={group.ratio} />
           </div>
-          {model.vendor_name != null && model.vendor_name !== '' && (
-            <div className='text-muted-foreground mt-1 truncate text-xs'>
-              {model.vendor_name}
-            </div>
-          )}
+          <div className='text-muted-foreground mt-1 truncate text-xs'>
+            {group.description}
+          </div>
         </div>
         <Badge
           variant='outline'
-          className={cn('h-6 shrink-0', statusClassName(model.status))}
+          className={cn('h-6 shrink-0', statusClassName(group.status))}
         >
-          {statusLabel(model.status, t)}
+          {statusLabel(group.status, t)}
         </Badge>
       </div>
 
       <div className='mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4'>
-        <ModelMetric
+        <GroupMetric
           icon={Timer}
           label={t('TTFT')}
-          value={formatLatency(model.avg_ttft_ms)}
+          value={formatLatency(group.avg_ttft_ms)}
         />
-        <ModelMetric
+        <GroupMetric
           icon={Clock3}
           label={t('Latency')}
-          value={formatLatency(model.avg_latency_ms)}
+          value={formatLatency(group.avg_latency_ms)}
         />
-        <ModelMetric
+        <GroupMetric
           icon={Activity}
           label={t('Success rate')}
           value={
-            model.status !== 'idle' ? formatUptimePct(model.success_rate) : '—'
+            group.status !== 'idle' ? formatUptimePct(group.success_rate) : '—'
           }
-          valueClassName={getSuccessRateTextClass(model.success_rate)}
+          valueClassName={getSuccessRateTextClass(group.success_rate)}
         />
-        <ModelMetric
+        <GroupMetric
           icon={Gauge}
           label={t('Throughput')}
-          value={formatThroughput(model.avg_tps)}
+          value={formatThroughput(group.avg_tps)}
         />
       </div>
 
@@ -311,12 +269,12 @@ function ModelCard(props: { model: ModelMonitorModel }) {
         <div className='flex items-center justify-between gap-3 text-xs'>
           <span className='text-muted-foreground'>{t('Recent 60 checks')}</span>
           <span className='text-muted-foreground font-mono'>
-            {t('Last sample')}: {formatLastSample(model.last_bucket_ts)}
+            {t('Last sample')}: {formatLastSample(group.last_bucket_ts)}
           </span>
         </div>
         <RecentBars
-          rates={model.recent_success_rates}
-          status={model.status}
+          rates={group.recent_success_rates}
+          status={group.status}
           label={t('Recent 60 checks')}
         />
       </div>
@@ -324,109 +282,20 @@ function ModelCard(props: { model: ModelMonitorModel }) {
   )
 }
 
-function ModelRows(props: { models: ModelMonitorModel[] }) {
-  return (
-    <div className='grid gap-3 p-3 xl:grid-cols-2'>
-      {props.models.map((model) => (
-        <ModelCard key={model.model_name} model={model} />
-      ))}
-    </div>
-  )
-}
-
-function GroupSection(props: {
-  group: ModelMonitorGroup
-  open: boolean
-  onOpenChange: (open: boolean) => void
-}) {
-  const { t } = useTranslation()
-  const summary = props.group.summary
-
-  return (
-    <Collapsible
-      open={props.open}
-      onOpenChange={props.onOpenChange}
-      className='bg-card overflow-hidden rounded-lg border'
-    >
-      <CollapsibleTrigger className='hover:bg-muted/40 flex w-full cursor-pointer items-center gap-3 px-3 py-3 text-left transition-colors sm:px-4'>
-        <ChevronDown
-          className={cn(
-            'text-muted-foreground size-4 shrink-0 transition-transform',
-            !props.open && '-rotate-90'
-          )}
-          aria-hidden='true'
-        />
-        <div className='min-w-0 flex-1'>
-          <div className='flex min-w-0 flex-wrap items-center gap-2'>
-            <GroupBadge group={props.group.name} ratio={props.group.ratio} />
-            <span className='text-muted-foreground truncate text-xs'>
-              {props.group.description}
-            </span>
-          </div>
-          <div className='text-muted-foreground mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs'>
-            <span>
-              {t('Models')}: {props.group.models.length}
-            </span>
-            <span>
-              {t('Success rate')}: {formatUptimePct(summary.success_rate)}
-            </span>
-          </div>
-        </div>
-        <div className='hidden shrink-0 grid-cols-3 gap-2 lg:grid'>
-          <CompactMetric
-            label={t('TTFT')}
-            value={formatLatency(summary.avg_ttft_ms)}
-          />
-          <CompactMetric
-            label={t('Latency')}
-            value={formatLatency(summary.avg_latency_ms)}
-          />
-          <CompactMetric
-            label={t('TPS')}
-            value={formatThroughput(summary.avg_tps)}
-          />
-        </div>
-      </CollapsibleTrigger>
-      <CollapsibleContent className='border-t'>
-        {props.group.models.length > 0 ? (
-          <ModelRows models={props.group.models} />
-        ) : (
-          <div className='text-muted-foreground px-4 py-8 text-center text-sm'>
-            {t('No models in this group')}
-          </div>
-        )}
-      </CollapsibleContent>
-    </Collapsible>
-  )
-}
-
-function CompactMetric(props: { label: string; value: string }) {
-  return (
-    <div className='min-w-[6rem] rounded-md border px-2 py-1.5 text-right'>
-      <div className='text-muted-foreground text-[11px]'>{props.label}</div>
-      <div className='font-mono text-xs font-semibold tabular-nums'>
-        {props.value}
-      </div>
-    </div>
-  )
-}
-
 function ModelMonitorSkeleton() {
   return (
-    <div className='space-y-3'>
-      {Array.from({ length: 3 }).map((_, index) => (
-        <div key={index} className='rounded-lg border'>
-          <div className='flex items-center gap-3 px-4 py-3'>
-            <Skeleton className='size-4' />
-            <div className='flex-1 space-y-2'>
-              <Skeleton className='h-5 w-40' />
-              <Skeleton className='h-3 w-72 max-w-full' />
-            </div>
-            <Skeleton className='hidden h-10 w-72 lg:block' />
+    <div className='grid gap-3 xl:grid-cols-2'>
+      {Array.from({ length: 4 }).map((_, index) => (
+        <div key={index} className='rounded-lg border p-4'>
+          <Skeleton className='h-6 w-48' />
+          <Skeleton className='mt-2 h-3 w-64 max-w-full' />
+          <div className='mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4'>
+            <Skeleton className='h-14' />
+            <Skeleton className='h-14' />
+            <Skeleton className='h-14' />
+            <Skeleton className='h-14' />
           </div>
-          <div className='border-t p-3'>
-            <Skeleton className='h-36 w-full' />
-          </div>
+          <Skeleton className='mt-4 h-6 w-full' />
         </div>
       ))}
     </div>
@@ -438,7 +307,6 @@ export function ModelMonitor() {
   const [windowHours, setWindowHours] =
     useState<(typeof WINDOW_OPTIONS)[number]>(1)
   const [search, setSearch] = useState('')
-  const [closedGroups, setClosedGroups] = useState<Set<string>>(() => new Set())
 
   const query = useQuery({
     queryKey: ['model-monitor', windowHours],
@@ -453,20 +321,18 @@ export function ModelMonitor() {
     () => filterGroups(groups, search),
     [groups, search]
   )
-  const summary = useMemo(() => weightedSummary(groups), [groups])
-  const totalModels = useMemo(
-    () => groups.reduce((sum, group) => sum + group.models.length, 0),
+  const summary = query.data?.data.summary ?? emptySummary()
+  const statusCounts = useMemo(
+    () =>
+      groups.reduce(
+        (counts, group) => {
+          counts[group.status] += 1
+          return counts
+        },
+        { healthy: 0, degraded: 0, critical: 0, idle: 0 }
+      ),
     [groups]
   )
-
-  const setGroupOpen = (group: string, open: boolean) => {
-    setClosedGroups((current) => {
-      const next = new Set(current)
-      if (open) next.delete(group)
-      else next.add(group)
-      return next
-    })
-  }
 
   return (
     <SectionPageLayout>
@@ -499,7 +365,7 @@ export function ModelMonitor() {
       <SectionPageLayout.Content>
         <div className='space-y-3'>
           <div className='flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between'>
-            <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-4'>
+            <div className='grid gap-2 sm:grid-cols-2 xl:grid-cols-5'>
               <SummaryMetric
                 icon={Activity}
                 label={t('Groups')}
@@ -507,50 +373,63 @@ export function ModelMonitor() {
               />
               <SummaryMetric
                 icon={Gauge}
-                label={t('Models')}
-                value={formatCount(totalModels)}
+                label={t('Healthy groups')}
+                value={formatCount(statusCounts.healthy)}
+                valueClassName='text-emerald-600 dark:text-emerald-400'
               />
               <SummaryMetric
                 icon={Timer}
-                label={t('Success rate')}
-                value={formatUptimePct(summary.success_rate)}
-                valueClassName={getSuccessRateTextClass(summary.success_rate)}
+                label={t('Degraded groups')}
+                value={formatCount(statusCounts.degraded)}
+                valueClassName='text-amber-600 dark:text-amber-400'
+              />
+              <SummaryMetric
+                icon={Clock3}
+                label={t('Critical groups')}
+                value={formatCount(statusCounts.critical)}
+                valueClassName='text-red-600 dark:text-red-400'
+              />
+              <SummaryMetric
+                icon={Activity}
+                label={t('Idle groups')}
+                value={formatCount(statusCounts.idle)}
+                valueClassName='text-muted-foreground'
               />
             </div>
-            <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end'>
-              <InputGroup className='w-full sm:w-[18rem]'>
-                <InputGroupAddon>
-                  <Search className='size-4' aria-hidden='true' />
-                </InputGroupAddon>
-                <InputGroupInput
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder={t('Search models')}
-                />
-              </InputGroup>
-              <ButtonGroup>
-                <Button
-                  variant='outline'
-                  size='sm'
-                  onClick={() => setClosedGroups(new Set<string>())}
-                >
-                  <ChevronsUpDown className='size-3.5' />
-                  {t('Expand all')}
-                </Button>
-                <Button
-                  variant='outline'
-                  size='sm'
-                  onClick={() =>
-                    setClosedGroups(
-                      new Set(filteredGroups.map((group) => group.name))
-                    )
-                  }
-                >
-                  <ChevronsDownUp className='size-3.5' />
-                  {t('Collapse all')}
-                </Button>
-              </ButtonGroup>
-            </div>
+            <InputGroup className='w-full sm:w-[18rem]'>
+              <InputGroupAddon>
+                <Search className='size-4' aria-hidden='true' />
+              </InputGroupAddon>
+              <InputGroupInput
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={t('Search groups...')}
+              />
+            </InputGroup>
+          </div>
+
+          <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-4'>
+            <SummaryMetric
+              icon={Timer}
+              label={t('Success rate')}
+              value={formatUptimePct(summary.success_rate)}
+              valueClassName={getSuccessRateTextClass(summary.success_rate)}
+            />
+            <SummaryMetric
+              icon={Clock3}
+              label={t('TTFT')}
+              value={formatLatency(summary.avg_ttft_ms)}
+            />
+            <SummaryMetric
+              icon={Activity}
+              label={t('Latency')}
+              value={formatLatency(summary.avg_latency_ms)}
+            />
+            <SummaryMetric
+              icon={Gauge}
+              label={t('Throughput')}
+              value={formatThroughput(summary.avg_tps)}
+            />
           </div>
 
           {query.isLoading ? (
@@ -565,18 +444,13 @@ export function ModelMonitor() {
               bordered
               icon={Activity}
               title={
-                search ? t('No matching models') : t('No model monitor data')
+                search ? t('No matching groups') : t('No group monitor data')
               }
             />
           ) : (
-            <div className='space-y-3'>
+            <div className='grid gap-3 xl:grid-cols-2'>
               {filteredGroups.map((group) => (
-                <GroupSection
-                  key={group.name}
-                  group={group}
-                  open={!closedGroups.has(group.name)}
-                  onOpenChange={(open) => setGroupOpen(group.name, open)}
-                />
+                <GroupCard key={group.name} group={group} />
               ))}
             </div>
           )}

@@ -5243,6 +5243,12 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "Healthy groups": "正常なグループ",
+    "Degraded groups": "低下したグループ",
+    "Critical groups": "重大なグループ",
+    "Idle groups": "アイドルのグループ",
+    "No matching groups": "一致するグループはありません",
+    "No group monitor data": "グループ監視データはありません"
   }
 }
