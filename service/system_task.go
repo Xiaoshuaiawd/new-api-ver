@@ -20,6 +20,7 @@ const (
 	systemTaskRunnerIdleInterval = 15 * time.Second
 	systemTaskLockTTL            = 60 * time.Second
 	logCleanupBatchSize          = 100
+	logBodyCleanupBatchSize      = 500
 
 	// systemTaskSchedulerInterval throttles how often the scheduler/stale-lock
 	// pass runs, independent of how often the runner wakes to claim tasks.
@@ -83,8 +84,19 @@ func (logCleanupHandler) Run(ctx context.Context, task *model.SystemTask, runner
 	runLogCleanupTask(ctx, task, runnerID)
 }
 
+// logBodyCleanupHandler clears saved request/response bodies from log details
+// as an on-demand background task. It is created via StartLogBodyCleanupTask.
+type logBodyCleanupHandler struct{}
+
+func (logBodyCleanupHandler) Type() string { return model.SystemTaskTypeLogBodyCleanup }
+
+func (logBodyCleanupHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	runLogBodyCleanupTask(ctx, task, runnerID)
+}
+
 func init() {
 	RegisterSystemTaskHandler(logCleanupHandler{})
+	RegisterSystemTaskHandler(logBodyCleanupHandler{})
 }
 
 type LogCleanupPayload struct {
@@ -101,6 +113,19 @@ type LogCleanupState struct {
 
 type LogCleanupResult struct {
 	DeletedCount int64 `json:"deleted_count"`
+}
+
+type LogBodyCleanupPayload struct {
+	BatchSize int `json:"batch_size"`
+}
+
+type LogBodyCleanupState struct {
+	UpdatedCount int64 `json:"updated_count"`
+	Progress     int   `json:"progress"`
+}
+
+type LogBodyCleanupResult struct {
+	UpdatedCount int64 `json:"updated_count"`
 }
 
 var (
@@ -193,6 +218,12 @@ func StartLogCleanupTask(targetTimestamp int64) (*model.SystemTask, error) {
 	}
 	notifySystemTaskRunner()
 	return task, nil
+}
+
+func StartLogBodyCleanupTask() (*model.SystemTask, error) {
+	payload := LogBodyCleanupPayload{BatchSize: logBodyCleanupBatchSize}
+	task, _, err := EnqueueSystemTask(model.SystemTaskTypeLogBodyCleanup, payload)
+	return task, err
 }
 
 // EnqueueSystemTask creates an on-demand task of the given type. The returned
@@ -420,6 +451,34 @@ func runLogCleanupTask(ctx context.Context, task *model.SystemTask, runnerID str
 	}
 
 	result := LogCleanupResult{DeletedCount: state.Processed}
+	if err := model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, result, ""); err != nil {
+		logSystemTaskLockError(ctx, task, err)
+	}
+}
+
+func runLogBodyCleanupTask(ctx context.Context, task *model.SystemTask, runnerID string) {
+	payload := LogBodyCleanupPayload{}
+	if err := task.DecodePayload(&payload); err != nil {
+		failSystemTask(task, runnerID, err)
+		return
+	}
+	if payload.BatchSize <= 0 {
+		payload.BatchSize = logBodyCleanupBatchSize
+	}
+
+	updatedCount, err := model.ClearLogBodyDetails(ctx, payload.BatchSize)
+	if err != nil {
+		failSystemTask(task, runnerID, err)
+		return
+	}
+
+	state := LogBodyCleanupState{UpdatedCount: updatedCount, Progress: 100}
+	if err := model.UpdateSystemTaskState(task.TaskID, runnerID, state); err != nil {
+		logSystemTaskLockError(ctx, task, err)
+		return
+	}
+
+	result := LogBodyCleanupResult{UpdatedCount: updatedCount}
 	if err := model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, result, ""); err != nil {
 		logSystemTaskLockError(ctx, task, err)
 	}

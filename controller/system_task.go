@@ -34,6 +34,20 @@ func CreateLogCleanupSystemTask(c *gin.Context) {
 	})
 }
 
+func CreateLogBodyCleanupSystemTask(c *gin.Context) {
+	task, err := service.StartLogBodyCleanupTask()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    task.ToResponse(),
+	})
+}
+
 func GetCurrentSystemTask(c *gin.Context) {
 	taskType := c.Query("type")
 	if taskType == "" {

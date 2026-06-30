@@ -151,6 +151,60 @@ func TestRefreshChannelMultiplierSnapshotStoresResult(t *testing.T) {
 	assert.Equal(t, snapshot.ObservedAt, stored.ObservedAt)
 }
 
+func TestRefreshChannelMultiplierSnapshotAlertsWhenHealthyMultiplierChanges(t *testing.T) {
+	withChannelMultiplierMonitorTestDB(t)
+	withChannelAlertTestSettings(t)
+	events := captureChannelAlertEvents(t)
+	ResetChannelMultiplierMonitorForTest()
+	t.Cleanup(ResetChannelMultiplierMonitorForTest)
+
+	originalProbe := channelMultiplierProbe
+	t.Cleanup(func() {
+		channelMultiplierProbe = originalProbe
+	})
+
+	channel := &model.Channel{
+		Id:      1202,
+		Type:    constant.ChannelTypeCustom,
+		Key:     "sk-current",
+		Name:    "refresh-alert",
+		Balance: 42,
+		OtherSettings: channelMultiplierSettingsJSON(t, &dto.ChannelMultiplierMonitorConfig{
+			Enabled:  true,
+			Format:   dto.ChannelMultiplierProviderFormatNewAPI,
+			BaseURL:  "https://upstream.example.com",
+			Username: "alice",
+			Password: "secret",
+		}),
+	}
+
+	SetChannelMultiplierSnapshotForTest(ChannelMultiplierSnapshot{
+		ChannelID:  1202,
+		State:      ChannelMultiplierSnapshotHealthy,
+		Multiplier: 0.5,
+		Balance:    42,
+	})
+	channelMultiplierProbe = func(ctx context.Context, channel *model.Channel) (ChannelMultiplierSnapshot, error) {
+		return buildHealthyMultiplierSnapshot(
+			channel,
+			GetChannelMultiplierMonitorConfig(channel),
+			0.75,
+			41,
+			"default",
+			"token-1",
+		), nil
+	}
+
+	snapshot, err := RefreshChannelMultiplierSnapshot(context.Background(), channel)
+
+	require.NoError(t, err)
+	assert.Equal(t, 0.75, snapshot.Multiplier)
+	require.Len(t, *events, 1)
+	assert.Equal(t, ChannelAlertEventTypeMultiplierChanged, (*events)[0].Type)
+	assert.Equal(t, 0.5, (*events)[0].PreviousMultiplier)
+	assert.Equal(t, 0.75, (*events)[0].CurrentMultiplier)
+}
+
 func TestRunChannelMultiplierMonitorOnceUpdatesChannelBalances(t *testing.T) {
 	withChannelMultiplierMonitorTestDB(t)
 	ResetChannelMultiplierMonitorForTest()

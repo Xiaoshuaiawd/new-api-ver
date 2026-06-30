@@ -22,6 +22,7 @@ import {
   CreditCard,
   FileText,
   FlaskConical,
+  Gauge,
   HeartPulse,
   Key,
   LayoutDashboard,
@@ -79,6 +80,11 @@ export function buildSidebarData(t: Translate): SidebarData {
             title: t('Dashboard'),
             url: '/dashboard/models',
             icon: LayoutDashboard,
+          },
+          {
+            title: t('Group Monitor'),
+            url: '/model-monitor',
+            icon: Gauge,
           },
           {
             title: t('API Keys'),

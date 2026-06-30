@@ -30,7 +30,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { clearLogBodyDetails } from '../api'
+import { startLogBodyCleanupTask } from '../api'
 import { CommonLogsStats } from './common-logs-stats'
 import { useUsageLogsContext } from './usage-logs-provider'
 
@@ -48,29 +48,24 @@ export function CommonLogsHeaderActions() {
   const userRole = useAuthStore((state) => state.auth.user?.role ?? 0)
   const isRoot = userRole >= ROLE.SUPER_ADMIN
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const [isClearing, setIsClearing] = useState(false)
+  const [isStartingCleanup, setIsStartingCleanup] = useState(false)
 
   const handleClearBodyDetails = async () => {
-    setIsClearing(true)
+    setIsStartingCleanup(true)
     try {
-      const result = await clearLogBodyDetails()
+      const result = await startLogBodyCleanupTask()
       if (!result.success) {
-        toast.error(result.message || t('Failed to clear log body details'))
+        toast.error(result.message || t('Failed to start log body cleanup'))
         return
       }
-      const count = result.data?.updated_count ?? 0
-      toast.success(
-        t('Cleared request and response bodies from {{count}} logs.', {
-          count,
-        })
-      )
+      toast.success(t('Log body cleanup started in the background.'))
       setConfirmOpen(false)
       await queryClient.invalidateQueries({ queryKey: ['logs'] })
       await queryClient.invalidateQueries({ queryKey: ['usage-logs-stats'] })
     } catch {
-      toast.error(t('Failed to clear log body details'))
+      toast.error(t('Failed to start log body cleanup'))
     } finally {
-      setIsClearing(false)
+      setIsStartingCleanup(false)
     }
   }
 
@@ -84,9 +79,9 @@ export function CommonLogsHeaderActions() {
             size='sm'
             className='h-7 gap-1.5 px-2 text-xs'
             onClick={() => setConfirmOpen(true)}
-            disabled={isClearing}
+            disabled={isStartingCleanup}
           >
-            {isClearing ? (
+            {isStartingCleanup ? (
               <Loader2 className='size-3.5 animate-spin' />
             ) : (
               <Trash2 className='size-3.5' />
@@ -119,11 +114,13 @@ export function CommonLogsHeaderActions() {
         onOpenChange={setConfirmOpen}
         title={t('Clear request and response bodies?')}
         desc={t(
-          'This removes saved request and response bodies from all log details, but keeps the log rows and other diagnostic fields.'
+          'This starts a background task to remove saved request and response bodies from log details, while keeping log rows and other diagnostic fields.'
         )}
-        confirmText={isClearing ? t('Clearing...') : t('Clear bodies')}
+        confirmText={
+          isStartingCleanup ? t('Starting...') : t('Start cleanup')
+        }
         destructive
-        isLoading={isClearing}
+        isLoading={isStartingCleanup}
         handleConfirm={handleClearBodyDetails}
       />
     </>

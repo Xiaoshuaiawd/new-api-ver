@@ -60,6 +60,19 @@ const numericString = z.string().refine((value) => {
 
 const monitoringSchema = z.object({
   QuotaRemindThreshold: numericString,
+  channel_alert_setting: z.object({
+    enabled: z.boolean(),
+    balance_alert_enabled: z.boolean(),
+    multiplier_change_enabled: z.boolean(),
+    balance_threshold: z.coerce.number().min(0),
+    min_interval_seconds: z.coerce.number().int().min(1),
+    feishu_enabled: z.boolean(),
+    feishu_webhook_url: z.string(),
+    feishu_secret: z.string(),
+    dingtalk_enabled: z.boolean(),
+    dingtalk_webhook_url: z.string(),
+    dingtalk_secret: z.string(),
+  }),
   perf_metrics_setting: z.object({
     enabled: z.boolean(),
     flush_interval: z.coerce.number().min(1),
@@ -73,6 +86,17 @@ type MonitoringFormValues = z.output<typeof monitoringSchema>
 
 type FlatMonitoringDefaults = {
   QuotaRemindThreshold: string
+  'channel_alert_setting.enabled': boolean
+  'channel_alert_setting.balance_alert_enabled': boolean
+  'channel_alert_setting.multiplier_change_enabled': boolean
+  'channel_alert_setting.balance_threshold': number
+  'channel_alert_setting.min_interval_seconds': number
+  'channel_alert_setting.feishu_enabled': boolean
+  'channel_alert_setting.feishu_webhook_url': string
+  'channel_alert_setting.feishu_secret': string
+  'channel_alert_setting.dingtalk_enabled': boolean
+  'channel_alert_setting.dingtalk_webhook_url': string
+  'channel_alert_setting.dingtalk_secret': string
   'perf_metrics_setting.enabled': boolean
   'perf_metrics_setting.flush_interval': number
   'perf_metrics_setting.bucket_time': 'minute' | '5min' | 'hour'
@@ -87,6 +111,23 @@ const buildFormDefaults = (
   defaults: MonitoringSettingsSectionProps['defaultValues']
 ): MonitoringFormInput => ({
   QuotaRemindThreshold: defaults.QuotaRemindThreshold ?? '',
+  channel_alert_setting: {
+    enabled: defaults['channel_alert_setting.enabled'],
+    balance_alert_enabled:
+      defaults['channel_alert_setting.balance_alert_enabled'],
+    multiplier_change_enabled:
+      defaults['channel_alert_setting.multiplier_change_enabled'],
+    balance_threshold: defaults['channel_alert_setting.balance_threshold'],
+    min_interval_seconds:
+      defaults['channel_alert_setting.min_interval_seconds'],
+    feishu_enabled: defaults['channel_alert_setting.feishu_enabled'],
+    feishu_webhook_url: defaults['channel_alert_setting.feishu_webhook_url'],
+    feishu_secret: defaults['channel_alert_setting.feishu_secret'],
+    dingtalk_enabled: defaults['channel_alert_setting.dingtalk_enabled'],
+    dingtalk_webhook_url:
+      defaults['channel_alert_setting.dingtalk_webhook_url'],
+    dingtalk_secret: defaults['channel_alert_setting.dingtalk_secret'],
+  },
   perf_metrics_setting: {
     enabled: defaults['perf_metrics_setting.enabled'],
     flush_interval: defaults['perf_metrics_setting.flush_interval'],
@@ -99,6 +140,32 @@ const normalizeDefaults = (
   defaults: MonitoringSettingsSectionProps['defaultValues']
 ): FlatMonitoringDefaults => ({
   QuotaRemindThreshold: (defaults.QuotaRemindThreshold ?? '').trim(),
+  'channel_alert_setting.enabled':
+    defaults['channel_alert_setting.enabled'] ?? false,
+  'channel_alert_setting.balance_alert_enabled':
+    defaults['channel_alert_setting.balance_alert_enabled'] ?? true,
+  'channel_alert_setting.multiplier_change_enabled':
+    defaults['channel_alert_setting.multiplier_change_enabled'] ?? true,
+  'channel_alert_setting.balance_threshold':
+    defaults['channel_alert_setting.balance_threshold'] ?? 0,
+  'channel_alert_setting.min_interval_seconds':
+    defaults['channel_alert_setting.min_interval_seconds'] ?? 300,
+  'channel_alert_setting.feishu_enabled':
+    defaults['channel_alert_setting.feishu_enabled'] ?? false,
+  'channel_alert_setting.feishu_webhook_url': (
+    defaults['channel_alert_setting.feishu_webhook_url'] ?? ''
+  ).trim(),
+  'channel_alert_setting.feishu_secret': (
+    defaults['channel_alert_setting.feishu_secret'] ?? ''
+  ).trim(),
+  'channel_alert_setting.dingtalk_enabled':
+    defaults['channel_alert_setting.dingtalk_enabled'] ?? false,
+  'channel_alert_setting.dingtalk_webhook_url': (
+    defaults['channel_alert_setting.dingtalk_webhook_url'] ?? ''
+  ).trim(),
+  'channel_alert_setting.dingtalk_secret': (
+    defaults['channel_alert_setting.dingtalk_secret'] ?? ''
+  ).trim(),
   'perf_metrics_setting.enabled': defaults['perf_metrics_setting.enabled'],
   'perf_metrics_setting.flush_interval':
     defaults['perf_metrics_setting.flush_interval'],
@@ -111,6 +178,27 @@ const normalizeFormValues = (
   values: MonitoringFormValues
 ): FlatMonitoringDefaults => ({
   QuotaRemindThreshold: values.QuotaRemindThreshold.trim(),
+  'channel_alert_setting.enabled': values.channel_alert_setting.enabled,
+  'channel_alert_setting.balance_alert_enabled':
+    values.channel_alert_setting.balance_alert_enabled,
+  'channel_alert_setting.multiplier_change_enabled':
+    values.channel_alert_setting.multiplier_change_enabled,
+  'channel_alert_setting.balance_threshold':
+    values.channel_alert_setting.balance_threshold,
+  'channel_alert_setting.min_interval_seconds':
+    values.channel_alert_setting.min_interval_seconds,
+  'channel_alert_setting.feishu_enabled':
+    values.channel_alert_setting.feishu_enabled,
+  'channel_alert_setting.feishu_webhook_url':
+    values.channel_alert_setting.feishu_webhook_url.trim(),
+  'channel_alert_setting.feishu_secret':
+    values.channel_alert_setting.feishu_secret.trim(),
+  'channel_alert_setting.dingtalk_enabled':
+    values.channel_alert_setting.dingtalk_enabled,
+  'channel_alert_setting.dingtalk_webhook_url':
+    values.channel_alert_setting.dingtalk_webhook_url.trim(),
+  'channel_alert_setting.dingtalk_secret':
+    values.channel_alert_setting.dingtalk_secret.trim(),
   'perf_metrics_setting.enabled': values.perf_metrics_setting.enabled,
   'perf_metrics_setting.flush_interval':
     values.perf_metrics_setting.flush_interval,
@@ -151,6 +239,16 @@ export function MonitoringSettingsSection({
     baselineSerializedRef.current = serialized
   }, [defaultValues])
 
+  const channelAlertsEnabled = form.watch('channel_alert_setting.enabled')
+  const balanceAlertsEnabled = form.watch(
+    'channel_alert_setting.balance_alert_enabled'
+  )
+  const feishuAlertsEnabled = form.watch(
+    'channel_alert_setting.feishu_enabled'
+  )
+  const dingTalkAlertsEnabled = form.watch(
+    'channel_alert_setting.dingtalk_enabled'
+  )
   const perfMetricsEnabled = form.watch('perf_metrics_setting.enabled')
 
   const onSubmit = async (values: MonitoringFormValues) => {
@@ -205,6 +303,234 @@ export function MonitoringSettingsSection({
               </FormItem>
             )}
           />
+
+          <div>
+            <h4 className='font-medium'>
+              {t('Channel balance and multiplier alerts')}
+            </h4>
+            <p className='text-muted-foreground mt-1 text-xs'>
+              {t(
+                'Send robot alerts when an upstream balance crosses the threshold or a monitored upstream multiplier changes.'
+              )}
+            </p>
+          </div>
+
+          <div className='grid grid-cols-1 gap-4 md:grid-cols-3'>
+            <FormField
+              control={form.control}
+              name='channel_alert_setting.enabled'
+              render={({ field }) => (
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>{t('Enable channel alerts')}</FormLabel>
+                  </SettingsSwitchContent>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                </SettingsSwitchItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name='channel_alert_setting.balance_alert_enabled'
+              render={({ field }) => (
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>{t('Balance threshold alerts')}</FormLabel>
+                  </SettingsSwitchContent>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                      disabled={!channelAlertsEnabled}
+                    />
+                  </FormControl>
+                </SettingsSwitchItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name='channel_alert_setting.multiplier_change_enabled'
+              render={({ field }) => (
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>{t('Multiplier change alerts')}</FormLabel>
+                  </SettingsSwitchContent>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                      disabled={!channelAlertsEnabled}
+                    />
+                  </FormControl>
+                </SettingsSwitchItem>
+              )}
+            />
+          </div>
+
+          <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
+            <FormField
+              control={form.control}
+              name='channel_alert_setting.balance_threshold'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Channel balance threshold')}</FormLabel>
+                  <FormControl>
+                    <Input
+                      type='number'
+                      min={0}
+                      step='0.01'
+                      {...safeNumberFieldProps(field)}
+                      disabled={!channelAlertsEnabled || !balanceAlertsEnabled}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'Alert once when a refreshed channel balance falls below this value.'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name='channel_alert_setting.min_interval_seconds'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Alert cooldown (seconds)')}</FormLabel>
+                  <FormControl>
+                    <Input
+                      type='number'
+                      min={1}
+                      step={1}
+                      {...safeNumberFieldProps(field)}
+                      disabled={!channelAlertsEnabled}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t('Suppress duplicate alerts for the same channel event.')}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+
+          <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
+            <FormField
+              control={form.control}
+              name='channel_alert_setting.feishu_enabled'
+              render={({ field }) => (
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>{t('Feishu alerts')}</FormLabel>
+                  </SettingsSwitchContent>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                      disabled={!channelAlertsEnabled}
+                    />
+                  </FormControl>
+                </SettingsSwitchItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name='channel_alert_setting.dingtalk_enabled'
+              render={({ field }) => (
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>{t('DingTalk alerts')}</FormLabel>
+                  </SettingsSwitchContent>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                      disabled={!channelAlertsEnabled}
+                    />
+                  </FormControl>
+                </SettingsSwitchItem>
+              )}
+            />
+          </div>
+
+          <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
+            <FormField
+              control={form.control}
+              name='channel_alert_setting.feishu_webhook_url'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Feishu webhook URL')}</FormLabel>
+                  <FormControl>
+                    <Input
+                      value={field.value}
+                      onChange={field.onChange}
+                      disabled={!channelAlertsEnabled || !feishuAlertsEnabled}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name='channel_alert_setting.feishu_secret'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Feishu signing secret')}</FormLabel>
+                  <FormControl>
+                    <Input
+                      type='password'
+                      value={field.value}
+                      onChange={field.onChange}
+                      disabled={!channelAlertsEnabled || !feishuAlertsEnabled}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name='channel_alert_setting.dingtalk_webhook_url'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('DingTalk webhook URL')}</FormLabel>
+                  <FormControl>
+                    <Input
+                      value={field.value}
+                      onChange={field.onChange}
+                      disabled={!channelAlertsEnabled || !dingTalkAlertsEnabled}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name='channel_alert_setting.dingtalk_secret'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('DingTalk signing secret')}</FormLabel>
+                  <FormControl>
+                    <Input
+                      type='password'
+                      value={field.value}
+                      onChange={field.onChange}
+                      disabled={!channelAlertsEnabled || !dingTalkAlertsEnabled}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
 
           <div>
             <h4 className='font-medium'>{t('Model performance metrics')}</h4>

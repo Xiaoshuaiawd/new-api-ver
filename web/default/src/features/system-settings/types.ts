@@ -119,6 +119,25 @@ export type LogCleanupTask = SystemTask<
   LogCleanupTaskResult
 >
 
+export type LogBodyCleanupTaskPayload = {
+  batch_size: number
+}
+
+export type LogBodyCleanupTaskState = {
+  updated_count: number
+  progress: number
+}
+
+export type LogBodyCleanupTaskResult = {
+  updated_count: number
+}
+
+export type LogBodyCleanupTask = SystemTask<
+  LogBodyCleanupTaskPayload,
+  LogBodyCleanupTaskState,
+  LogBodyCleanupTaskResult
+>
+
 export type SystemTaskResponse<TTask = SystemTask | null> = {
   success: boolean
   message: string
@@ -390,6 +409,17 @@ export type OperationsSettings = {
   'perf_metrics_setting.flush_interval': number
   'perf_metrics_setting.bucket_time': 'hour' | 'minute' | '5min'
   'perf_metrics_setting.retention_days': number
+  'channel_alert_setting.enabled': boolean
+  'channel_alert_setting.balance_alert_enabled': boolean
+  'channel_alert_setting.multiplier_change_enabled': boolean
+  'channel_alert_setting.balance_threshold': number
+  'channel_alert_setting.min_interval_seconds': number
+  'channel_alert_setting.feishu_enabled': boolean
+  'channel_alert_setting.feishu_webhook_url': string
+  'channel_alert_setting.feishu_secret': string
+  'channel_alert_setting.dingtalk_enabled': boolean
+  'channel_alert_setting.dingtalk_webhook_url': string
+  'channel_alert_setting.dingtalk_secret': string
 } & ChannelHealthSettings &
   ChannelMultiplierMonitorSettings &
   ChannelAutoPrioritySettings

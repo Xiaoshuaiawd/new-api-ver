@@ -62,6 +62,28 @@ const OPERATIONS_SECTIONS = [
             settings['perf_metrics_setting.bucket_time'] ?? 'hour',
           'perf_metrics_setting.retention_days':
             settings['perf_metrics_setting.retention_days'] ?? 0,
+          'channel_alert_setting.enabled':
+            settings['channel_alert_setting.enabled'] ?? false,
+          'channel_alert_setting.balance_alert_enabled':
+            settings['channel_alert_setting.balance_alert_enabled'] ?? true,
+          'channel_alert_setting.multiplier_change_enabled':
+            settings['channel_alert_setting.multiplier_change_enabled'] ?? true,
+          'channel_alert_setting.balance_threshold':
+            settings['channel_alert_setting.balance_threshold'] ?? 0,
+          'channel_alert_setting.min_interval_seconds':
+            settings['channel_alert_setting.min_interval_seconds'] ?? 300,
+          'channel_alert_setting.feishu_enabled':
+            settings['channel_alert_setting.feishu_enabled'] ?? false,
+          'channel_alert_setting.feishu_webhook_url':
+            settings['channel_alert_setting.feishu_webhook_url'] ?? '',
+          'channel_alert_setting.feishu_secret':
+            settings['channel_alert_setting.feishu_secret'] ?? '',
+          'channel_alert_setting.dingtalk_enabled':
+            settings['channel_alert_setting.dingtalk_enabled'] ?? false,
+          'channel_alert_setting.dingtalk_webhook_url':
+            settings['channel_alert_setting.dingtalk_webhook_url'] ?? '',
+          'channel_alert_setting.dingtalk_secret':
+            settings['channel_alert_setting.dingtalk_secret'] ?? '',
         }}
       />
     ),

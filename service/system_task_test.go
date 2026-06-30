@@ -232,3 +232,70 @@ func TestEnqueueSystemTaskReportsCreatedAndExistingActive(t *testing.T) {
 	require.NotNil(t, second)
 	assert.NotEqual(t, first.TaskID, second.TaskID)
 }
+
+func TestStartLogBodyCleanupTaskEnqueuesAndDeduplicatesActiveRun(t *testing.T) {
+	truncate(t)
+
+	first, err := StartLogBodyCleanupTask()
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	assert.Equal(t, model.SystemTaskTypeLogBodyCleanup, first.Type)
+	assert.Equal(t, model.SystemTaskStatusPending, first.Status)
+
+	existing, err := StartLogBodyCleanupTask()
+	require.NoError(t, err)
+	require.NotNil(t, existing)
+	assert.Equal(t, first.TaskID, existing.TaskID)
+	assert.Equal(t, int64(1), countSystemTasks(t, model.SystemTaskTypeLogBodyCleanup))
+}
+
+func TestRunLogBodyCleanupTaskClearsSavedBodies(t *testing.T) {
+	truncate(t)
+
+	require.NoError(t, model.LOG_DB.Create(&model.Log{
+		Other: common.MapToJsonStr(map[string]interface{}{
+			"log_detail": map[string]interface{}{
+				"request_body":             `{"model":"gpt","prompt":"hi"}`,
+				"response_body":            `{"error":"upstream failed"}`,
+				"upstream_debug_reference": "keep-me",
+			},
+		}),
+	}).Error)
+
+	task, err := model.CreateSystemTask(
+		model.SystemTaskTypeLogBodyCleanup,
+		LogBodyCleanupPayload{BatchSize: 10},
+		LogBodyCleanupState{},
+	)
+	require.NoError(t, err)
+	runnerID := "runner-log-body-cleanup"
+	claimedTask, claimed, err := model.ClaimSystemTask(
+		task.ID,
+		model.SystemTaskTypeLogBodyCleanup,
+		runnerID,
+		common.GetTimestamp()+60,
+	)
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	runLogBodyCleanupTask(context.Background(), claimedTask, runnerID)
+
+	finished, err := model.GetSystemTaskByTaskID(task.TaskID)
+	require.NoError(t, err)
+	require.NotNil(t, finished)
+	assert.Equal(t, model.SystemTaskStatusSucceeded, finished.Status)
+
+	var result LogBodyCleanupResult
+	require.NoError(t, common.UnmarshalJsonStr(finished.Result, &result))
+	assert.Equal(t, int64(1), result.UpdatedCount)
+
+	var log model.Log
+	require.NoError(t, model.LOG_DB.First(&log).Error)
+	other, err := common.StrToMap(log.Other)
+	require.NoError(t, err)
+	detail, ok := other["log_detail"].(map[string]interface{})
+	require.True(t, ok)
+	assert.NotContains(t, detail, "request_body")
+	assert.NotContains(t, detail, "response_body")
+	assert.Equal(t, "keep-me", detail["upstream_debug_reference"])
+}

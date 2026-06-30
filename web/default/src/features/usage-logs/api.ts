@@ -17,6 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
+import type {
+  LogBodyCleanupTask,
+  SystemTaskResponse,
+} from '@/features/system-settings/types'
 import { buildQueryParams } from './lib/utils'
 import type {
   GetLogsParams,
@@ -83,12 +87,12 @@ export const getUserLogStats = (
   params: Omit<GetLogStatsParams, 'username' | 'channel'> = {}
 ) => fetchLogStats('/api/log', params, false)
 
-export async function clearLogBodyDetails(): Promise<{
-  success: boolean
-  message?: string
-  data?: { updated_count: number }
-}> {
-  const res = await api.delete('/api/log/body-details')
+export async function startLogBodyCleanupTask(): Promise<
+  SystemTaskResponse<LogBodyCleanupTask>
+> {
+  const res = await api.post<SystemTaskResponse<LogBodyCleanupTask>>(
+    '/api/system-task/log-body-cleanup'
+  )
   return res.data
 }
 

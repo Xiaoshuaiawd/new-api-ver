@@ -3,6 +3,8 @@ package model
 import (
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
+
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -78,6 +80,29 @@ type PerfMetricSummaryBucket struct {
 	GenerationMs   int64  `json:"generation_ms"`
 }
 
+type PerfMetricGroupSummaryBucket struct {
+	ModelName      string `json:"model_name"`
+	Group          string `json:"group"`
+	BucketTs       int64  `json:"bucket_ts"`
+	RequestCount   int64  `json:"request_count"`
+	SuccessCount   int64  `json:"success_count"`
+	TotalLatencyMs int64  `json:"total_latency_ms"`
+	TtftSumMs      int64  `json:"ttft_sum_ms"`
+	TtftCount      int64  `json:"ttft_count"`
+	OutputTokens   int64  `json:"output_tokens"`
+	GenerationMs   int64  `json:"generation_ms"`
+}
+
+func perfMetricGroupCol() string {
+	if commonGroupCol != "" {
+		return commonGroupCol
+	}
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+		return `"group"`
+	}
+	return "`group`"
+}
+
 func GetPerfMetricsSummaryAll(startTs int64, endTs int64, groups []string) ([]PerfMetricSummary, error) {
 	var summaries []PerfMetricSummary
 	query := DB.Model(&PerfMetric{}).
@@ -92,6 +117,28 @@ func GetPerfMetricsSummaryAll(startTs int64, endTs int64, groups []string) ([]Pe
 	err := query.
 		Group("model_name").
 		Having("SUM(request_count) > 0").
+		Find(&summaries).Error
+	return summaries, err
+}
+
+func GetPerfMetricsGroupSummaryBucketsAll(startTs int64, endTs int64, groups []string) ([]PerfMetricGroupSummaryBucket, error) {
+	var summaries []PerfMetricGroupSummaryBucket
+	groupCol := perfMetricGroupCol()
+	query := DB.Model(&PerfMetric{}).
+		Select("model_name, "+groupCol+" as "+groupCol+", bucket_ts, SUM(request_count) as request_count, SUM(success_count) as success_count, SUM(total_latency_ms) as total_latency_ms, SUM(ttft_sum_ms) as ttft_sum_ms, SUM(ttft_count) as ttft_count, SUM(output_tokens) as output_tokens, SUM(generation_ms) as generation_ms").
+		Where("bucket_ts >= ? AND bucket_ts <= ?", startTs, endTs)
+	if groups != nil {
+		if len(groups) == 0 {
+			return summaries, nil
+		}
+		query = query.Where(groupCol+" IN ?", groups)
+	}
+	err := query.
+		Group("model_name, " + groupCol + ", bucket_ts").
+		Having("SUM(request_count) > 0").
+		Order(groupCol + " ASC").
+		Order("model_name ASC").
+		Order("bucket_ts ASC").
 		Find(&summaries).Error
 	return summaries, err
 }
