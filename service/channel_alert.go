@@ -180,15 +180,14 @@ func sendChannelAlertNotifications(event ChannelAlertEvent) error {
 		return nil
 	}
 
-	text := channelAlertText(event)
 	var firstErr error
 	if setting.FeishuEnabled && strings.TrimSpace(setting.FeishuWebhookURL) != "" {
-		if err := sendFeishuBotText(setting.FeishuWebhookURL, setting.FeishuSecret, text); err != nil && firstErr == nil {
+		if err := sendFeishuBotCard(setting.FeishuWebhookURL, setting.FeishuSecret, event); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
 	if setting.DingTalkEnabled && strings.TrimSpace(setting.DingTalkWebhookURL) != "" {
-		if err := sendDingTalkBotText(setting.DingTalkWebhookURL, setting.DingTalkSecret, text); err != nil && firstErr == nil {
+		if err := sendDingTalkBotMarkdown(setting.DingTalkWebhookURL, setting.DingTalkSecret, event); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
@@ -235,18 +234,62 @@ func formatChannelAlertFloat(value float64) string {
 	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
-type feishuBotTextPayload struct {
-	Timestamp string `json:"timestamp,omitempty"`
-	Sign      string `json:"sign,omitempty"`
-	MsgType   string `json:"msg_type"`
-	Content   struct {
-		Text string `json:"text"`
-	} `json:"content"`
+type channelAlertCardContent struct {
+	Title       string
+	Template    string
+	AccentColor string
+	Channel     string
+	Summary     string
+	Rows        []channelAlertCardRow
+	OccurredAt  int64
 }
 
-func sendFeishuBotText(webhookURL string, secret string, text string) error {
-	payload := feishuBotTextPayload{MsgType: "text"}
-	payload.Content.Text = text
+type channelAlertCardRow struct {
+	Label string
+	Value string
+}
+
+type feishuBotCardPayload struct {
+	Timestamp string        `json:"timestamp,omitempty"`
+	Sign      string        `json:"sign,omitempty"`
+	MsgType   string        `json:"msg_type"`
+	Card      feishuBotCard `json:"card"`
+}
+
+type feishuBotCard struct {
+	Config   feishuBotCardConfig    `json:"config"`
+	Header   feishuBotCardHeader    `json:"header"`
+	Elements []feishuBotCardElement `json:"elements"`
+}
+
+type feishuBotCardConfig struct {
+	WideScreenMode bool `json:"wide_screen_mode"`
+}
+
+type feishuBotCardHeader struct {
+	Template string         `json:"template"`
+	Title    feishuCardText `json:"title"`
+}
+
+type feishuBotCardElement struct {
+	Tag      string            `json:"tag"`
+	Text     *feishuCardText   `json:"text,omitempty"`
+	Fields   []feishuCardField `json:"fields,omitempty"`
+	Elements []feishuCardText  `json:"elements,omitempty"`
+}
+
+type feishuCardField struct {
+	IsShort bool           `json:"is_short"`
+	Text    feishuCardText `json:"text"`
+}
+
+type feishuCardText struct {
+	Tag     string `json:"tag"`
+	Content string `json:"content"`
+}
+
+func sendFeishuBotCard(webhookURL string, secret string, event ChannelAlertEvent) error {
+	payload := buildFeishuChannelAlertPayload(event)
 	if strings.TrimSpace(secret) != "" {
 		timestamp := strconv.FormatInt(channelAlertNow().Unix(), 10)
 		payload.Timestamp = timestamp
@@ -255,14 +298,74 @@ func sendFeishuBotText(webhookURL string, secret string, text string) error {
 	return postChannelAlertJSON(webhookURL, payload)
 }
 
-type dingTalkBotTextPayload struct {
-	MsgType string `json:"msgtype"`
-	Text    struct {
-		Content string `json:"content"`
-	} `json:"text"`
+func buildFeishuChannelAlertPayload(event ChannelAlertEvent) feishuBotCardPayload {
+	content := buildChannelAlertCardContent(event)
+	mainContent := fmt.Sprintf(
+		"**%s**\n<font color=\"%s\">%s</font>",
+		content.Channel,
+		content.AccentColor,
+		content.Summary,
+	)
+	fields := make([]feishuCardField, 0, len(content.Rows))
+	for _, row := range content.Rows {
+		fields = append(fields, feishuCardField{
+			IsShort: true,
+			Text: feishuCardText{
+				Tag:     "lark_md",
+				Content: fmt.Sprintf("**%s**\n%s", row.Label, row.Value),
+			},
+		})
+	}
+
+	return feishuBotCardPayload{
+		MsgType: "interactive",
+		Card: feishuBotCard{
+			Config: feishuBotCardConfig{
+				WideScreenMode: true,
+			},
+			Header: feishuBotCardHeader{
+				Template: content.Template,
+				Title: feishuCardText{
+					Tag:     "plain_text",
+					Content: content.Title,
+				},
+			},
+			Elements: []feishuBotCardElement{
+				{
+					Tag: "div",
+					Text: &feishuCardText{
+						Tag:     "lark_md",
+						Content: mainContent,
+					},
+				},
+				{
+					Tag:    "div",
+					Fields: fields,
+				},
+				{Tag: "hr"},
+				{
+					Tag: "note",
+					Elements: []feishuCardText{
+						{
+							Tag:     "plain_text",
+							Content: "触发时间 " + formatChannelAlertTime(content.OccurredAt),
+						},
+					},
+				},
+			},
+		},
+	}
 }
 
-func sendDingTalkBotText(webhookURL string, secret string, text string) error {
+type dingTalkBotMarkdownPayload struct {
+	MsgType  string `json:"msgtype"`
+	Markdown struct {
+		Title string `json:"title"`
+		Text  string `json:"text"`
+	} `json:"markdown"`
+}
+
+func sendDingTalkBotMarkdown(webhookURL string, secret string, event ChannelAlertEvent) error {
 	targetURL := webhookURL
 	if strings.TrimSpace(secret) != "" {
 		timestamp := strconv.FormatInt(channelAlertNow().UnixMilli(), 10)
@@ -273,9 +376,111 @@ func sendDingTalkBotText(webhookURL string, secret string, text string) error {
 		targetURL = signedURL
 	}
 
-	payload := dingTalkBotTextPayload{MsgType: "text"}
-	payload.Text.Content = text
+	payload := buildDingTalkChannelAlertPayload(event)
 	return postChannelAlertJSON(targetURL, payload)
+}
+
+func buildDingTalkChannelAlertPayload(event ChannelAlertEvent) dingTalkBotMarkdownPayload {
+	content := buildChannelAlertCardContent(event)
+	lines := []string{
+		"### " + content.Title,
+		"",
+		"> **" + content.Channel + "**",
+		"",
+		content.Summary,
+		"",
+	}
+	for _, row := range content.Rows {
+		lines = append(lines, fmt.Sprintf("**%s：** `%s`", row.Label, row.Value), "")
+	}
+	lines = append(lines, "---", fmt.Sprintf("###### 触发时间：%s", formatChannelAlertTime(content.OccurredAt)))
+
+	payload := dingTalkBotMarkdownPayload{MsgType: "markdown"}
+	payload.Markdown.Title = content.Title
+	payload.Markdown.Text = strings.Join(lines, "\n")
+	return payload
+}
+
+func buildChannelAlertCardContent(event ChannelAlertEvent) channelAlertCardContent {
+	channel := formatChannelAlertChannel(event.ChannelID, event.ChannelName)
+	occurredAt := event.OccurredAt
+	if occurredAt == 0 {
+		occurredAt = channelAlertNow().Unix()
+	}
+
+	switch event.Type {
+	case ChannelAlertEventTypeBalanceLow:
+		current := formatChannelAlertFloat(event.CurrentBalance)
+		threshold := formatChannelAlertFloat(event.BalanceThreshold)
+		shortfall := math.Max(event.BalanceThreshold-event.CurrentBalance, 0)
+		return channelAlertCardContent{
+			Title:       "渠道余额不足",
+			Template:    "red",
+			AccentColor: "red",
+			Channel:     channel,
+			Summary:     fmt.Sprintf("当前余额 %s 已低于告警阈值 %s，请及时处理。", current, threshold),
+			Rows: []channelAlertCardRow{
+				{Label: "当前余额", Value: current},
+				{Label: "原余额", Value: formatChannelAlertFloat(event.PreviousBalance)},
+				{Label: "告警阈值", Value: threshold},
+				{Label: "需补足", Value: formatChannelAlertFloat(shortfall)},
+			},
+			OccurredAt: occurredAt,
+		}
+	case ChannelAlertEventTypeMultiplierChanged:
+		previous := formatChannelAlertFloat(event.PreviousMultiplier)
+		current := formatChannelAlertFloat(event.CurrentMultiplier)
+		change := formatChannelAlertPercentChange(event.PreviousMultiplier, event.CurrentMultiplier)
+		rows := []channelAlertCardRow{
+			{Label: "原倍率", Value: previous},
+			{Label: "新倍率", Value: current},
+			{Label: "变化", Value: change},
+		}
+		if event.ObservedGroup != "" {
+			rows = append(rows, channelAlertCardRow{Label: "分组", Value: event.ObservedGroup})
+		}
+		if event.ObservedTokenID != "" {
+			rows = append(rows, channelAlertCardRow{Label: "Token", Value: event.ObservedTokenID})
+		}
+		return channelAlertCardContent{
+			Title:       "渠道倍率变化",
+			Template:    "orange",
+			AccentColor: "orange",
+			Channel:     channel,
+			Summary:     fmt.Sprintf("倍率已从 %s 调整为 %s，变化 %s。", previous, current, change),
+			Rows:        rows,
+			OccurredAt:  occurredAt,
+		}
+	default:
+		return channelAlertCardContent{
+			Title:       "渠道告警",
+			Template:    "blue",
+			AccentColor: "blue",
+			Channel:     channel,
+			Summary:     "检测到渠道健康事件，请查看系统状态。",
+			OccurredAt:  occurredAt,
+		}
+	}
+}
+
+func formatChannelAlertPercentChange(previous float64, current float64) string {
+	if math.Abs(previous) <= 1e-9 {
+		return "N/A"
+	}
+	change := (current - previous) / previous * 100
+	if math.Abs(change) < 0.01 {
+		return "0%"
+	}
+	formatted := strconv.FormatFloat(change, 'f', 2, 64)
+	formatted = strings.TrimRight(strings.TrimRight(formatted, "0"), ".")
+	return formatted + "%"
+}
+
+func formatChannelAlertTime(timestamp int64) string {
+	if timestamp <= 0 {
+		return "-"
+	}
+	return time.Unix(timestamp, 0).Format("2006-01-02 15:04:05")
 }
 
 func channelAlertNow() time.Time {

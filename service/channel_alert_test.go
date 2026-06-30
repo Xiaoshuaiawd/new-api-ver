@@ -46,6 +46,14 @@ func captureChannelAlertEvents(t *testing.T) *[]ChannelAlertEvent {
 	return &events
 }
 
+func marshalChannelAlertTestJSON(t *testing.T, value any) string {
+	t.Helper()
+
+	data, err := common.Marshal(value)
+	require.NoError(t, err)
+	return string(data)
+}
+
 func TestChannelBalanceAlertRequiresEnabledThresholdCrossing(t *testing.T) {
 	setting := withChannelAlertTestSettings(t)
 	events := captureChannelAlertEvents(t)
@@ -226,15 +234,81 @@ func TestSendChannelAlertNotificationsPostsFeishuAndDingTalkPayloads(t *testing.
 		}
 	}
 
-	assert.Equal(t, "text", feishuBody["msg_type"])
-	feishuContent, ok := feishuBody["content"].(map[string]any)
+	assert.Equal(t, "interactive", feishuBody["msg_type"])
+	feishuCard, ok := feishuBody["card"].(map[string]any)
 	require.True(t, ok)
-	assert.Contains(t, feishuContent["text"], "paid-upstream")
-	assert.Contains(t, feishuContent["text"], "8")
+	feishuHeader, ok := feishuCard["header"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "red", feishuHeader["template"])
+	feishuTitle, ok := feishuHeader["title"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "渠道余额不足", feishuTitle["content"])
+	feishuElements, ok := feishuCard["elements"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, feishuElements)
+	feishuElementsJSON := marshalChannelAlertTestJSON(t, feishuElements)
+	assert.Contains(t, feishuElementsJSON, "paid-upstream")
+	assert.Contains(t, feishuElementsJSON, "当前余额")
+	assert.Contains(t, feishuElementsJSON, "8")
 
-	assert.Equal(t, "text", dingTalkBody["msgtype"])
-	dingTalkText, ok := dingTalkBody["text"].(map[string]any)
+	assert.Equal(t, "markdown", dingTalkBody["msgtype"])
+	dingTalkMarkdown, ok := dingTalkBody["markdown"].(map[string]any)
 	require.True(t, ok)
-	assert.Contains(t, dingTalkText["content"], "paid-upstream")
-	assert.Contains(t, dingTalkText["content"], "8")
+	assert.Equal(t, "渠道余额不足", dingTalkMarkdown["title"])
+	assert.Contains(t, dingTalkMarkdown["text"], "paid-upstream")
+	assert.Contains(t, dingTalkMarkdown["text"], "当前余额")
+	assert.Contains(t, dingTalkMarkdown["text"], "8")
+}
+
+func TestChannelAlertCardContentForMultiplierChange(t *testing.T) {
+	SetChannelAlertNowFuncForTest(func() time.Time {
+		return time.Unix(1_700_000_000, 0)
+	})
+	t.Cleanup(ResetChannelAlertStateForTest)
+
+	feishuPayload := buildFeishuChannelAlertPayload(ChannelAlertEvent{
+		Type:               ChannelAlertEventTypeMultiplierChanged,
+		ChannelID:          6,
+		ChannelName:        "junche-pro",
+		PreviousMultiplier: 0.1,
+		CurrentMultiplier:  0.06,
+		ObservedGroup:      "codex-plus",
+		ObservedTokenID:    "162",
+		OccurredAt:         1_700_000_000,
+	})
+
+	assert.Equal(t, "interactive", feishuPayload.MsgType)
+	assert.Equal(t, "orange", feishuPayload.Card.Header.Template)
+	assert.Equal(t, "渠道倍率变化", feishuPayload.Card.Header.Title.Content)
+	payloadJSON := marshalChannelAlertTestJSON(t, feishuPayload)
+	assert.Contains(t, payloadJSON, "#6 junche-pro")
+	assert.Contains(t, payloadJSON, "原倍率")
+	assert.Contains(t, payloadJSON, "0.1")
+	assert.Contains(t, payloadJSON, "新倍率")
+	assert.Contains(t, payloadJSON, "0.06")
+	assert.Contains(t, payloadJSON, "变化")
+	assert.Contains(t, payloadJSON, "-40%")
+	assert.Contains(t, payloadJSON, "codex-plus")
+	assert.Contains(t, payloadJSON, "162")
+
+	dingTalkPayload := buildDingTalkChannelAlertPayload(ChannelAlertEvent{
+		Type:               ChannelAlertEventTypeMultiplierChanged,
+		ChannelID:          6,
+		ChannelName:        "junche-pro",
+		PreviousMultiplier: 0.1,
+		CurrentMultiplier:  0.06,
+		ObservedGroup:      "codex-plus",
+		ObservedTokenID:    "162",
+		OccurredAt:         1_700_000_000,
+	})
+
+	assert.Equal(t, "markdown", dingTalkPayload.MsgType)
+	assert.Equal(t, "渠道倍率变化", dingTalkPayload.Markdown.Title)
+	assert.Contains(t, dingTalkPayload.Markdown.Text, "#6 junche-pro")
+	assert.Contains(t, dingTalkPayload.Markdown.Text, "原倍率")
+	assert.Contains(t, dingTalkPayload.Markdown.Text, "0.1")
+	assert.Contains(t, dingTalkPayload.Markdown.Text, "新倍率")
+	assert.Contains(t, dingTalkPayload.Markdown.Text, "0.06")
+	assert.Contains(t, dingTalkPayload.Markdown.Text, "变化")
+	assert.Contains(t, dingTalkPayload.Markdown.Text, "-40%")
 }
