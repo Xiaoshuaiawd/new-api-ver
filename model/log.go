@@ -740,6 +740,140 @@ func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	return token
 }
 
+var logBodyDetailKeys = []string{
+	"request_body",
+	"request_body_truncated",
+	"request_body_size",
+	"response_body",
+	"response_body_truncated",
+	"response_body_size",
+}
+
+func logBodyDetailCandidateQuery(tx *gorm.DB) *gorm.DB {
+	var queryParts []string
+	var args []interface{}
+	for _, key := range logBodyDetailKeys {
+		queryParts = append(queryParts, "other LIKE ?")
+		args = append(args, "%\""+key+"\"%")
+	}
+	return tx.Where(strings.Join(queryParts, " OR "), args...)
+}
+
+func removeLogBodyDetails(other string) (string, bool) {
+	if other == "" {
+		return "", false
+	}
+	otherMap, err := common.StrToMap(other)
+	if err != nil {
+		return "", false
+	}
+	detailRaw, ok := otherMap["log_detail"]
+	if !ok {
+		return "", false
+	}
+	detail, ok := detailRaw.(map[string]interface{})
+	if !ok {
+		return "", false
+	}
+
+	changed := false
+	for _, key := range logBodyDetailKeys {
+		if _, exists := detail[key]; exists {
+			delete(detail, key)
+			changed = true
+		}
+	}
+	if !changed {
+		return "", false
+	}
+	if len(detail) == 0 {
+		delete(otherMap, "log_detail")
+	} else {
+		otherMap["log_detail"] = detail
+	}
+	return common.MapToJsonStr(otherMap), true
+}
+
+func updateLogBodyDetailsByRow(ctx context.Context, log Log, other string) error {
+	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+		if log.RequestId != "" {
+			return LOG_DB.WithContext(ctx).Exec(
+				"ALTER TABLE logs UPDATE other = ? WHERE request_id = ? SETTINGS mutations_sync = 1",
+				other,
+				log.RequestId,
+			).Error
+		}
+		return LOG_DB.WithContext(ctx).Exec(
+			"ALTER TABLE logs UPDATE other = ? WHERE created_at = ? AND other = ? SETTINGS mutations_sync = 1",
+			other,
+			log.CreatedAt,
+			log.Other,
+		).Error
+	}
+
+	return LOG_DB.WithContext(ctx).Model(&Log{}).Where("id = ?", log.Id).Update("other", other).Error
+}
+
+func ClearLogBodyDetails(ctx context.Context, limit int) (int64, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+
+	var total int64
+	var lastID int
+	var lastCreatedAt int64
+	var lastRequestId string
+	hasClickHouseCursor := false
+	for {
+		if err := ctx.Err(); err != nil {
+			return total, err
+		}
+
+		var logs []Log
+		tx := LOG_DB.WithContext(ctx).Model(&Log{}).Select("id", "created_at", "request_id", "other")
+		tx = logBodyDetailCandidateQuery(tx)
+		if !common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+			tx = tx.Where("id > ?", lastID).Order("id asc")
+		} else {
+			if hasClickHouseCursor {
+				tx = tx.Where("created_at > ? OR (created_at = ? AND request_id > ?)", lastCreatedAt, lastCreatedAt, lastRequestId)
+			}
+			tx = tx.Order("created_at asc, request_id asc")
+		}
+		if err := tx.Limit(limit).Find(&logs).Error; err != nil {
+			return total, err
+		}
+		if len(logs) == 0 {
+			break
+		}
+
+		for _, log := range logs {
+			if !common.UsingLogDatabase(common.DatabaseTypeClickHouse) && log.Id > lastID {
+				lastID = log.Id
+			}
+			if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+				lastCreatedAt = log.CreatedAt
+				lastRequestId = log.RequestId
+				hasClickHouseCursor = true
+			}
+			newOther, changed := removeLogBodyDetails(log.Other)
+			if !changed {
+				continue
+			}
+			if err := updateLogBodyDetailsByRow(ctx, log, newOther); err != nil {
+				return total, err
+			}
+			total++
+		}
+
+		if len(logs) < limit {
+			break
+		}
+	}
+
+	return total, nil
+}
+
 func CountOldLog(ctx context.Context, targetTimestamp int64) (int64, error) {
 	var total int64
 	if err := LOG_DB.WithContext(ctx).Model(&Log{}).Where("created_at < ?", targetTimestamp).Count(&total).Error; err != nil {

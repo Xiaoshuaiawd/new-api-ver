@@ -195,3 +195,14 @@ func DeleteHistoryLogs(c *gin.Context) {
 	})
 	return
 }
+
+func ClearLogBodyDetails(c *gin.Context) {
+	count, err := model.ClearLogBodyDetails(c.Request.Context(), 500)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"updated_count": count,
+	})
+}

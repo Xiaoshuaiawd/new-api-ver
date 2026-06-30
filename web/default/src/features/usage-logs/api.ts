@@ -83,6 +83,15 @@ export const getUserLogStats = (
   params: Omit<GetLogStatsParams, 'username' | 'channel'> = {}
 ) => fetchLogStats('/api/log', params, false)
 
+export async function clearLogBodyDetails(): Promise<{
+  success: boolean
+  message?: string
+  data?: { updated_count: number }
+}> {
+  const res = await api.delete('/api/log/body-details')
+  return res.data
+}
+
 export async function getUserInfo(
   userId: number
 ): Promise<{ success: boolean; message?: string; data?: UserInfo }> {

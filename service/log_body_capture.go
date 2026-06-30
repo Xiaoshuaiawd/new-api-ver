@@ -9,7 +9,6 @@ import (
 
 const (
 	ginKeyLogResponseBody = "log_response_body"
-	maxLogBodyDetailBytes = 64 * 1024
 )
 
 func SetLogResponseBody(c *gin.Context, body []byte) {
@@ -43,19 +42,11 @@ func AppendLogBodyDetails(c *gin.Context, other map[string]interface{}) {
 	}
 
 	detail := map[string]interface{}{}
-	if requestBody, size, truncated, ok := getLogRequestBody(c); ok {
+	if requestBody, ok := getLogRequestBody(c); ok {
 		detail["request_body"] = requestBody
-		if truncated {
-			detail["request_body_truncated"] = true
-			detail["request_body_size"] = size
-		}
 	}
-	if responseBody, size, truncated, ok := getLogResponseBody(c); ok {
+	if responseBody, ok := getLogResponseBody(c); ok {
 		detail["response_body"] = responseBody
-		if truncated {
-			detail["response_body_truncated"] = true
-			detail["response_body_size"] = size
-		}
 	}
 	if len(detail) == 0 {
 		return
@@ -63,39 +54,37 @@ func AppendLogBodyDetails(c *gin.Context, other map[string]interface{}) {
 	other["log_detail"] = detail
 }
 
-func getLogRequestBody(c *gin.Context) (string, int, bool, bool) {
+func appendLogBodyDetailsForZeroTokens(c *gin.Context, other map[string]interface{}, totalTokens int) {
+	if totalTokens != 0 {
+		return
+	}
+	AppendLogBodyDetails(c, other)
+}
+
+func getLogRequestBody(c *gin.Context) (string, bool) {
 	storage, err := common.GetBodyStorage(c)
 	if err != nil || storage == nil {
-		return "", 0, false, false
+		return "", false
 	}
 	data, err := storage.Bytes()
 	if err != nil {
-		return "", 0, false, false
+		return "", false
 	}
 	_, _ = storage.Seek(0, io.SeekStart)
-	return truncateLogBody(data)
+	return string(data), true
 }
 
-func getLogResponseBody(c *gin.Context) (string, int, bool, bool) {
+func getLogResponseBody(c *gin.Context) (string, bool) {
 	value, ok := c.Get(ginKeyLogResponseBody)
 	if !ok || value == nil {
-		return "", 0, false, false
+		return "", false
 	}
 	switch body := value.(type) {
 	case string:
-		return truncateLogBody([]byte(body))
+		return body, true
 	case []byte:
-		return truncateLogBody(body)
+		return string(body), true
 	default:
-		return "", 0, false, false
+		return "", false
 	}
-}
-
-func truncateLogBody(data []byte) (string, int, bool, bool) {
-	size := len(data)
-	if len(data) > maxLogBodyDetailBytes {
-		data = data[:maxLogBodyDetailBytes]
-		return string(data), size, true, true
-	}
-	return string(data), size, false, true
 }

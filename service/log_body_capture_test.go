@@ -37,11 +37,11 @@ func TestAppendLogBodyDetailsCapturesRequestAndResponseBodies(t *testing.T) {
 	assert.Equal(t, `{"model":"gpt","prompt":"hi"}`, string(replayed))
 }
 
-func TestAppendLogBodyDetailsTruncatesLargeBodies(t *testing.T) {
+func TestAppendLogBodyDetailsKeepsLargeBodiesUntruncated(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(nil)
-	requestBody := strings.Repeat("a", maxLogBodyDetailBytes+128)
-	responseBody := strings.Repeat("b", maxLogBodyDetailBytes+64)
+	requestBody := strings.Repeat("a", 64*1024+128)
+	responseBody := strings.Repeat("b", 64*1024+64)
 	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(requestBody))
 	ctx.Set(ginKeyLogResponseBody, responseBody)
 
@@ -50,12 +50,12 @@ func TestAppendLogBodyDetailsTruncatesLargeBodies(t *testing.T) {
 
 	details, ok := other["log_detail"].(map[string]interface{})
 	require.True(t, ok)
-	assert.Len(t, details["request_body"], maxLogBodyDetailBytes)
-	assert.Len(t, details["response_body"], maxLogBodyDetailBytes)
-	assert.Equal(t, true, details["request_body_truncated"])
-	assert.Equal(t, len(requestBody), details["request_body_size"])
-	assert.Equal(t, true, details["response_body_truncated"])
-	assert.Equal(t, len(responseBody), details["response_body_size"])
+	assert.Equal(t, requestBody, details["request_body"])
+	assert.Equal(t, responseBody, details["response_body"])
+	assert.NotContains(t, details, "request_body_truncated")
+	assert.NotContains(t, details, "request_body_size")
+	assert.NotContains(t, details, "response_body_truncated")
+	assert.NotContains(t, details, "response_body_size")
 }
 
 func TestAppendLogBodyDetailsCapturesEmptyBodies(t *testing.T) {
@@ -75,6 +75,33 @@ func TestAppendLogBodyDetailsCapturesEmptyBodies(t *testing.T) {
 	assert.Equal(t, "", details["response_body"])
 	assert.NotContains(t, details, "request_body_truncated")
 	assert.NotContains(t, details, "response_body_truncated")
+}
+
+func TestAppendLogBodyDetailsForZeroTokensSkipsSuccessfulUsageBodies(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"gpt","prompt":"hi"}`))
+	SetLogResponseBody(ctx, []byte(`{"usage":{"total_tokens":12}}`))
+
+	other := map[string]interface{}{}
+	appendLogBodyDetailsForZeroTokens(ctx, other, 12)
+
+	assert.NotContains(t, other, "log_detail")
+}
+
+func TestAppendLogBodyDetailsForZeroTokensCapturesAbnormalUsageBodies(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"gpt","prompt":"hi"}`))
+	SetLogResponseBody(ctx, []byte(`{"usage":{"total_tokens":0}}`))
+
+	other := map[string]interface{}{}
+	appendLogBodyDetailsForZeroTokens(ctx, other, 0)
+
+	details, ok := other["log_detail"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, `{"model":"gpt","prompt":"hi"}`, details["request_body"])
+	assert.Equal(t, `{"usage":{"total_tokens":0}}`, details["response_body"])
 }
 
 func TestIOCopyBytesGracefullyCapturesEmptyResponseBodyForLogs(t *testing.T) {
