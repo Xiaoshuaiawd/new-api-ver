@@ -12,8 +12,10 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func withChannelAlertTestSettings(t *testing.T) *operation_setting.ChannelAlertSetting {
@@ -46,6 +48,22 @@ func captureChannelAlertEvents(t *testing.T) *[]ChannelAlertEvent {
 	return &events
 }
 
+func withChannelAlertTestDB(t *testing.T) {
+	t.Helper()
+
+	oldDB := model.DB
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	model.DB = db
+	require.NoError(t, db.AutoMigrate(&model.Channel{}))
+	t.Cleanup(func() {
+		model.DB = oldDB
+		_ = sqlDB.Close()
+	})
+}
+
 func marshalChannelAlertTestJSON(t *testing.T, value any) string {
 	t.Helper()
 
@@ -54,14 +72,13 @@ func marshalChannelAlertTestJSON(t *testing.T, value any) string {
 	return string(data)
 }
 
-func TestChannelBalanceAlertRequiresEnabledThresholdCrossing(t *testing.T) {
+func TestChannelBalanceAlertRequiresEnabledThresholdAndLowBalance(t *testing.T) {
 	setting := withChannelAlertTestSettings(t)
 	events := captureChannelAlertEvents(t)
 
 	channel := &model.Channel{Id: 101, Name: "low-balance"}
 
 	RecordChannelBalanceChange(channel, 25, 12)
-	RecordChannelBalanceChange(channel, 9, 8)
 	setting.Enabled = false
 	RecordChannelBalanceChange(channel, 25, 5)
 	setting.Enabled = true
@@ -87,6 +104,120 @@ func TestChannelBalanceAlertEmitsOnlyWhenBalanceFallsBelowThreshold(t *testing.T
 	assert.Equal(t, 10.0, event.PreviousBalance)
 	assert.Equal(t, 9.99, event.CurrentBalance)
 	assert.Equal(t, 10.0, event.BalanceThreshold)
+}
+
+func TestChannelBalanceAlertEmitsWhenBalanceIsAlreadyBelowThreshold(t *testing.T) {
+	withChannelAlertTestSettings(t)
+	events := captureChannelAlertEvents(t)
+
+	channel := &model.Channel{Id: 107, Name: "already-low"}
+
+	RecordChannelBalanceChange(channel, 9, 8)
+
+	require.Len(t, *events, 1)
+	event := (*events)[0]
+	assert.Equal(t, ChannelAlertEventTypeBalanceLow, event.Type)
+	assert.Equal(t, 107, event.ChannelID)
+	assert.Equal(t, "already-low", event.ChannelName)
+	assert.Equal(t, 9.0, event.PreviousBalance)
+	assert.Equal(t, 8.0, event.CurrentBalance)
+	assert.Equal(t, 10.0, event.BalanceThreshold)
+}
+
+func TestNotifyLowBalanceChannelsEmitsStoredLowBalances(t *testing.T) {
+	setting := withChannelAlertTestSettings(t)
+	setting.BalanceThreshold = 30
+	setting.FeishuEnabled = true
+	setting.FeishuWebhookURL = "https://example.com/feishu"
+	events := captureChannelAlertEvents(t)
+	withChannelAlertTestDB(t)
+
+	require.NoError(t, model.DB.Create([]*model.Channel{
+		{
+			Id:                 701,
+			Name:               "code-pro",
+			Key:                "sk-low",
+			Status:             common.ChannelStatusEnabled,
+			Balance:            28.97,
+			BalanceUpdatedTime: 1_700_000_000,
+		},
+		{
+			Id:                 702,
+			Name:               "healthy",
+			Key:                "sk-healthy",
+			Status:             common.ChannelStatusEnabled,
+			Balance:            31,
+			BalanceUpdatedTime: 1_700_000_000,
+		},
+		{
+			Id:                 703,
+			Name:               "disabled-low",
+			Key:                "sk-disabled",
+			Status:             common.ChannelStatusManuallyDisabled,
+			Balance:            20,
+			BalanceUpdatedTime: 1_700_000_000,
+		},
+		{
+			Id:      704,
+			Name:    "unknown-balance",
+			Key:     "sk-unknown",
+			Status:  common.ChannelStatusEnabled,
+			Balance: 0,
+		},
+	}).Error)
+
+	err := NotifyLowBalanceChannels()
+
+	require.NoError(t, err)
+	require.Len(t, *events, 1)
+	event := (*events)[0]
+	assert.Equal(t, ChannelAlertEventTypeBalanceLow, event.Type)
+	assert.Equal(t, 701, event.ChannelID)
+	assert.Equal(t, "code-pro", event.ChannelName)
+	assert.Equal(t, 28.97, event.PreviousBalance)
+	assert.Equal(t, 28.97, event.CurrentBalance)
+	assert.Equal(t, 30.0, event.BalanceThreshold)
+}
+
+func TestNotifyLowBalanceChannelsWaitsForNotificationTarget(t *testing.T) {
+	setting := withChannelAlertTestSettings(t)
+	setting.BalanceThreshold = 30
+	events := captureChannelAlertEvents(t)
+	withChannelAlertTestDB(t)
+
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:                 704,
+		Name:               "pending-target",
+		Key:                "sk-low",
+		Status:             common.ChannelStatusEnabled,
+		Balance:            28,
+		BalanceUpdatedTime: 1_700_000_000,
+	}).Error)
+
+	require.NoError(t, NotifyLowBalanceChannels())
+	require.Empty(t, *events)
+
+	setting.FeishuEnabled = true
+	setting.FeishuWebhookURL = "https://example.com/feishu"
+
+	require.NoError(t, NotifyLowBalanceChannels())
+	require.Len(t, *events, 1)
+	assert.Equal(t, 704, (*events)[0].ChannelID)
+}
+
+func TestChannelAlertWithoutNotificationTargetDoesNotConsumeCooldown(t *testing.T) {
+	withChannelAlertTestSettings(t)
+	now := time.Unix(1_700_000_000, 0)
+	SetChannelAlertNowFuncForTest(func() time.Time { return now })
+
+	channel := &model.Channel{Id: 705, Name: "target-later"}
+
+	RecordChannelBalanceChange(channel, 20, 9)
+	events := captureChannelAlertEvents(t)
+	RecordChannelBalanceChange(channel, 20, 8)
+
+	require.Len(t, *events, 1)
+	assert.Equal(t, 8.0, (*events)[0].CurrentBalance)
 }
 
 func TestChannelMultiplierAlertEmitsWhenHealthyMultiplierChanges(t *testing.T) {

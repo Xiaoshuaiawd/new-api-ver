@@ -93,7 +93,7 @@ func RecordChannelBalanceChange(channel *model.Channel, previousBalance float64,
 	if !setting.Enabled || !setting.BalanceAlertEnabled || setting.BalanceThreshold <= 0 {
 		return
 	}
-	if previousBalance < setting.BalanceThreshold || currentBalance >= setting.BalanceThreshold {
+	if currentBalance >= setting.BalanceThreshold {
 		return
 	}
 
@@ -105,6 +105,46 @@ func RecordChannelBalanceChange(channel *model.Channel, previousBalance float64,
 		CurrentBalance:   currentBalance,
 		BalanceThreshold: setting.BalanceThreshold,
 	})
+}
+
+func NotifyLowBalanceChannels() error {
+	setting := operation_setting.GetChannelAlertSetting()
+	if !channelAlertCanNotifyBalance(setting) {
+		return nil
+	}
+
+	channels, err := model.GetAllChannels(0, 0, true, false)
+	if err != nil {
+		return err
+	}
+	for _, channel := range channels {
+		if channel.Status != common.ChannelStatusEnabled {
+			continue
+		}
+		if channel.BalanceUpdatedTime <= 0 {
+			continue
+		}
+		if channel.Balance >= setting.BalanceThreshold {
+			continue
+		}
+		RecordChannelBalanceChange(channel, channel.Balance, channel.Balance)
+	}
+	return nil
+}
+
+func channelAlertCanNotifyBalance(setting *operation_setting.ChannelAlertSetting) bool {
+	if setting == nil || !setting.Enabled || !setting.BalanceAlertEnabled || setting.BalanceThreshold <= 0 {
+		return false
+	}
+	return channelAlertHasNotificationTarget(setting)
+}
+
+func channelAlertHasNotificationTarget(setting *operation_setting.ChannelAlertSetting) bool {
+	if setting == nil {
+		return false
+	}
+	return (setting.FeishuEnabled && strings.TrimSpace(setting.FeishuWebhookURL) != "") ||
+		(setting.DingTalkEnabled && strings.TrimSpace(setting.DingTalkWebhookURL) != "")
 }
 
 func RecordChannelMultiplierChange(channel *model.Channel, previous ChannelMultiplierSnapshot, current ChannelMultiplierSnapshot) {
@@ -146,6 +186,11 @@ func emitChannelAlert(setting *operation_setting.ChannelAlertSetting, event Chan
 	}
 	channelAlertState.Lock()
 	now := channelAlertState.now()
+	notify := channelAlertState.notifyFunc
+	if notify == nil && !channelAlertHasNotificationTarget(setting) {
+		channelAlertState.Unlock()
+		return
+	}
 	alertKey := fmt.Sprintf("%s:%d", event.Type, event.ChannelID)
 	minInterval := time.Duration(setting.MinIntervalSeconds) * time.Second
 	if minInterval <= 0 {
@@ -156,7 +201,6 @@ func emitChannelAlert(setting *operation_setting.ChannelAlertSetting, event Chan
 		return
 	}
 	channelAlertState.lastAlertAt[alertKey] = now
-	notify := channelAlertState.notifyFunc
 	channelAlertState.Unlock()
 
 	if event.OccurredAt == 0 {

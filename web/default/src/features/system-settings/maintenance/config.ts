@@ -26,6 +26,7 @@ export type HeaderNavModulesConfig = {
   console: boolean
   pricing: HeaderNavAccessConfig
   rankings: HeaderNavAccessConfig
+  groupMonitor: boolean
   docs: boolean
   about: boolean
   [key: string]: boolean | HeaderNavAccessConfig
@@ -49,6 +50,7 @@ export const HEADER_NAV_DEFAULT: HeaderNavModulesConfig = {
     enabled: true,
     requireAuth: false,
   },
+  groupMonitor: true,
   docs: true,
   about: true,
 }
@@ -62,6 +64,7 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
   console: {
     enabled: true,
     detail: true,
+    modelMonitor: true,
     token: true,
     log: true,
     midjourney: true,
@@ -155,6 +158,10 @@ export function parseHeaderNavModules(
       }
       if (key === 'rankings') {
         result.rankings = parseAccessModule(raw, base.rankings)
+        return
+      }
+      if (key === 'groupMonitor') {
+        result.groupMonitor = toBoolean(raw, base.groupMonitor)
         return
       }
 

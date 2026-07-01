@@ -12,7 +12,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func withLogBodyCapture(t *testing.T, enabled bool) {
+	t.Helper()
+	previous := common.LogBodyCaptureEnabled
+	common.LogBodyCaptureEnabled = enabled
+	t.Cleanup(func() {
+		common.LogBodyCaptureEnabled = previous
+	})
+}
+
+func TestAppendLogBodyDetailsSkipsWhenCaptureDisabledByDefault(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(nil)
+	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"gpt","prompt":"hi"}`))
+	SetLogResponseBody(ctx, []byte(`{"error":{"message":"upstream failed"}}`))
+
+	other := map[string]interface{}{}
+	AppendLogBodyDetails(ctx, other)
+
+	assert.NotContains(t, other, "log_detail")
+}
+
 func TestAppendLogBodyDetailsCapturesRequestAndResponseBodies(t *testing.T) {
+	withLogBodyCapture(t, true)
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(nil)
 	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"gpt","prompt":"hi"}`))
@@ -38,6 +60,7 @@ func TestAppendLogBodyDetailsCapturesRequestAndResponseBodies(t *testing.T) {
 }
 
 func TestAppendLogBodyDetailsKeepsLargeBodiesUntruncated(t *testing.T) {
+	withLogBodyCapture(t, true)
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(nil)
 	requestBody := strings.Repeat("a", 64*1024+128)
@@ -59,6 +82,7 @@ func TestAppendLogBodyDetailsKeepsLargeBodiesUntruncated(t *testing.T) {
 }
 
 func TestAppendLogBodyDetailsCapturesEmptyBodies(t *testing.T) {
+	withLogBodyCapture(t, true)
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(nil)
 	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(""))
@@ -78,6 +102,7 @@ func TestAppendLogBodyDetailsCapturesEmptyBodies(t *testing.T) {
 }
 
 func TestAppendLogBodyDetailsForZeroTokensSkipsSuccessfulUsageBodies(t *testing.T) {
+	withLogBodyCapture(t, true)
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(nil)
 	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"gpt","prompt":"hi"}`))
@@ -90,6 +115,7 @@ func TestAppendLogBodyDetailsForZeroTokensSkipsSuccessfulUsageBodies(t *testing.
 }
 
 func TestAppendLogBodyDetailsForZeroTokensCapturesAbnormalUsageBodies(t *testing.T) {
+	withLogBodyCapture(t, true)
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(nil)
 	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"gpt","prompt":"hi"}`))
@@ -105,6 +131,7 @@ func TestAppendLogBodyDetailsForZeroTokensCapturesAbnormalUsageBodies(t *testing
 }
 
 func TestIOCopyBytesGracefullyCapturesEmptyResponseBodyForLogs(t *testing.T) {
+	withLogBodyCapture(t, true)
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -126,6 +153,7 @@ func TestIOCopyBytesGracefullyCapturesEmptyResponseBodyForLogs(t *testing.T) {
 }
 
 func TestIOCopyBytesGracefullyOverwritesEarlierErrorResponseBody(t *testing.T) {
+	withLogBodyCapture(t, true)
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)

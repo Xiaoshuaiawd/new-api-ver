@@ -40,6 +40,9 @@ func AppendLogBodyDetails(c *gin.Context, other map[string]interface{}) {
 	if c == nil || other == nil {
 		return
 	}
+	if !common.LogBodyCaptureEnabled {
+		return
+	}
 
 	detail := map[string]interface{}{}
 	if requestBody, ok := getLogRequestBody(c); ok {

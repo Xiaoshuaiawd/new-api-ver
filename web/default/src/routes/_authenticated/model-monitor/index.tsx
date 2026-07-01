@@ -16,9 +16,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, redirect } from '@tanstack/react-router'
+import { getFreshModuleAccess } from '@/lib/nav-modules'
 import { ModelMonitor } from '@/features/model-monitor'
 
 export const Route = createFileRoute('/_authenticated/model-monitor/')({
+  beforeLoad: async () => {
+    const access = await getFreshModuleAccess('groupMonitor')
+    if (!access.enabled) {
+      throw redirect({ to: '/' })
+    }
+  },
   component: ModelMonitor,
 })

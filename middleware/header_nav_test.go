@@ -113,6 +113,23 @@ func TestHeaderNavModuleAuthRequiresLoginForRankings(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, recorder.Code)
 }
 
+func TestHeaderNavModuleAuthRequiresLoginForGroupMonitorByDefault(t *testing.T) {
+	withHeaderNavModules(t, "")
+
+	recorder := performHeaderNavRequest(t, HeaderNavModuleAuth("groupMonitor"), false)
+
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+}
+
+func TestHeaderNavModuleAuthRejectsDisabledGroupMonitor(t *testing.T) {
+	raw := `{"groupMonitor":false}`
+	withHeaderNavModules(t, raw)
+
+	recorder := performHeaderNavRequest(t, HeaderNavModuleAuth("groupMonitor"), true)
+
+	require.Equal(t, http.StatusForbidden, recorder.Code)
+}
+
 func TestHeaderNavModuleAuthRejectsLegacyDisabledModule(t *testing.T) {
 	raw := `{"rankings":false}`
 	withHeaderNavModules(t, raw)

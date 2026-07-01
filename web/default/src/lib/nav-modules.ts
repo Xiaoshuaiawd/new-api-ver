@@ -20,13 +20,14 @@ import { getStatus } from '@/lib/api'
 
 export type ModuleAccess = { enabled: boolean; requireAuth: boolean }
 
-export type HeaderNavModule = 'rankings' | 'pricing'
+export type HeaderNavModule = 'rankings' | 'pricing' | 'groupMonitor'
 
 export type HeaderNavModules = {
   home: boolean
   console: boolean
   pricing: ModuleAccess
   rankings: ModuleAccess
+  groupMonitor: boolean
   docs: boolean
   about: boolean
   [key: string]: boolean | ModuleAccess
@@ -37,6 +38,7 @@ const DEFAULT_HEADER_NAV_MODULES: HeaderNavModules = {
   console: true,
   pricing: { enabled: true, requireAuth: false },
   rankings: { enabled: true, requireAuth: false },
+  groupMonitor: true,
   docs: true,
   about: true,
 }
@@ -44,6 +46,10 @@ const DEFAULT_HEADER_NAV_MODULES: HeaderNavModules = {
 const DEFAULTS: Record<HeaderNavModule, ModuleAccess> = {
   pricing: DEFAULT_HEADER_NAV_MODULES.pricing,
   rankings: DEFAULT_HEADER_NAV_MODULES.rankings,
+  groupMonitor: {
+    enabled: DEFAULT_HEADER_NAV_MODULES.groupMonitor,
+    requireAuth: true,
+  },
 }
 
 function cloneHeaderNavDefaults(): HeaderNavModules {
@@ -118,6 +124,14 @@ export function parseHeaderNavModules(raw: unknown): HeaderNavModules {
       result.rankings = parseAccess(value, result.rankings)
       return
     }
+    if (key === 'groupMonitor') {
+      if (value && typeof value === 'object') {
+        result.groupMonitor = parseAccess(value, DEFAULTS.groupMonitor).enabled
+        return
+      }
+      result.groupMonitor = parseHeaderNavBoolean(value, result.groupMonitor)
+      return
+    }
 
     const fallback = result[key]
     if (
@@ -166,7 +180,15 @@ export function getModuleAccessFromStatus(
   status: Record<string, unknown> | null,
   module: HeaderNavModule
 ): ModuleAccess {
-  return parseHeaderNavModulesFromStatus(status)[module] ?? DEFAULTS[module]
+  const value = parseHeaderNavModulesFromStatus(status)[module]
+  if (value && typeof value === 'object') return value
+  if (typeof value === 'boolean') {
+    return {
+      enabled: value,
+      requireAuth: DEFAULTS[module].requireAuth,
+    }
+  }
+  return DEFAULTS[module]
 }
 
 export function getModuleAccess(module: HeaderNavModule): ModuleAccess {

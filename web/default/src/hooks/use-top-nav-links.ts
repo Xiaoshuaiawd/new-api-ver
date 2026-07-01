@@ -77,11 +77,14 @@ export function useTopNavLinks(): TopNavLink[] {
     const requiresAuth = pricing.requireAuth && !isAuthed
     links.push({ title: t('Model Square'), href: '/pricing', requiresAuth })
   }
-  links.push({
-    title: t('Group Monitor'),
-    href: '/model-monitor',
-    requiresAuth: !isAuthed,
-  })
+
+  if (modules?.groupMonitor !== false) {
+    links.push({
+      title: t('Group Monitor'),
+      href: '/model-monitor',
+      requiresAuth: !isAuthed,
+    })
+  }
 
   // Rankings
   const rankings = modules?.rankings
