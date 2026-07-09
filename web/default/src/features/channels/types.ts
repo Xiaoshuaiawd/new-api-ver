@@ -49,9 +49,16 @@ export const channelRuntimeHealthSchema = z
     window_samples: z.number().default(0),
     window_failures: z.number().default(0),
     error_rate: z.number().default(0),
+    average_first_response_ms: z.number().default(0),
+    p95_first_response_ms: z.number().default(0),
+    runtime_available: z.boolean().default(true),
+    availability_reason: z.string().optional(),
+    probe_available: z.boolean().default(true),
+    probe_unavailable_reason: z.string().optional(),
     warmup_started_at: z.number().default(0),
     warmup_ends_at: z.number().default(0),
     warmup_percent: z.number().default(0),
+    warmup_throttle_percent: z.number().default(0),
   })
   .default({
     channel_id: 0,
@@ -67,9 +74,14 @@ export const channelRuntimeHealthSchema = z
     window_samples: 0,
     window_failures: 0,
     error_rate: 0,
+    average_first_response_ms: 0,
+    p95_first_response_ms: 0,
+    runtime_available: true,
+    probe_available: true,
     warmup_started_at: 0,
     warmup_ends_at: 0,
     warmup_percent: 100,
+    warmup_throttle_percent: 0,
   })
 
 export type ChannelRuntimeHealth = z.infer<typeof channelRuntimeHealthSchema>

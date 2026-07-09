@@ -74,7 +74,7 @@ func withChannelRuntimeHealth(channel *model.Channel) channelRuntimeHealthItem {
 	}
 	return channelRuntimeHealthItem{
 		Channel:            sanitizeChannelForResponse(channel),
-		RuntimeHealth:      service.GetChannelHealthSnapshotForDisplay(channel.Id),
+		RuntimeHealth:      service.GetChannelHealthSnapshotForChannelDisplay(channel),
 		UpstreamMultiplier: service.GetChannelMultiplierSnapshotForDisplay(channel),
 	}
 }

@@ -11,6 +11,7 @@ const (
 )
 
 type ChannelRuntimeStateFunc func(channelID int, modelName string, mode ChannelRuntimeStateMode) (available bool, inflight int)
+type ChannelRuntimeWeightFunc func(channelID int, modelName string, weight int, inflight int) int
 
 type ChannelSelectionTraceEvent struct {
 	Stage       string
@@ -35,6 +36,11 @@ var channelRuntimeState = struct {
 var channelRuntimeHealthState = struct {
 	sync.RWMutex
 	fn ChannelRuntimeHealthStateFunc
+}{}
+
+var channelRuntimeWeight = struct {
+	sync.RWMutex
+	fn ChannelRuntimeWeightFunc
 }{}
 
 func SetChannelRuntimeStateFunc(fn ChannelRuntimeStateFunc) {
@@ -80,6 +86,23 @@ func SetChannelRuntimeHealthStateFunc(fn ChannelRuntimeHealthStateFunc) {
 	channelRuntimeHealthState.Lock()
 	defer channelRuntimeHealthState.Unlock()
 	channelRuntimeHealthState.fn = fn
+}
+
+func SetChannelRuntimeWeightFunc(fn ChannelRuntimeWeightFunc) {
+	channelRuntimeWeight.Lock()
+	defer channelRuntimeWeight.Unlock()
+	channelRuntimeWeight.fn = fn
+}
+
+func adjustRuntimeChannelWeight(channelID int, modelName string, weight int, inflight int) int {
+	adjusted := adjustedChannelWeight(weight, inflight)
+	channelRuntimeWeight.RLock()
+	fn := channelRuntimeWeight.fn
+	channelRuntimeWeight.RUnlock()
+	if fn == nil {
+		return adjusted
+	}
+	return fn(channelID, modelName, adjusted, inflight)
 }
 
 func runtimeTraceHealthState(channelID int) string {

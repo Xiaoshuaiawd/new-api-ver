@@ -169,6 +169,32 @@ func TestChannelHealthDoesNotReopenAfterCancelledStuckInflightRecovers(t *testin
 	require.Equal(t, 0, snapshot.Inflight)
 }
 
+func TestChannelHealthPrunesCancelledInflightAfterRetention(t *testing.T) {
+	withChannelHealthTestSettings(t)
+	now := time.Unix(1_700_000_000, 0)
+	SetChannelHealthNowFuncForTest(func() time.Time { return now })
+
+	const channelID = 8818
+	for i := 0; i < 3; i++ {
+		RecordAttemptStart(ChannelAttemptMeta{ChannelID: channelID})
+	}
+
+	now = now.Add(46 * time.Second)
+	CheckChannelHealthStuckRequests()
+
+	channelHealth.Lock()
+	state := channelHealth.channels[channelHealthScopeKey(channelHealthScope{channelID: channelID})]
+	require.Len(t, state.inflight, 3)
+	channelHealth.Unlock()
+
+	now = now.Add(10 * time.Minute)
+	CheckChannelHealthStuckRequests()
+
+	channelHealth.Lock()
+	require.Len(t, state.inflight, 0)
+	channelHealth.Unlock()
+}
+
 func TestChannelHealthStuckProbeReleasesProbeInProgress(t *testing.T) {
 	withChannelHealthTestSettings(t)
 	now := time.Unix(1_700_000_000, 0)
@@ -189,6 +215,77 @@ func TestChannelHealthStuckProbeReleasesProbeInProgress(t *testing.T) {
 
 	now = now.Add(31 * time.Second)
 	require.True(t, IsChannelProbeAvailable(channelID))
+}
+
+func TestRunDueChannelHealthProbesBypassesBackoffAfterMaxIsolation(t *testing.T) {
+	setting := withChannelHealthTestSettings(t)
+	setting.MaxIsolationSeconds = 60
+	withChannelHealthSelectionDB(t)
+	now := time.Unix(1_700_000_000, 0)
+	SetChannelHealthNowFuncForTest(func() time.Time { return now })
+
+	OpenChannel(9101, "runtime isolate")
+	channelHealth.Lock()
+	state := channelHealth.channels[channelHealthScopeKey(channelHealthScope{channelID: 9101})]
+	state.nextProbeAt = now.Add(time.Hour)
+	channelHealth.Unlock()
+
+	probed := make(chan struct{}, 1)
+	SetChannelHealthProbeFunc(func(ctx context.Context, channel *model.Channel, modelName string) error {
+		probed <- struct{}{}
+		return nil
+	})
+
+	now = now.Add(61 * time.Second)
+	RunDueChannelHealthProbes()
+
+	select {
+	case <-probed:
+	case <-time.After(time.Second):
+		t.Fatal("expected overdue isolation to bypass probe backoff")
+	}
+}
+
+func TestRunDueChannelHealthProbesUsesModelLevelScopeModel(t *testing.T) {
+	setting := withChannelHealthTestSettings(t)
+	setting.ModelLevelEnabled = true
+	withChannelHealthSelectionDB(t)
+	now := time.Unix(1_700_000_000, 0)
+	SetChannelHealthNowFuncForTest(func() time.Time { return now })
+
+	OpenChannelForModel(9101, "gpt-health-test", "runtime isolate")
+	now = now.Add(31 * time.Second)
+
+	probedModel := make(chan string, 1)
+	SetChannelHealthProbeFunc(func(ctx context.Context, channel *model.Channel, modelName string) error {
+		probedModel <- modelName
+		return nil
+	})
+
+	RunDueChannelHealthProbes()
+
+	select {
+	case modelName := <-probedModel:
+		require.Equal(t, "gpt-health-test", modelName)
+	case <-time.After(time.Second):
+		t.Fatal("expected model-level probe to run")
+	}
+}
+
+func TestProbePermanentFailureUsesMaxBackoff(t *testing.T) {
+	setting := withChannelHealthTestSettings(t)
+	setting.ProbeIntervalSeconds = 30
+	setting.ProbeBackoffMaxSeconds = 300
+	now := time.Unix(1_700_000_000, 0)
+	SetChannelHealthNowFuncForTest(func() time.Time { return now })
+
+	const channelID = 8819
+	OpenChannel(channelID, "runtime isolate")
+	RecordProbeResult(channelID, false, "401 unauthorized invalid api key")
+
+	snapshot, ok := GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, now.Add(300*time.Second).Unix(), snapshot.NextProbeAt)
 }
 
 func TestChannelHealthRequiresTwoProbeSuccessesToRecover(t *testing.T) {
@@ -230,7 +327,8 @@ func TestChannelHealthWarmupCompletesAfterDuration(t *testing.T) {
 }
 
 func TestChannelHealthWarmupRampsSnapshotPercent(t *testing.T) {
-	withChannelHealthTestSettings(t)
+	setting := withChannelHealthTestSettings(t)
+	setting.FirstResponseTimeoutSeconds = 10
 	now := time.Unix(1_700_000_000, 0)
 	SetChannelHealthNowFuncForTest(func() time.Time { return now })
 
@@ -256,15 +354,51 @@ func TestChannelHealthWarmupRampsSnapshotPercent(t *testing.T) {
 	require.Equal(t, ChannelHealthStateWarming, snapshot.State)
 	require.Equal(t, 70, snapshot.WarmupPercent)
 
-	now = now.Add(20 * time.Second)
+	handle := RecordAttemptStart(ChannelAttemptMeta{ChannelID: channelID})
+	now = now.Add(11 * time.Second)
+	RecordFirstResponse(handle)
+	RecordAttemptFinish(handle, ChannelAttemptResult{StatusCode: http.StatusOK})
+	snapshot, ok = GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, 10, snapshot.WarmupPercent)
+
+	now = now.Add(10 * time.Second)
 	snapshot, ok = GetChannelHealthSnapshot(channelID)
 	require.True(t, ok)
 	require.Equal(t, ChannelHealthStateHealthy, snapshot.State)
 	require.Equal(t, 100, snapshot.WarmupPercent)
 }
 
-func TestChannelHealthWarmupFailureReopensChannel(t *testing.T) {
-	withChannelHealthTestSettings(t)
+func TestChannelHealthAdjustedWeightReducesWarmingAndSlowChannels(t *testing.T) {
+	setting := withChannelHealthTestSettings(t)
+	setting.FirstResponseTimeoutSeconds = 10
+	now := time.Unix(1_700_000_000, 0)
+	SetChannelHealthNowFuncForTest(func() time.Time { return now })
+
+	const channelID = 8820
+	OpenChannel(channelID, "test open")
+	RecordProbeResult(channelID, true, "")
+	RecordProbeResult(channelID, true, "")
+
+	require.Equal(t, 10, adjustChannelHealthWeight(channelID, "", 100, 0))
+
+	now = now.Add(40 * time.Second)
+	require.Equal(t, 70, adjustChannelHealthWeight(channelID, "", 100, 0))
+
+	handle := RecordAttemptStart(ChannelAttemptMeta{ChannelID: channelID})
+	now = now.Add(11 * time.Second)
+	RecordFirstResponse(handle)
+	RecordAttemptFinish(handle, ChannelAttemptResult{StatusCode: http.StatusOK})
+
+	require.Equal(t, 5, adjustChannelHealthWeight(channelID, "", 100, 0))
+}
+
+func TestChannelHealthWarmupRepeatedFailuresReopenChannel(t *testing.T) {
+	setting := withChannelHealthTestSettings(t)
+	setting.MinSamples = 2
+	setting.MinFailures = 2
+	setting.ErrorRateThreshold = 0.5
+	setting.ConsecutiveFailureThreshold = 10
 
 	const channelID = 8811
 	OpenChannel(channelID, "test open")
@@ -273,12 +407,18 @@ func TestChannelHealthWarmupFailureReopensChannel(t *testing.T) {
 
 	handle := RecordAttemptStart(ChannelAttemptMeta{ChannelID: channelID})
 	RecordAttemptFinish(handle, ChannelAttemptResult{Error: channelHealthTestUpstreamError()})
-
-	require.False(t, IsChannelAvailable(channelID))
 	snapshot, ok := GetChannelHealthSnapshot(channelID)
 	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateWarming, snapshot.State)
+
+	handle = RecordAttemptStart(ChannelAttemptMeta{ChannelID: channelID})
+	RecordAttemptFinish(handle, ChannelAttemptResult{Error: channelHealthTestUpstreamError()})
+
+	require.False(t, IsChannelAvailable(channelID))
+	snapshot, ok = GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
 	require.Equal(t, ChannelHealthStateOpen, snapshot.State)
-	require.Contains(t, snapshot.Reason, "warmup")
+	require.Contains(t, snapshot.Reason, "warmup unhealthy")
 }
 
 func TestChannelHealthHalfOpenAttemptSuccessCountsTowardRecovery(t *testing.T) {
@@ -351,6 +491,86 @@ func TestChannelHealthAvailabilityHonorsIsolationCacheOverLocalHealthyState(t *t
 	require.False(t, IsChannelAvailable(channelID))
 }
 
+func TestChannelHealthStaleIsolationSnapshotCanBeClaimedForRecoveryProbe(t *testing.T) {
+	setting := withChannelHealthTestSettings(t)
+	setting.MaxIsolationSeconds = 60
+	now := time.Unix(1_700_000_000, 0)
+	SetChannelHealthNowFuncForTest(func() time.Time { return now })
+
+	const channelID = 8821
+	require.NoError(t, getChannelHealthIsolationCache().SetWithTTL(channelHealthCacheKey(channelHealthScope{channelID: channelID}), ChannelHealthSnapshot{
+		ChannelID:   channelID,
+		State:       ChannelHealthStateOpen,
+		Reason:      "remote stale isolate",
+		OpenedAt:    now.Add(-2 * time.Minute).Unix(),
+		NextProbeAt: now.Add(time.Hour).Unix(),
+	}, time.Minute))
+
+	require.True(t, IsChannelProbeAvailable(channelID))
+	require.True(t, MarkChannelProbing(channelID))
+	snapshot, ok := GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateProbing, snapshot.State)
+	require.True(t, snapshot.ProbeInProgress)
+}
+
+func TestChannelHealthProbeRecoveryRequiresHealthyLatencyWindow(t *testing.T) {
+	setting := withChannelHealthTestSettings(t)
+	setting.FirstResponseTimeoutSeconds = 10
+	setting.MinSamples = 2
+	setting.MinFailures = 1
+	now := time.Unix(1_700_000_000, 0)
+	SetChannelHealthNowFuncForTest(func() time.Time { return now })
+
+	const channelID = 8822
+	OpenChannel(channelID, "test open")
+
+	for i := 0; i < 2; i++ {
+		now = now.Add(31 * time.Second)
+		require.True(t, MarkChannelProbing(channelID))
+		handle := RecordAttemptStart(ChannelAttemptMeta{ChannelID: channelID})
+		now = now.Add(11 * time.Second)
+		RecordFirstResponse(handle)
+		RecordAttemptFinish(handle, ChannelAttemptResult{StatusCode: http.StatusOK})
+	}
+
+	snapshot, ok := GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateProbing, snapshot.State)
+	require.Contains(t, snapshot.Reason, "first_response")
+
+	now = now.Add(181 * time.Second)
+	RecordProbeResult(channelID, true, "")
+	RecordProbeResult(channelID, true, "")
+
+	snapshot, ok = GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateWarming, snapshot.State)
+}
+
+func TestChannelHealthWarmupThrottlesSingleFailureInsteadOfReopeningImmediately(t *testing.T) {
+	setting := withChannelHealthTestSettings(t)
+	setting.MinSamples = 4
+	setting.MinFailures = 2
+	now := time.Unix(1_700_000_000, 0)
+	SetChannelHealthNowFuncForTest(func() time.Time { return now })
+
+	const channelID = 8823
+	OpenChannel(channelID, "test open")
+	RecordProbeResult(channelID, true, "")
+	RecordProbeResult(channelID, true, "")
+
+	now = now.Add(20 * time.Second)
+	handle := RecordAttemptStart(ChannelAttemptMeta{ChannelID: channelID})
+	RecordAttemptFinish(handle, ChannelAttemptResult{Error: channelHealthTestUpstreamError()})
+
+	snapshot, ok := GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateWarming, snapshot.State)
+	require.Equal(t, setting.WarmupStartPercent, snapshot.WarmupPercent)
+	require.Equal(t, setting.WarmupStartPercent, snapshot.WarmupThrottlePercent)
+}
+
 func TestRunDueChannelHealthProbesSkipsManualDisabledChannel(t *testing.T) {
 	withChannelHealthTestSettings(t)
 	withChannelHealthSelectionDB(t)
@@ -360,7 +580,7 @@ func TestRunDueChannelHealthProbesSkipsManualDisabledChannel(t *testing.T) {
 	OpenChannel(9101, "runtime isolate")
 	now = now.Add(31 * time.Second)
 	called := false
-	SetChannelHealthProbeFunc(func(ctx context.Context, channel *model.Channel) error {
+	SetChannelHealthProbeFunc(func(ctx context.Context, channel *model.Channel, modelName string) error {
 		called = true
 		return nil
 	})
@@ -383,7 +603,7 @@ func TestRunDueChannelHealthProbesSkipsAutoDisabledChannel(t *testing.T) {
 	OpenChannel(9101, "runtime isolate")
 	now = now.Add(31 * time.Second)
 	called := false
-	SetChannelHealthProbeFunc(func(ctx context.Context, channel *model.Channel) error {
+	SetChannelHealthProbeFunc(func(ctx context.Context, channel *model.Channel, modelName string) error {
 		called = true
 		return nil
 	})
@@ -588,13 +808,107 @@ func TestChannelHealthEventsEmitOncePerTransitionAndSummarize(t *testing.T) {
 	RecordProbeResult(8813, true, "")
 	events = GetChannelHealthEvents(ChannelHealthEventFilter{})
 	require.Len(t, events, 2)
-	require.Equal(t, ChannelHealthEventTypeRecovered, events[1].Type)
+	require.Equal(t, ChannelHealthEventTypeWarming, events[1].Type)
+
+	now = now.Add(61 * time.Second)
+	require.True(t, IsChannelAvailable(8813))
+	events = GetChannelHealthEvents(ChannelHealthEventFilter{})
+	require.Len(t, events, 3)
+	require.Equal(t, ChannelHealthEventTypeRecovered, events[2].Type)
 
 	report := GetChannelHealthReport(ChannelHealthEventFilter{})
 	require.Equal(t, 1, report.IsolationCount)
 	require.Equal(t, 1, report.RecoveryCount)
 	require.Len(t, report.TopFailingChannels, 1)
 	require.Equal(t, 8813, report.TopFailingChannels[0].ChannelID)
+}
+
+func TestChannelHealthEventsIncludeSnapshotAndStateTimeline(t *testing.T) {
+	setting := withChannelHealthTestSettings(t)
+	setting.MinSamples = 2
+	setting.MinFailures = 2
+	setting.ErrorRateThreshold = 0.5
+	setting.FirstResponseTimeoutSeconds = 10
+	setting.ModelLevelEnabled = true
+	now := time.Unix(1_700_000_000, 0)
+	SetChannelHealthNowFuncForTest(func() time.Time { return now })
+
+	const channelID = 8824
+	for _, latency := range []time.Duration{100 * time.Millisecond, 300 * time.Millisecond} {
+		handle := RecordAttemptStart(ChannelAttemptMeta{ChannelID: channelID, ModelName: "gpt-p2", Group: "vip"})
+		now = now.Add(latency)
+		RecordFirstResponse(handle)
+		RecordAttemptFinish(handle, ChannelAttemptResult{Error: channelHealthTestUpstreamError()})
+		now = now.Add(time.Second)
+	}
+
+	now = now.Add(31 * time.Second)
+	require.True(t, MarkChannelProbingForModel(channelID, "gpt-p2"))
+	now = now.Add(181 * time.Second)
+	RecordProbeResultForModel(channelID, "gpt-p2", true, "")
+	RecordProbeResultForModel(channelID, "gpt-p2", true, "")
+	now = now.Add(61 * time.Second)
+	require.True(t, IsChannelAvailableForModel(channelID, "gpt-p2"))
+
+	events := GetChannelHealthEvents(ChannelHealthEventFilter{ChannelID: channelID, ModelName: "gpt-p2", Limit: 10})
+	require.Len(t, events, 4)
+	require.Equal(t, ChannelHealthEventTypeOpened, events[0].Type)
+	require.Equal(t, 2, events[0].Snapshot.WindowSamples)
+	require.Equal(t, 2, events[0].Snapshot.WindowFailures)
+	require.Equal(t, 200.0, events[0].Snapshot.AverageFirstResponseMs)
+	require.Equal(t, 300.0, events[0].Snapshot.P95FirstResponseMs)
+	require.Equal(t, 30, events[0].Snapshot.ProbeBackoffSeconds)
+	require.Equal(t, ChannelHealthEventTypeProbing, events[1].Type)
+	require.Equal(t, ChannelHealthEventTypeWarming, events[2].Type)
+	require.Equal(t, ChannelHealthEventTypeRecovered, events[3].Type)
+	require.Equal(t, string(ChannelHealthStateHealthy), events[3].State)
+}
+
+func TestChannelHealthTimelineEventsDoNotNotify(t *testing.T) {
+	withChannelHealthTestSettings(t)
+	now := time.Unix(1_700_000_000, 0)
+	SetChannelHealthNowFuncForTest(func() time.Time { return now })
+	notifications := make(chan ChannelHealthEvent, 4)
+	SetChannelHealthEventNotifyFuncForTest(func(event ChannelHealthEvent) {
+		notifications <- event
+	})
+
+	const channelID = 8825
+	OpenChannel(channelID, "runtime isolate")
+	require.Equal(t, ChannelHealthEventTypeOpened, waitChannelHealthNotificationForTest(t, notifications).Type)
+
+	now = now.Add(31 * time.Second)
+	require.True(t, MarkChannelProbing(channelID))
+	requireNoChannelHealthNotificationForTest(t, notifications)
+
+	now = now.Add(181 * time.Second)
+	RecordProbeResult(channelID, true, "")
+	RecordProbeResult(channelID, true, "")
+	requireNoChannelHealthNotificationForTest(t, notifications)
+
+	now = now.Add(61 * time.Second)
+	require.True(t, IsChannelAvailable(channelID))
+	require.Equal(t, ChannelHealthEventTypeRecovered, waitChannelHealthNotificationForTest(t, notifications).Type)
+}
+
+func waitChannelHealthNotificationForTest(t *testing.T, notifications <-chan ChannelHealthEvent) ChannelHealthEvent {
+	t.Helper()
+	select {
+	case event := <-notifications:
+		return event
+	case <-time.After(time.Second):
+		t.Fatal("expected channel health notification")
+	}
+	return ChannelHealthEvent{}
+}
+
+func requireNoChannelHealthNotificationForTest(t *testing.T, notifications <-chan ChannelHealthEvent) {
+	t.Helper()
+	select {
+	case event := <-notifications:
+		t.Fatalf("unexpected channel health notification: %s", event.Type)
+	default:
+	}
 }
 
 func TestChannelHealthReportIncludesAverageFirstResponseLatency(t *testing.T) {

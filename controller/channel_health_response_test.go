@@ -54,4 +54,29 @@ func TestWithChannelsRuntimeHealthAddsHealthyAndOpenSnapshots(t *testing.T) {
 	require.Equal(t, 9202, items[1].RuntimeHealth.ChannelID)
 	require.Equal(t, service.ChannelHealthStateOpen, items[1].RuntimeHealth.State)
 	require.Equal(t, "runtime isolate", items[1].RuntimeHealth.Reason)
+	require.False(t, items[1].RuntimeHealth.RuntimeAvailable)
+	require.Contains(t, items[1].RuntimeHealth.AvailabilityReason, "runtime isolate")
+}
+
+func TestWithChannelRuntimeHealthExplainsManualDisabledChannel(t *testing.T) {
+	setting := operation_setting.GetChannelHealthSetting()
+	original := *setting
+	*setting = operation_setting.ChannelHealthSetting{
+		Enabled: true,
+	}
+	t.Cleanup(func() {
+		*setting = original
+		service.ResetChannelHealthForTest()
+	})
+	service.ResetChannelHealthForTest()
+
+	item := withChannelRuntimeHealth(&model.Channel{
+		Id:     9203,
+		Type:   constant.ChannelTypeOpenAI,
+		Status: common.ChannelStatusManuallyDisabled,
+		Name:   "manual-disabled",
+	})
+
+	require.False(t, item.RuntimeHealth.RuntimeAvailable)
+	require.Contains(t, item.RuntimeHealth.AvailabilityReason, "manually disabled")
 }

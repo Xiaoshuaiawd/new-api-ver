@@ -130,9 +130,14 @@ function getRuntimeHealth(channel: Channel): ChannelRuntimeHealth {
       window_samples: 0,
       window_failures: 0,
       error_rate: 0,
+      average_first_response_ms: 0,
+      p95_first_response_ms: 0,
+      runtime_available: true,
+      probe_available: true,
       warmup_started_at: 0,
       warmup_ends_at: 0,
       warmup_percent: 100,
+      warmup_throttle_percent: 0,
     }
   )
 }
@@ -288,6 +293,10 @@ function RuntimeHealthCell({ channel }: { channel: Channel }) {
     health.window_samples > 0 ||
     health.next_probe_at > 0 ||
     health.opened_at > 0 ||
+    health.availability_reason ||
+    health.probe_unavailable_reason ||
+    health.average_first_response_ms > 0 ||
+    health.p95_first_response_ms > 0 ||
     health.state === 'warming'
 
   const badge = (
@@ -314,12 +323,34 @@ function RuntimeHealthCell({ channel }: { channel: Channel }) {
                 {t('Reason:')} {health.reason}
               </div>
             )}
+            {health.availability_reason && (
+              <div>
+                {t('Availability:')} {health.availability_reason}
+              </div>
+            )}
+            {health.probe_unavailable_reason && (
+              <div>
+                {t('Probe unavailable:')} {health.probe_unavailable_reason}
+              </div>
+            )}
             <div>
               {t('Error rate:')} {formatHealthPercent(health.error_rate)}
             </div>
             <div>
               {t('Window:')} {health.window_failures}/{health.window_samples}
             </div>
+            {health.average_first_response_ms > 0 && (
+              <div>
+                {t('Average first response:')}{' '}
+                {formatResponseTime(health.average_first_response_ms)}
+              </div>
+            )}
+            {health.p95_first_response_ms > 0 && (
+              <div>
+                {t('P95 first response:')}{' '}
+                {formatResponseTime(health.p95_first_response_ms)}
+              </div>
+            )}
             <div>
               {t('Inflight:')} {health.inflight}
             </div>
@@ -336,6 +367,9 @@ function RuntimeHealthCell({ channel }: { channel: Channel }) {
             {health.state === 'warming' && (
               <div>
                 {t('Warm-up:')} {health.warmup_percent}%
+                {health.warmup_throttle_percent > 0
+                  ? ` / ${t('throttle')} ${health.warmup_throttle_percent}%`
+                  : ''}
               </div>
             )}
           </div>

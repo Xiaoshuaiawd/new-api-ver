@@ -42,7 +42,7 @@ type testResult struct {
 }
 
 func init() {
-	service.SetChannelHealthProbeFunc(func(ctx context.Context, channel *model.Channel) error {
+	service.SetChannelHealthProbeFunc(func(ctx context.Context, channel *model.Channel, modelName string) error {
 		if channel == nil {
 			return errors.New("channel is nil")
 		}
@@ -50,7 +50,7 @@ func init() {
 		if err != nil {
 			return err
 		}
-		result := testChannel(ctx, channel, testUserID, "", "", shouldUseStreamForAutomaticChannelTest(channel))
+		result := testChannel(ctx, channel, testUserID, modelName, "", shouldUseStreamForAutomaticChannelTest(channel))
 		if result.localErr != nil {
 			return result.localErr
 		}

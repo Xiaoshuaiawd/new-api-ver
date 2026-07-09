@@ -64,6 +64,80 @@ func TestChannelSelectionTraceRecordsRuntimeOpenSkip(t *testing.T) {
 	require.Equal(t, "runtime open", trace[0]["reason"])
 }
 
+func TestChannelSelectionTraceAggregatesSelectionSummary(t *testing.T) {
+	ResetChannelSelectionTraceSummaryForTest()
+	t.Cleanup(ResetChannelSelectionTraceSummaryForTest)
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(nil)
+
+	RecordChannelSelectionTrace(ctx, ChannelSelectionTraceEvent{
+		Stage:       ChannelSelectionTraceStageRuntime,
+		Action:      ChannelSelectionTraceActionSkip,
+		Group:       "default",
+		Model:       "gpt-trace",
+		ChannelID:   9101,
+		Priority:    10,
+		HealthState: string(ChannelHealthStateOpen),
+		Reason:      "runtime unavailable",
+	})
+	RecordChannelSelectionTrace(ctx, ChannelSelectionTraceEvent{
+		Stage:  ChannelSelectionTraceStagePriority,
+		Action: ChannelSelectionTraceActionFallback,
+		Group:  "default",
+		Model:  "gpt-trace",
+		Reason: "priority has no runtime available channels",
+	})
+	RecordChannelSelectionTrace(ctx, ChannelSelectionTraceEvent{
+		Stage:     ChannelSelectionTraceStageFinal,
+		Action:    ChannelSelectionTraceActionSelect,
+		Group:     "default",
+		Model:     "gpt-trace",
+		ChannelID: 9102,
+		Priority:  1,
+	})
+
+	summary := GetChannelSelectionTraceSummary(ChannelHealthEventFilter{ModelName: "gpt-trace"})
+	require.Len(t, summary, 3)
+	runtimeSummary := findChannelSelectionSummaryForTest(summary, 9101, 10)
+	require.Equal(t, 1, runtimeSummary.RuntimeUnavailable)
+	require.Equal(t, 1, runtimeSummary.HealthDegraded)
+	require.Equal(t, 1, runtimeSummary.Skipped)
+	require.Equal(t, 1, findChannelSelectionSummaryForTest(summary, 0, 0).PriorityFallbacks)
+	require.Equal(t, 1, findChannelSelectionSummaryForTest(summary, 9102, 1).Selected)
+
+	report := GetChannelHealthReport(ChannelHealthEventFilter{ModelName: "gpt-trace"})
+	require.Len(t, report.SelectionSummary, 3)
+}
+
+func TestChannelSelectionTraceSummaryIsBounded(t *testing.T) {
+	ResetChannelSelectionTraceSummaryForTest()
+	t.Cleanup(ResetChannelSelectionTraceSummaryForTest)
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(nil)
+
+	for i := 0; i < channelSelectionTraceSummaryMaxItems+25; i++ {
+		RecordChannelSelectionTrace(ctx, ChannelSelectionTraceEvent{
+			Stage:     ChannelSelectionTraceStageFinal,
+			Action:    ChannelSelectionTraceActionSelect,
+			Group:     "default",
+			Model:     "gpt-trace",
+			ChannelID: 10000 + i,
+		})
+	}
+
+	summary := GetChannelSelectionTraceSummary(ChannelHealthEventFilter{ModelName: "gpt-trace"})
+	require.LessOrEqual(t, len(summary), channelSelectionTraceSummaryMaxItems)
+}
+
+func findChannelSelectionSummaryForTest(summary []ChannelSelectionTraceSummary, channelID int, priority int64) ChannelSelectionTraceSummary {
+	for _, item := range summary {
+		if item.ChannelID == channelID && item.Priority == priority {
+			return item
+		}
+	}
+	return ChannelSelectionTraceSummary{}
+}
+
 func TestChannelSelectionTraceDoesNotLeakBetweenConcurrentSelections(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	withChannelHealthTestSettings(t)
@@ -182,6 +256,46 @@ func TestCacheGetRandomSatisfiedChannelExcludesFailedChannelsDuringRetry(t *test
 	require.NoError(t, err)
 	require.NotNil(t, channel)
 	assert.Equal(t, 9103, channel.Id)
+}
+
+func TestCacheGetRandomSatisfiedChannelExcludesFailedChannelWithoutSkippingNextPriority(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	withChannelHealthSelectionDB(t)
+
+	pFallback := int64(0)
+	weight := uint(100)
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:       9103,
+		Type:     constant.ChannelTypeOpenAI,
+		Key:      "sk-fallback",
+		Status:   common.ChannelStatusEnabled,
+		Name:     "fallback-priority",
+		Priority: &pFallback,
+		Weight:   &weight,
+		Models:   "gpt-health-test",
+		Group:    "default",
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.Ability{
+		Group:     "default",
+		Model:     "gpt-health-test",
+		ChannelId: 9103,
+		Enabled:   true,
+		Priority:  &pFallback,
+		Weight:    weight,
+	}).Error)
+	model.InitChannelCache()
+
+	channel, group, err := CacheGetRandomSatisfiedChannel(&RetryParam{
+		TokenGroup:         "default",
+		ModelName:          "gpt-health-test",
+		Retry:              common.GetPointer(1),
+		ExcludedChannelIDs: map[int]struct{}{9101: {}},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "default", group)
+	require.NotNil(t, channel)
+	assert.Equal(t, 9102, channel.Id)
 }
 
 func TestCacheGetRandomSatisfiedChannelSkipsChannelsWithoutImageInputSupport(t *testing.T) {

@@ -27,6 +27,7 @@ type ChannelHealthSetting struct {
 	ProbeTimeoutSeconds         int     `json:"probe_timeout_seconds"`
 	ProbeSuccessesToRecover     int     `json:"probe_successes_to_recover"`
 	ProbeBackoffMaxSeconds      int     `json:"probe_backoff_max_seconds"`
+	MaxIsolationSeconds         int     `json:"max_isolation_seconds"`
 	WarmupEnabled               bool    `json:"warmup_enabled"`
 	WarmupDurationSeconds       int     `json:"warmup_duration_seconds"`
 	WarmupStartPercent          int     `json:"warmup_start_percent"`
@@ -51,6 +52,7 @@ var channelHealthSetting = ChannelHealthSetting{
 	ProbeTimeoutSeconds:         30,
 	ProbeSuccessesToRecover:     2,
 	ProbeBackoffMaxSeconds:      300,
+	MaxIsolationSeconds:         1800,
 	WarmupEnabled:               true,
 	WarmupDurationSeconds:       60,
 	WarmupStartPercent:          10,

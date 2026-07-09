@@ -99,6 +99,7 @@ export function ChannelHealthReportPanel() {
   const report = data?.data
   const events = report?.events ?? []
   const topFailing = report?.top_failing_channels ?? []
+  const selectionSummary = report?.selection_summary ?? []
 
   return (
     <Card size='sm' className='rounded-lg'>
@@ -243,6 +244,61 @@ export function ChannelHealthReportPanel() {
                 )}
               </div>
             </div>
+            <div className='rounded-md border p-3 sm:col-span-4'>
+              <div className='text-muted-foreground text-xs'>
+                {t('Selection summary')}
+              </div>
+              <div className='mt-2 grid gap-2'>
+                {selectionSummary.length > 0 ? (
+                  selectionSummary.slice(0, 6).map((item, index) => (
+                    <div
+                      key={`${item.channel_id ?? 0}:${item.priority ?? 0}:${item.model ?? ''}:${index}`}
+                      className='grid gap-1 rounded-md bg-muted/40 px-2 py-1.5 text-xs'
+                    >
+                      <div className='flex items-center justify-between gap-2'>
+                        <span className='truncate font-medium'>
+                          {item.channel_id ? `#${item.channel_id}` : t('Route')}
+                          {item.priority !== undefined
+                            ? ` / P${item.priority}`
+                            : ''}
+                          {item.model ? ` / ${item.model}` : ''}
+                        </span>
+                        <span className='text-muted-foreground shrink-0'>
+                          {item.last_seen_at
+                            ? formatDateTimeObject(
+                                new Date(item.last_seen_at * 1000)
+                              )
+                            : ''}
+                        </span>
+                      </div>
+                      <div className='text-muted-foreground flex flex-wrap gap-x-3 gap-y-1'>
+                        <span>
+                          {t('Selected')}: {item.selected}
+                        </span>
+                        <span>
+                          {t('Skipped')}: {item.skipped}
+                        </span>
+                        <span>
+                          {t('Runtime unavailable')}: {item.runtime_unavailable}
+                        </span>
+                        <span>
+                          {t('Priority fallback')}: {item.priority_fallbacks}
+                        </span>
+                      </div>
+                      {item.last_reason ? (
+                        <div className='text-muted-foreground truncate'>
+                          {item.last_reason}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))
+                ) : (
+                  <span className='text-muted-foreground text-sm'>
+                    {t('No selection trace yet')}
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
 
           <div className='min-h-0 rounded-md border'>
@@ -278,6 +334,32 @@ export function ChannelHealthReportPanel() {
                     {event.reason ? (
                       <div className='text-muted-foreground truncate text-xs'>
                         {event.reason}
+                      </div>
+                    ) : null}
+                    {event.snapshot ? (
+                      <div className='text-muted-foreground flex flex-wrap gap-x-3 gap-y-1 text-xs'>
+                        <span>
+                          {t('Window')}: {event.snapshot.window_failures}/
+                          {event.snapshot.window_samples}
+                        </span>
+                        <span>
+                          {t('Inflight')}: {event.snapshot.active_inflight}
+                        </span>
+                        <span>
+                          {t('Stuck')}: {event.snapshot.stuck_inflight}
+                        </span>
+                        <span>
+                          {t('P95 first response')}:{' '}
+                          {formatLatency(event.snapshot.p95_first_response_ms)}
+                        </span>
+                        <span>
+                          {t('Probe backoff')}: {event.snapshot.probe_backoff_seconds}s
+                        </span>
+                        {event.snapshot.warmup_percent > 0 ? (
+                          <span>
+                            {t('Warm-up')}: {event.snapshot.warmup_percent}%
+                          </span>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>

@@ -36,6 +36,8 @@ const (
 
 const (
 	ChannelHealthEventTypeOpened      = "opened"
+	ChannelHealthEventTypeProbing     = "probing"
+	ChannelHealthEventTypeWarming     = "warming"
 	ChannelHealthEventTypeRecovered   = "recovered"
 	ChannelHealthEventTypeProbeFailed = "probe_failed"
 )
@@ -56,7 +58,7 @@ type ChannelAttemptResult struct {
 	StatusCode int
 }
 
-type ChannelHealthProbeFunc func(ctx context.Context, channel *model.Channel) error
+type ChannelHealthProbeFunc func(ctx context.Context, channel *model.Channel, modelName string) error
 
 type ChannelRuntimeControlResult struct {
 	ChannelID       int                   `json:"channel_id"`
@@ -65,15 +67,16 @@ type ChannelRuntimeControlResult struct {
 }
 
 type ChannelHealthEvent struct {
-	Type         string `json:"type"`
-	ChannelID    int    `json:"channel_id"`
-	ModelName    string `json:"model_name,omitempty"`
-	Group        string `json:"group,omitempty"`
-	State        string `json:"state"`
-	Reason       string `json:"reason,omitempty"`
-	OccurredAt   int64  `json:"occurred_at"`
-	AlertSent    bool   `json:"alert_sent"`
-	AlertSubject string `json:"alert_subject,omitempty"`
+	Type         string                     `json:"type"`
+	ChannelID    int                        `json:"channel_id"`
+	ModelName    string                     `json:"model_name,omitempty"`
+	Group        string                     `json:"group,omitempty"`
+	State        string                     `json:"state"`
+	Reason       string                     `json:"reason,omitempty"`
+	OccurredAt   int64                      `json:"occurred_at"`
+	Snapshot     ChannelHealthEventSnapshot `json:"snapshot,omitempty"`
+	AlertSent    bool                       `json:"alert_sent"`
+	AlertSubject string                     `json:"alert_subject,omitempty"`
 }
 
 type ChannelHealthEventFilter struct {
@@ -86,12 +89,28 @@ type ChannelHealthEventFilter struct {
 }
 
 type ChannelHealthReport struct {
-	IsolationCount         int                         `json:"isolation_count"`
-	RecoveryCount          int                         `json:"recovery_count"`
-	ProbeFailureCount      int                         `json:"probe_failure_count"`
-	AverageFirstResponseMs float64                     `json:"average_first_response_ms"`
-	TopFailingChannels     []ChannelHealthChannelCount `json:"top_failing_channels"`
-	Events                 []ChannelHealthEvent        `json:"events"`
+	IsolationCount         int                            `json:"isolation_count"`
+	RecoveryCount          int                            `json:"recovery_count"`
+	ProbeFailureCount      int                            `json:"probe_failure_count"`
+	AverageFirstResponseMs float64                        `json:"average_first_response_ms"`
+	TopFailingChannels     []ChannelHealthChannelCount    `json:"top_failing_channels"`
+	Events                 []ChannelHealthEvent           `json:"events"`
+	SelectionSummary       []ChannelSelectionTraceSummary `json:"selection_summary"`
+}
+
+type ChannelHealthEventSnapshot struct {
+	ActiveInflight         int     `json:"active_inflight"`
+	StuckInflight          int     `json:"stuck_inflight"`
+	WindowSamples          int     `json:"window_samples"`
+	WindowFailures         int     `json:"window_failures"`
+	ErrorRate              float64 `json:"error_rate"`
+	AverageFirstResponseMs float64 `json:"average_first_response_ms"`
+	P95FirstResponseMs     float64 `json:"p95_first_response_ms"`
+	ProbeBackoffSeconds    int     `json:"probe_backoff_seconds"`
+	NextProbeAt            int64   `json:"next_probe_at"`
+	ProbeInProgress        bool    `json:"probe_in_progress"`
+	WarmupPercent          int     `json:"warmup_percent"`
+	WarmupThrottlePercent  int     `json:"warmup_throttle_percent,omitempty"`
 }
 
 type ChannelHealthChannelCount struct {
@@ -123,46 +142,55 @@ type ChannelHealthSnapshot struct {
 	WindowFailures         int                `json:"window_failures"`
 	ErrorRate              float64            `json:"error_rate"`
 	AverageFirstResponseMs float64            `json:"average_first_response_ms"`
+	P95FirstResponseMs     float64            `json:"p95_first_response_ms"`
+	RuntimeAvailable       bool               `json:"runtime_available"`
+	AvailabilityReason     string             `json:"availability_reason,omitempty"`
+	ProbeAvailable         bool               `json:"probe_available"`
+	ProbeUnavailableReason string             `json:"probe_unavailable_reason,omitempty"`
 	WarmupStartedAt        int64              `json:"warmup_started_at"`
 	WarmupEndsAt           int64              `json:"warmup_ends_at"`
 	WarmupPercent          int                `json:"warmup_percent"`
+	WarmupThrottlePercent  int                `json:"warmup_throttle_percent,omitempty"`
 }
 
 type channelAttemptState struct {
 	meta              ChannelAttemptMeta
 	startedAt         time.Time
 	firstResponseSeen bool
+	firstResponse     time.Duration
 	stuck             bool
 	cancelled         bool
 }
 
 type channelHealthSample struct {
-	at      time.Time
-	failed  bool
-	reason  string
-	status  int
-	errCode string
+	at            time.Time
+	failed        bool
+	reason        string
+	status        int
+	errCode       string
+	firstResponse time.Duration
 }
 
 type channelHealthStateData struct {
-	channelID          int
-	modelName          string
-	group              string
-	state              ChannelHealthState
-	reason             string
-	openedAt           time.Time
-	nextProbeAt        time.Time
-	probeInProgress    bool
-	consecutiveFailure int
-	probeSuccesses     int
-	probeFailures      int
-	probeBackoff       time.Duration
-	warmupStartedAt    time.Time
-	warmupEndsAt       time.Time
-	firstResponseTotal time.Duration
-	firstResponseCount int
-	inflight           map[int64]*channelAttemptState
-	samples            []channelHealthSample
+	channelID             int
+	modelName             string
+	group                 string
+	state                 ChannelHealthState
+	reason                string
+	openedAt              time.Time
+	nextProbeAt           time.Time
+	probeInProgress       bool
+	consecutiveFailure    int
+	probeSuccesses        int
+	probeFailures         int
+	probeBackoff          time.Duration
+	warmupStartedAt       time.Time
+	warmupEndsAt          time.Time
+	warmupThrottlePercent int
+	firstResponseTotal    time.Duration
+	firstResponseCount    int
+	inflight              map[int64]*channelAttemptState
+	samples               []channelHealthSample
 }
 
 var channelHealth = struct {
@@ -196,6 +224,9 @@ func init() {
 	})
 	model.SetChannelRuntimeHealthStateFunc(func(channelID int) string {
 		return string(GetChannelHealthSnapshotForDisplay(channelID).State)
+	})
+	model.SetChannelRuntimeWeightFunc(func(channelID int, modelName string, weight int, inflight int) int {
+		return adjustChannelHealthWeight(channelID, modelName, weight, inflight)
 	})
 	relaycommon.MarkChannelHealthFirstResponseFunc = MarkChannelHealthFirstResponse
 }
@@ -270,6 +301,9 @@ func defaultChannelHealthSetting() operation_setting.ChannelHealthSetting {
 	if normalized.ProbeBackoffMaxSeconds <= 0 {
 		normalized.ProbeBackoffMaxSeconds = 300
 	}
+	if normalized.MaxIsolationSeconds <= 0 {
+		normalized.MaxIsolationSeconds = 1800
+	}
 	if normalized.WarmupDurationSeconds <= 0 {
 		normalized.WarmupDurationSeconds = 60
 	}
@@ -320,6 +354,68 @@ func channelHealthScopeKey(scope channelHealthScope) string {
 	return fmt.Sprintf("%d:model:%s", scope.channelID, scope.modelName)
 }
 
+func channelRuntimeControlScopes(channel *model.Channel, setting operation_setting.ChannelHealthSetting) []channelHealthScope {
+	if channel == nil || channel.Id <= 0 {
+		return nil
+	}
+	scopes := make([]channelHealthScope, 0, 1)
+	seen := make(map[string]struct{})
+	appendScope := func(scope channelHealthScope) {
+		if scope.channelID <= 0 {
+			return
+		}
+		key := channelHealthScopeKey(scope)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		scopes = append(scopes, scope)
+	}
+	appendScope(channelHealthScope{channelID: channel.Id})
+	if !setting.ModelLevelEnabled {
+		return scopes
+	}
+	for _, modelName := range channelRuntimeControlModelNames(channel) {
+		appendScope(channelHealthScopeFor(channel.Id, modelName, setting))
+	}
+	return scopes
+}
+
+func channelRuntimeControlModelNames(channel *model.Channel) []string {
+	if channel == nil || channel.Id <= 0 {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	addModelName := func(modelName string) {
+		modelName = strings.TrimSpace(modelName)
+		if modelName == "" {
+			return
+		}
+		seen[modelName] = struct{}{}
+	}
+	if model.DB != nil {
+		var abilityModels []string
+		if err := model.DB.Model(&model.Ability{}).
+			Where("channel_id = ? and enabled = ?", channel.Id, true).
+			Distinct("model").
+			Pluck("model", &abilityModels).Error; err != nil {
+			common.SysError(fmt.Sprintf("load channel runtime control models failed: channel_id=%d, err=%v", channel.Id, err))
+		}
+		for _, modelName := range abilityModels {
+			addModelName(modelName)
+		}
+	}
+	for _, modelName := range channel.GetModels() {
+		addModelName(modelName)
+	}
+	modelNames := make([]string, 0, len(seen))
+	for modelName := range seen {
+		modelNames = append(modelNames, modelName)
+	}
+	sort.Strings(modelNames)
+	return modelNames
+}
+
 func getOrCreateChannelHealthLocked(scope channelHealthScope) *channelHealthStateData {
 	if channelHealth.channels == nil {
 		channelHealth.channels = make(map[string]*channelHealthStateData)
@@ -353,6 +449,7 @@ func ResetChannelHealthForTest() {
 	channelHealth.events = nil
 	channelHealth.lastAlertAt = make(map[string]time.Time)
 	channelHealth.notifyFunc = nil
+	ResetChannelSelectionTraceSummaryForTest()
 }
 
 func SetChannelHealthNowFuncForTest(now func() time.Time) {
@@ -390,6 +487,20 @@ func IsChannelAvailableForModel(channelID int, modelName string) bool {
 	setting := defaultChannelHealthSetting()
 	scope := channelHealthScopeFor(channelID, modelName, setting)
 	if snapshot, found := getChannelHealthIsolationSnapshot(scope, now); found {
+		if snapshot.State == ChannelHealthStateHealthy {
+			channelHealth.Lock()
+			if state, ok := channelHealth.channels[channelHealthScopeKey(scope)]; ok && state.state == ChannelHealthStateWarming && isChannelWarmupCompleteLocked(state, now) {
+				completeChannelWarmupLocked(state, now, setting, "warmup complete")
+			}
+			channelHealth.Unlock()
+			return true
+		}
+		if shouldHydrateChannelHealthSnapshotForProbe(snapshot, now, setting) {
+			channelHealth.Lock()
+			state := hydrateChannelHealthStateFromSnapshotLocked(scope, snapshot, now, setting)
+			persistChannelHealthIsolationLocked(state, now, setting)
+			channelHealth.Unlock()
+		}
 		return isChannelHealthSnapshotAvailable(snapshot, now)
 	}
 
@@ -430,7 +541,18 @@ func IsChannelProbeAvailableForModel(channelID int, modelName string) bool {
 	if !found {
 		return true
 	}
-	return snapshot.State == ChannelHealthStateHealthy
+	if snapshot.State == ChannelHealthStateHealthy {
+		return true
+	}
+	if !shouldHydrateChannelHealthSnapshotForProbe(snapshot, now, setting) {
+		return false
+	}
+	channelHealth.Lock()
+	state = hydrateChannelHealthStateFromSnapshotLocked(scope, snapshot, now, setting)
+	available := isChannelProbeAvailableLocked(state, now)
+	persistChannelHealthIsolationLocked(state, now, setting)
+	channelHealth.Unlock()
+	return available
 }
 
 func isChannelProbeAvailableLocked(state *channelHealthStateData, now time.Time) bool {
@@ -461,11 +583,10 @@ func isChannelAvailableLocked(state *channelHealthStateData, now time.Time, sett
 	}
 	if state.state == ChannelHealthStateWarming {
 		if isChannelWarmupCompleteLocked(state, now) {
-			markChannelHealthyLocked(state)
-			deleteChannelHealthIsolation(channelHealthScope{channelID: state.channelID, modelName: state.modelName})
+			completeChannelWarmupLocked(state, now, setting, "warmup complete")
 			return true
 		}
-		percent := channelWarmupPercentLocked(state, now, setting)
+		percent := channelWarmupPercentWithOptionsLocked(state, now, setting, false)
 		return percent >= 100 || common.GetRandomInt(100) < percent
 	}
 	return false
@@ -516,6 +637,44 @@ func isChannelHealthSnapshotAvailable(snapshot ChannelHealthSnapshot, now time.T
 	default:
 		return false
 	}
+}
+
+func shouldHydrateChannelHealthSnapshotForProbe(snapshot ChannelHealthSnapshot, now time.Time, setting operation_setting.ChannelHealthSetting) bool {
+	if snapshot.State != ChannelHealthStateOpen && snapshot.State != ChannelHealthStateProbing {
+		return false
+	}
+	if snapshot.OpenedAt > 0 && setting.MaxIsolationSeconds > 0 {
+		openedAt := time.Unix(snapshot.OpenedAt, 0)
+		if now.Sub(openedAt) >= time.Duration(setting.MaxIsolationSeconds)*time.Second {
+			return true
+		}
+	}
+	return snapshot.NextProbeAt <= 0 || now.Unix() >= snapshot.NextProbeAt
+}
+
+func hydrateChannelHealthStateFromSnapshotLocked(scope channelHealthScope, snapshot ChannelHealthSnapshot, now time.Time, setting operation_setting.ChannelHealthSetting) *channelHealthStateData {
+	state := getOrCreateChannelHealthLocked(scope)
+	state.state = snapshot.State
+	state.reason = snapshot.Reason
+	state.openedAt = unixToTime(snapshot.OpenedAt)
+	state.nextProbeAt = unixToTime(snapshot.NextProbeAt)
+	state.probeInProgress = snapshot.ProbeInProgress
+	state.consecutiveFailure = snapshot.ConsecutiveFailure
+	state.probeSuccesses = snapshot.ProbeSuccesses
+	state.probeFailures = snapshot.ProbeFailures
+	state.warmupStartedAt = unixToTime(snapshot.WarmupStartedAt)
+	state.warmupEndsAt = unixToTime(snapshot.WarmupEndsAt)
+	state.warmupThrottlePercent = snapshot.WarmupThrottlePercent
+	if state.inflight == nil {
+		state.inflight = make(map[int64]*channelAttemptState)
+	}
+	if state.state == ChannelHealthStateOpen || state.state == ChannelHealthStateProbing {
+		if shouldHydrateChannelHealthSnapshotForProbe(snapshot, now, setting) {
+			state.nextProbeAt = now
+			state.probeInProgress = false
+		}
+	}
+	return state
 }
 
 func GetChannelInflight(channelID int) int {
@@ -677,6 +836,7 @@ func RecordFirstResponse(handle AttemptHandle) {
 	if latency < 0 {
 		latency = 0
 	}
+	attempt.firstResponse = latency
 	state.firstResponseTotal += latency
 	state.firstResponseCount++
 }
@@ -717,7 +877,7 @@ func RecordAttemptFinish(handle AttemptHandle, result ChannelAttemptResult) {
 	clearChannelID := 0
 	shouldClearAffinity := false
 	if shouldSample && !attempt.cancelled {
-		recordChannelHealthSampleLocked(state, now, setting, failed, reason, status, errCode)
+		recordChannelHealthSampleLocked(state, now, setting, failed, reason, status, errCode, attempt.firstResponse)
 		if attempt.meta.Probe {
 			clearChannelID, shouldClearAffinity = recordProbeAttemptResultLocked(state, now, setting, !failed, reason)
 		} else {
@@ -770,7 +930,7 @@ func ShouldRecordChannelHealthFailure(_ *gin.Context, err *types.NewAPIError) bo
 	return operation_setting.ShouldRetryByStatusCode(code)
 }
 
-func recordChannelHealthSampleLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting, failed bool, reason string, status int, errCode string) {
+func recordChannelHealthSampleLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting, failed bool, reason string, status int, errCode string, firstResponse time.Duration) {
 	cutoff := now.Add(-time.Duration(setting.WindowSeconds) * time.Second)
 	samples := state.samples[:0]
 	for _, sample := range state.samples {
@@ -779,11 +939,12 @@ func recordChannelHealthSampleLocked(state *channelHealthStateData, now time.Tim
 		}
 	}
 	samples = append(samples, channelHealthSample{
-		at:      now,
-		failed:  failed,
-		reason:  reason,
-		status:  status,
-		errCode: errCode,
+		at:            now,
+		failed:        failed,
+		reason:        reason,
+		status:        status,
+		errCode:       errCode,
+		firstResponse: firstResponse,
 	})
 	state.samples = samples
 	if failed {
@@ -799,13 +960,27 @@ func evaluateChannelHealthLocked(state *channelHealthStateData, now time.Time, s
 	}
 	if state.state == ChannelHealthStateWarming {
 		if isChannelWarmupCompleteLocked(state, now) {
-			markChannelHealthyLocked(state)
-			deleteChannelHealthIsolation(channelHealthScope{channelID: state.channelID, modelName: state.modelName})
+			completeChannelWarmupLocked(state, now, setting, "warmup complete")
 			return 0, false
 		}
-		if state.consecutiveFailure > 0 {
-			return openChannelLocked(state, now, setting, "warmup failure")
+		if shouldReopenWarmingChannelLocked(state, now, setting) {
+			return openChannelLocked(state, now, setting, "warmup unhealthy window")
 		}
+		stats := channelHealthWindowStatsLocked(state, now, setting)
+		if shouldThrottleWarmupLocked(stats, setting) || state.consecutiveFailure > 0 || channelActiveInflightCountLocked(state) >= setting.StuckInflightThreshold {
+			state.warmupThrottlePercent = setting.WarmupStartPercent
+			if state.warmupThrottlePercent <= 0 {
+				state.warmupThrottlePercent = 1
+			}
+			state.reason = "warming throttled"
+			persistChannelHealthIsolationLocked(state, now, setting)
+			return 0, false
+		}
+		if stats.samples >= setting.MinSamples && stats.failures == 0 && stats.slowFirstResponses == 0 {
+			state.warmupThrottlePercent = 0
+			state.reason = "warming"
+		}
+		persistChannelHealthIsolationLocked(state, now, setting)
 		return 0, false
 	}
 
@@ -823,20 +998,121 @@ func evaluateChannelHealthLocked(state *channelHealthStateData, now time.Time, s
 	return 0, false
 }
 
+type channelHealthWindowStats struct {
+	samples                int
+	failures               int
+	firstResponseSamples   int
+	slowFirstResponses     int
+	averageFirstResponseMs float64
+	p95FirstResponseMs     float64
+}
+
 func channelHealthWindowCountsLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting) (int, int) {
+	stats := channelHealthWindowStatsWithOptionsLocked(state, now, setting, false)
+	return stats.samples, stats.failures
+}
+
+func channelHealthWindowStatsLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting) channelHealthWindowStats {
+	return channelHealthWindowStatsWithOptionsLocked(state, now, setting, true)
+}
+
+func channelHealthWindowStatsWithOptionsLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting, includeP95 bool) channelHealthWindowStats {
 	cutoff := now.Add(-time.Duration(setting.WindowSeconds) * time.Second)
-	samples := 0
-	failures := 0
+	stats := channelHealthWindowStats{}
+	var firstResponseTotal time.Duration
+	firstResponses := make([]time.Duration, 0)
 	for _, sample := range state.samples {
 		if sample.at.Before(cutoff) {
 			continue
 		}
-		samples++
+		stats.samples++
 		if sample.failed {
-			failures++
+			stats.failures++
+		}
+		if sample.firstResponse > 0 {
+			stats.firstResponseSamples++
+			firstResponseTotal += sample.firstResponse
+			if includeP95 {
+				firstResponses = append(firstResponses, sample.firstResponse)
+			}
+			if setting.FirstResponseTimeoutSeconds > 0 && sample.firstResponse >= time.Duration(setting.FirstResponseTimeoutSeconds)*time.Second {
+				stats.slowFirstResponses++
+			}
 		}
 	}
-	return samples, failures
+	if stats.firstResponseSamples > 0 {
+		stats.averageFirstResponseMs = float64(firstResponseTotal.Microseconds()) / 1000.0 / float64(stats.firstResponseSamples)
+	}
+	if includeP95 && len(firstResponses) > 0 {
+		sort.Slice(firstResponses, func(i, j int) bool {
+			return firstResponses[i] < firstResponses[j]
+		})
+		index := int(float64(len(firstResponses))*0.95 + 0.5)
+		if index <= 0 {
+			index = 1
+		}
+		if index > len(firstResponses) {
+			index = len(firstResponses)
+		}
+		stats.p95FirstResponseMs = float64(firstResponses[index-1].Microseconds()) / 1000.0
+	}
+	return stats
+}
+
+func shouldReopenWarmingChannelLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting) bool {
+	if state == nil {
+		return false
+	}
+	if state.consecutiveFailure >= setting.ConsecutiveFailureThreshold {
+		return true
+	}
+	stats := channelHealthWindowStatsLocked(state, now, setting)
+	if stats.samples < setting.MinSamples || stats.failures < setting.MinFailures {
+		return false
+	}
+	errorRate := float64(stats.failures) / float64(stats.samples)
+	return errorRate >= setting.ErrorRateThreshold
+}
+
+func shouldThrottleWarmupLocked(stats channelHealthWindowStats, setting operation_setting.ChannelHealthSetting) bool {
+	if stats.samples > 0 && stats.failures > 0 {
+		errorRate := float64(stats.failures) / float64(stats.samples)
+		if errorRate >= setting.ErrorRateThreshold {
+			return true
+		}
+	}
+	if stats.firstResponseSamples == 0 || setting.FirstResponseTimeoutSeconds <= 0 {
+		return false
+	}
+	if stats.averageFirstResponseMs >= float64(setting.FirstResponseTimeoutSeconds*1000) {
+		return true
+	}
+	slowRatio := float64(stats.slowFirstResponses) / float64(stats.firstResponseSamples)
+	return slowRatio >= setting.ErrorRateThreshold
+}
+
+func channelRecoveryWindowHealthyLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting) (bool, string) {
+	stats := channelHealthWindowStatsLocked(state, now, setting)
+	if stats.samples >= setting.MinSamples && stats.failures >= setting.MinFailures {
+		errorRate := float64(stats.failures) / float64(stats.samples)
+		if errorRate >= setting.ErrorRateThreshold {
+			return false, fmt.Sprintf("recovery blocked: error_rate %.2f%% over %ds (%d/%d)", errorRate*100, setting.WindowSeconds, stats.failures, stats.samples)
+		}
+	}
+	minLatencySamples := setting.ProbeSuccessesToRecover
+	if minLatencySamples <= 0 {
+		minLatencySamples = 2
+	}
+	if stats.firstResponseSamples >= minLatencySamples && setting.FirstResponseTimeoutSeconds > 0 {
+		if stats.averageFirstResponseMs >= float64(setting.FirstResponseTimeoutSeconds*1000) {
+			return false, fmt.Sprintf("recovery blocked: first_response %.0fms over %ds", stats.averageFirstResponseMs, setting.FirstResponseTimeoutSeconds)
+		}
+		slowRatio := float64(stats.slowFirstResponses) / float64(stats.firstResponseSamples)
+		if slowRatio >= setting.ErrorRateThreshold {
+			return false, fmt.Sprintf("recovery blocked: first_response slow_ratio %.2f%%", slowRatio*100)
+		}
+	}
+	return true, ""
 }
 
 func OpenChannel(channelID int, reason string) {
@@ -875,22 +1151,30 @@ func ForceOpenChannelRuntime(channelID int, reason string, duration time.Duratio
 	if strings.TrimSpace(reason) == "" {
 		reason = "operator forced runtime isolation"
 	}
+	setting := defaultChannelHealthSetting()
+	scopes := channelRuntimeControlScopes(channel, setting)
 
 	channelHealth.Lock()
 	now := channelHealthNow()
-	setting := defaultChannelHealthSetting()
-	state := getOrCreateChannelHealthLocked(channelHealthScopeFor(channelID, "", setting))
-	clearChannelID, shouldClearAffinity := openChannelLocked(state, now, setting, reason)
-	if duration > 0 {
-		state.nextProbeAt = now.Add(duration)
-		persistChannelHealthIsolationLocked(state, now, setting)
+	shouldClearAffinity := false
+	snapshot := ChannelHealthSnapshot{ChannelID: channelID}
+	for i, scope := range scopes {
+		state := getOrCreateChannelHealthLocked(scope)
+		_, shouldClear := openChannelLocked(state, now, setting, reason)
+		shouldClearAffinity = shouldClearAffinity || shouldClear
+		if duration > 0 {
+			state.nextProbeAt = now.Add(duration)
+			persistChannelHealthIsolationLocked(state, now, setting)
+		}
+		if i == 0 {
+			snapshot = buildChannelHealthSnapshotLocked(state, now, setting)
+		}
 	}
-	snapshot := buildChannelHealthSnapshotLocked(state, now, setting)
 	channelHealth.Unlock()
 
 	deleted := 0
 	if shouldClearAffinity {
-		deleted = ClearChannelAffinityByChannelID(clearChannelID)
+		deleted = ClearChannelAffinityByChannelID(channelID)
 	}
 	return ChannelRuntimeControlResult{
 		ChannelID:       channelID,
@@ -913,14 +1197,21 @@ func ClearChannelRuntimeIsolation(channelID int) (ChannelRuntimeControlResult, e
 	if channel.Status != common.ChannelStatusEnabled {
 		return ChannelRuntimeControlResult{}, fmt.Errorf("channel database status is not enabled")
 	}
+	setting := defaultChannelHealthSetting()
+	scopes := channelRuntimeControlScopes(channel, setting)
 
 	channelHealth.Lock()
 	now := channelHealthNow()
-	setting := defaultChannelHealthSetting()
-	state := getOrCreateChannelHealthLocked(channelHealthScopeFor(channelID, "", setting))
-	markChannelHealthyLocked(state)
-	deleteChannelHealthIsolation(channelHealthScopeFor(channelID, "", setting))
-	snapshot := buildChannelHealthSnapshotLocked(state, now, setting)
+	snapshot := ChannelHealthSnapshot{ChannelID: channelID, State: ChannelHealthStateHealthy, RuntimeAvailable: true, ProbeAvailable: true, WarmupPercent: 100}
+	for i, scope := range scopes {
+		state := getOrCreateChannelHealthLocked(scope)
+		resetChannelRuntimeStateLocked(state)
+		markChannelHealthyLocked(state)
+		deleteChannelHealthIsolation(scope)
+		if i == 0 {
+			snapshot = buildChannelHealthSnapshotLocked(state, now, setting)
+		}
+	}
 	channelHealth.Unlock()
 
 	return ChannelRuntimeControlResult{
@@ -943,20 +1234,36 @@ func ForceChannelRuntimeProbeNow(channelID int) (ChannelRuntimeControlResult, er
 	if channel.Status != common.ChannelStatusEnabled {
 		return ChannelRuntimeControlResult{}, fmt.Errorf("channel database status is not enabled")
 	}
+	setting := defaultChannelHealthSetting()
+	scopes := channelRuntimeControlScopes(channel, setting)
 
 	channelHealth.Lock()
 	now := channelHealthNow()
-	setting := defaultChannelHealthSetting()
-	state := getOrCreateChannelHealthLocked(channelHealthScopeFor(channelID, "", setting))
-	if state.state == ChannelHealthStateHealthy {
+	snapshot := ChannelHealthSnapshot{ChannelID: channelID}
+	for i, scope := range scopes {
+		state := getOrCreateChannelHealthLocked(scope)
+		if state.state == ChannelHealthStateHealthy || state.state == ChannelHealthStateWarming {
+			state.state = ChannelHealthStateOpen
+			state.reason = "operator requested probe"
+			state.openedAt = now
+		}
+		state.nextProbeAt = now
+		state.probeInProgress = false
+		persistChannelHealthIsolationLocked(state, now, setting)
+		if i == 0 {
+			snapshot = buildChannelHealthSnapshotLocked(state, now, setting)
+		}
+	}
+	if len(scopes) == 0 {
+		state := getOrCreateChannelHealthLocked(channelHealthScopeFor(channelID, "", setting))
 		state.state = ChannelHealthStateOpen
 		state.reason = "operator requested probe"
 		state.openedAt = now
+		state.nextProbeAt = now
+		state.probeInProgress = false
+		persistChannelHealthIsolationLocked(state, now, setting)
+		snapshot = buildChannelHealthSnapshotLocked(state, now, setting)
 	}
-	state.nextProbeAt = now
-	state.probeInProgress = false
-	persistChannelHealthIsolationLocked(state, now, setting)
-	snapshot := buildChannelHealthSnapshotLocked(state, now, setting)
 	channelHealth.Unlock()
 
 	return ChannelRuntimeControlResult{
@@ -979,7 +1286,15 @@ func MarkChannelProbingForModel(channelID int, modelName string) bool {
 
 	now := channelHealthNow()
 	setting := defaultChannelHealthSetting()
-	state := getOrCreateChannelHealthLocked(channelHealthScopeFor(channelID, modelName, setting))
+	scope := channelHealthScopeFor(channelID, modelName, setting)
+	state, ok := channelHealth.channels[channelHealthScopeKey(scope)]
+	if !ok {
+		if snapshot, found := getChannelHealthIsolationSnapshot(scope, now); found && snapshot.State != ChannelHealthStateHealthy {
+			state = hydrateChannelHealthStateFromSnapshotLocked(scope, snapshot, now, setting)
+		} else {
+			state = getOrCreateChannelHealthLocked(scope)
+		}
+	}
 	if state.state == ChannelHealthStateHealthy {
 		return true
 	}
@@ -995,6 +1310,7 @@ func MarkChannelProbingForModel(channelID int, modelName string) bool {
 	state.state = ChannelHealthStateProbing
 	state.probeInProgress = true
 	persistChannelHealthIsolationLocked(state, now, setting)
+	recordChannelHealthEventLocked(setting, ChannelHealthEventTypeProbing, state, "probe started", now)
 	return true
 }
 
@@ -1044,10 +1360,21 @@ func recordProbeAttemptResultLocked(state *channelHealthStateData, now time.Time
 		return 0, false
 	}
 	state.probeInProgress = false
+	if success && (state.state == ChannelHealthStateHealthy || state.state == ChannelHealthStateWarming) {
+		persistChannelHealthIsolationLocked(state, now, setting)
+		return 0, false
+	}
 	if success {
 		state.probeSuccesses++
 		state.probeFailures = 0
 		if state.probeSuccesses >= setting.ProbeSuccessesToRecover {
+			if healthy, recoveryReason := channelRecoveryWindowHealthyLocked(state, now, setting); !healthy {
+				state.state = ChannelHealthStateProbing
+				state.reason = recoveryReason
+				state.nextProbeAt = now.Add(time.Duration(setting.ProbeIntervalSeconds) * time.Second)
+				persistChannelHealthIsolationLocked(state, now, setting)
+				return 0, false
+			}
 			if setting.WarmupEnabled {
 				state.state = ChannelHealthStateWarming
 				state.reason = "warming"
@@ -1056,10 +1383,11 @@ func recordProbeAttemptResultLocked(state *channelHealthStateData, now time.Time
 				state.probeSuccesses = 0
 				state.probeBackoff = 0
 				state.samples = nil
+				state.warmupThrottlePercent = 0
 				state.warmupStartedAt = now
 				state.warmupEndsAt = now.Add(time.Duration(setting.WarmupDurationSeconds) * time.Second)
 				persistChannelHealthIsolationLocked(state, now, setting)
-				recordChannelHealthEventLocked(setting, ChannelHealthEventTypeRecovered, state, "probe recovered", now)
+				recordChannelHealthEventLocked(setting, ChannelHealthEventTypeWarming, state, "probe recovered into warming", now)
 			} else {
 				markChannelHealthyLocked(state)
 				deleteChannelHealthIsolation(channelHealthScope{channelID: state.channelID, modelName: state.modelName})
@@ -1079,15 +1407,7 @@ func recordProbeAttemptResultLocked(state *channelHealthStateData, now time.Time
 	state.warmupEndsAt = time.Time{}
 	state.probeSuccesses = 0
 	state.probeFailures++
-	if state.probeBackoff <= 0 {
-		state.probeBackoff = time.Duration(setting.ProbeIntervalSeconds) * time.Second
-	} else {
-		state.probeBackoff *= 2
-	}
-	maxBackoff := time.Duration(setting.ProbeBackoffMaxSeconds) * time.Second
-	if state.probeBackoff > maxBackoff {
-		state.probeBackoff = maxBackoff
-	}
+	state.probeBackoff = nextProbeBackoffDuration(state.probeBackoff, setting, reason)
 	state.nextProbeAt = now.Add(state.probeBackoff)
 	persistChannelHealthIsolationLocked(state, now, setting)
 	recordChannelHealthEventLocked(setting, ChannelHealthEventTypeProbeFailed, state, reason, now)
@@ -1105,7 +1425,17 @@ func markChannelHealthyLocked(state *channelHealthStateData) {
 	state.probeBackoff = 0
 	state.warmupStartedAt = time.Time{}
 	state.warmupEndsAt = time.Time{}
+	state.warmupThrottlePercent = 0
 	state.samples = nil
+}
+
+func completeChannelWarmupLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting, reason string) {
+	if state == nil {
+		return
+	}
+	markChannelHealthyLocked(state)
+	deleteChannelHealthIsolation(channelHealthScope{channelID: state.channelID, modelName: state.modelName})
+	recordChannelHealthEventLocked(setting, ChannelHealthEventTypeRecovered, state, reason, now)
 }
 
 func recordChannelHealthEventLocked(setting operation_setting.ChannelHealthSetting, eventType string, state *channelHealthStateData, reason string, now time.Time) {
@@ -1123,16 +1453,19 @@ func recordChannelHealthEventLocked(setting operation_setting.ChannelHealthSetti
 		State:      string(state.state),
 		Reason:     reason,
 		OccurredAt: now.Unix(),
+		Snapshot:   buildChannelHealthEventSnapshotLocked(state, now, setting),
 	}
 	alertKey := fmt.Sprintf("%s:%s", eventType, channelHealthScopeKey(channelHealthScope{channelID: state.channelID, modelName: state.modelName}))
 	minInterval := time.Duration(setting.AlertMinIntervalSeconds) * time.Second
 	if minInterval <= 0 {
 		minInterval = 60 * time.Second
 	}
-	if last, ok := channelHealth.lastAlertAt[alertKey]; !ok || now.Sub(last) >= minInterval {
-		channelHealth.lastAlertAt[alertKey] = now
-		event.AlertSent = true
-		event.AlertSubject = channelHealthAlertSubject(event)
+	if channelHealthEventAlertable(eventType) {
+		if last, ok := channelHealth.lastAlertAt[alertKey]; !ok || now.Sub(last) >= minInterval {
+			channelHealth.lastAlertAt[alertKey] = now
+			event.AlertSent = true
+			event.AlertSubject = channelHealthAlertSubject(event)
+		}
 	}
 	channelHealth.events = append(channelHealth.events, event)
 	if len(channelHealth.events) > 1000 {
@@ -1141,6 +1474,40 @@ func recordChannelHealthEventLocked(setting operation_setting.ChannelHealthSetti
 	if event.AlertSent {
 		notify := channelHealth.notifyFunc
 		go notifyChannelHealthEvent(event, notify)
+	}
+}
+
+func channelHealthEventAlertable(eventType string) bool {
+	switch eventType {
+	case ChannelHealthEventTypeOpened, ChannelHealthEventTypeRecovered, ChannelHealthEventTypeProbeFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+func buildChannelHealthEventSnapshotLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting) ChannelHealthEventSnapshot {
+	if state == nil {
+		return ChannelHealthEventSnapshot{}
+	}
+	stats := channelHealthWindowStatsLocked(state, now, setting)
+	errorRate := 0.0
+	if stats.samples > 0 {
+		errorRate = float64(stats.failures) / float64(stats.samples)
+	}
+	return ChannelHealthEventSnapshot{
+		ActiveInflight:         channelActiveInflightCountLocked(state),
+		StuckInflight:          channelStuckInflightCountLocked(state),
+		WindowSamples:          stats.samples,
+		WindowFailures:         stats.failures,
+		ErrorRate:              errorRate,
+		AverageFirstResponseMs: stats.averageFirstResponseMs,
+		P95FirstResponseMs:     stats.p95FirstResponseMs,
+		ProbeBackoffSeconds:    int(state.probeBackoff.Seconds()),
+		NextProbeAt:            unixOrZero(state.nextProbeAt),
+		ProbeInProgress:        state.probeInProgress,
+		WarmupPercent:          channelWarmupPercentLocked(state, now, setting),
+		WarmupThrottlePercent:  state.warmupThrottlePercent,
 	}
 }
 
@@ -1163,6 +1530,10 @@ func channelHealthAlertSubject(event ChannelHealthEvent) string {
 	switch event.Type {
 	case ChannelHealthEventTypeOpened:
 		return fmt.Sprintf("Channel #%d%s runtime isolated", event.ChannelID, modelPart)
+	case ChannelHealthEventTypeProbing:
+		return fmt.Sprintf("Channel #%d%s runtime probing", event.ChannelID, modelPart)
+	case ChannelHealthEventTypeWarming:
+		return fmt.Sprintf("Channel #%d%s runtime warming", event.ChannelID, modelPart)
 	case ChannelHealthEventTypeRecovered:
 		return fmt.Sprintf("Channel #%d%s runtime recovered", event.ChannelID, modelPart)
 	case ChannelHealthEventTypeProbeFailed:
@@ -1219,6 +1590,7 @@ func GetChannelHealthReport(filter ChannelHealthEventFilter) ChannelHealthReport
 	report := ChannelHealthReport{
 		AverageFirstResponseMs: averageFirstResponseMsForFilter(filter),
 		Events:                 events,
+		SelectionSummary:       GetChannelSelectionTraceSummary(filter),
 	}
 	for _, event := range events {
 		switch event.Type {
@@ -1299,6 +1671,7 @@ func CheckChannelHealthStuckRequests() {
 	cancelStuckAttempts := make([]func(), 0)
 
 	for _, state := range channelHealth.channels {
+		pruneChannelInflightLocked(state, now, setting)
 		stuckCount := 0
 		var maxAge time.Duration
 		for _, attempt := range state.inflight {
@@ -1378,16 +1751,19 @@ func RunDueChannelHealthProbes() {
 		if state.probeInProgress {
 			continue
 		}
-		if !state.nextProbeAt.IsZero() && now.Before(state.nextProbeAt) {
+		if !state.nextProbeAt.IsZero() && now.Before(state.nextProbeAt) && !isChannelIsolationPastMaxLocked(state, now, setting) {
 			continue
 		}
 		if channelHealth.probeFunc == nil {
 			continue
 		}
-		if !tryAcquireChannelHealthProbeLock(state.channelID, setting) {
+		if !tryAcquireChannelHealthProbeLock(state.channelID, state.modelName, setting) {
 			continue
 		}
 		state.probeInProgress = true
+		state.state = ChannelHealthStateProbing
+		persistChannelHealthIsolationLocked(state, now, setting)
+		recordChannelHealthEventLocked(setting, ChannelHealthEventTypeProbing, state, "probe started", now)
 		targets = append(targets, probeTarget{channelID: state.channelID, modelName: state.modelName, probeFn: channelHealth.probeFunc})
 	}
 	channelHealth.Unlock()
@@ -1398,7 +1774,7 @@ func RunDueChannelHealthProbes() {
 }
 
 func runChannelHealthProbe(channelID int, modelName string, probeFn ChannelHealthProbeFunc, setting operation_setting.ChannelHealthSetting) {
-	defer releaseChannelHealthProbeLock(channelID)
+	defer releaseChannelHealthProbeLock(channelID, modelName)
 
 	channel, err := model.CacheGetChannel(channelID)
 	if err != nil || channel == nil {
@@ -1417,7 +1793,7 @@ func runChannelHealthProbe(channelID int, modelName string, probeFn ChannelHealt
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	err = probeFn(ctx, channel)
+	err = probeFn(ctx, channel, modelName)
 	if err != nil {
 		RecordProbeResultForModel(channelID, modelName, false, err.Error())
 		return
@@ -1425,7 +1801,7 @@ func runChannelHealthProbe(channelID int, modelName string, probeFn ChannelHealt
 	RecordProbeResultForModel(channelID, modelName, true, "")
 }
 
-func tryAcquireChannelHealthProbeLock(channelID int, setting operation_setting.ChannelHealthSetting) bool {
+func tryAcquireChannelHealthProbeLock(channelID int, modelName string, setting operation_setting.ChannelHealthSetting) bool {
 	if channelID <= 0 {
 		return false
 	}
@@ -1438,7 +1814,7 @@ func tryAcquireChannelHealthProbeLock(channelID int, setting operation_setting.C
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	ok, err := common.RDB.SetNX(ctx, channelHealthProbeLockKey(channelID), common.GetTimeString(), ttl).Result()
+	ok, err := common.RDB.SetNX(ctx, channelHealthProbeLockKey(channelID, modelName), common.GetTimeString(), ttl).Result()
 	if err != nil {
 		common.SysError(fmt.Sprintf("channel health probe lock failed: channel_id=%d, err=%v", channelID, err))
 		return false
@@ -1446,19 +1822,23 @@ func tryAcquireChannelHealthProbeLock(channelID int, setting operation_setting.C
 	return ok
 }
 
-func releaseChannelHealthProbeLock(channelID int) {
+func releaseChannelHealthProbeLock(channelID int, modelName string) {
 	if channelID <= 0 || !common.RedisEnabled || common.RDB == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := common.RDB.Del(ctx, channelHealthProbeLockKey(channelID)).Err(); err != nil {
+	if err := common.RDB.Del(ctx, channelHealthProbeLockKey(channelID, modelName)).Err(); err != nil {
 		common.SysError(fmt.Sprintf("channel health probe unlock failed: channel_id=%d, err=%v", channelID, err))
 	}
 }
 
-func channelHealthProbeLockKey(channelID int) string {
-	return fmt.Sprintf("%s:%d", channelHealthProbeLockNamespace, channelID)
+func channelHealthProbeLockKey(channelID int, modelName string) string {
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		return fmt.Sprintf("%s:%d", channelHealthProbeLockNamespace, channelID)
+	}
+	return fmt.Sprintf("%s:%d:model:%s", channelHealthProbeLockNamespace, channelID, modelName)
 }
 
 func GetChannelHealthSnapshot(channelID int) (ChannelHealthSnapshot, bool) {
@@ -1488,10 +1868,36 @@ func GetChannelHealthSnapshotForDisplay(channelID int) ChannelHealthSnapshot {
 		return snapshot
 	}
 	return ChannelHealthSnapshot{
-		ChannelID:     channelID,
-		State:         ChannelHealthStateHealthy,
-		WarmupPercent: 100,
+		ChannelID:        channelID,
+		State:            ChannelHealthStateHealthy,
+		RuntimeAvailable: true,
+		ProbeAvailable:   true,
+		WarmupPercent:    100,
 	}
+}
+
+func GetChannelHealthSnapshotForChannelDisplay(channel *model.Channel) ChannelHealthSnapshot {
+	if channel == nil {
+		return ChannelHealthSnapshot{}
+	}
+	snapshot := GetChannelHealthSnapshotForDisplay(channel.Id)
+	if channel.Status == common.ChannelStatusEnabled {
+		return snapshot
+	}
+	snapshot.RuntimeAvailable = false
+	snapshot.ProbeAvailable = false
+	switch channel.Status {
+	case common.ChannelStatusManuallyDisabled:
+		snapshot.AvailabilityReason = "channel manually disabled"
+		snapshot.ProbeUnavailableReason = "channel manually disabled"
+	case common.ChannelStatusAutoDisabled:
+		snapshot.AvailabilityReason = "channel database status auto disabled"
+		snapshot.ProbeUnavailableReason = "channel database status auto disabled"
+	default:
+		snapshot.AvailabilityReason = fmt.Sprintf("channel database status %d", channel.Status)
+		snapshot.ProbeUnavailableReason = snapshot.AvailabilityReason
+	}
+	return snapshot
 }
 
 func GetChannelHealthSnapshots() []ChannelHealthSnapshot {
@@ -1508,20 +1914,22 @@ func GetChannelHealthSnapshots() []ChannelHealthSnapshot {
 }
 
 func buildChannelHealthSnapshotLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting) ChannelHealthSnapshot {
+	return buildChannelHealthSnapshotWithOptionsLocked(state, now, setting, true)
+}
+
+func buildChannelHealthSnapshotWithOptionsLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting, includeP95 bool) ChannelHealthSnapshot {
 	if state.state == ChannelHealthStateWarming && isChannelWarmupCompleteLocked(state, now) {
-		markChannelHealthyLocked(state)
-		deleteChannelHealthIsolation(channelHealthScope{channelID: state.channelID, modelName: state.modelName})
+		completeChannelWarmupLocked(state, now, setting, "warmup complete")
 	}
-	samples, failures := channelHealthWindowCountsLocked(state, now, setting)
+	pruneChannelInflightLocked(state, now, setting)
+	stats := channelHealthWindowStatsWithOptionsLocked(state, now, setting, includeP95)
 	errorRate := 0.0
-	if samples > 0 {
-		errorRate = float64(failures) / float64(samples)
+	if stats.samples > 0 {
+		errorRate = float64(stats.failures) / float64(stats.samples)
 	}
-	averageFirstResponseMs := 0.0
-	if state.firstResponseCount > 0 {
-		averageFirstResponseMs = float64(state.firstResponseTotal.Microseconds()) / 1000.0 / float64(state.firstResponseCount)
-	}
-	warmupPercent := channelWarmupPercentLocked(state, now, setting)
+	warmupPercent := channelWarmupPercentWithOptionsLocked(state, now, setting, includeP95)
+	runtimeAvailable, availabilityReason := channelRuntimeAvailabilityLocked(state, now, warmupPercent)
+	probeAvailable, probeUnavailableReason := channelProbeAvailabilityLocked(state, now, setting)
 	return ChannelHealthSnapshot{
 		ChannelID:              state.channelID,
 		ModelName:              state.modelName,
@@ -1534,13 +1942,19 @@ func buildChannelHealthSnapshotLocked(state *channelHealthStateData, now time.Ti
 		ProbeSuccesses:         state.probeSuccesses,
 		ProbeFailures:          state.probeFailures,
 		Inflight:               channelActiveInflightCountLocked(state),
-		WindowSamples:          samples,
-		WindowFailures:         failures,
+		WindowSamples:          stats.samples,
+		WindowFailures:         stats.failures,
 		ErrorRate:              errorRate,
-		AverageFirstResponseMs: averageFirstResponseMs,
+		AverageFirstResponseMs: stats.averageFirstResponseMs,
+		P95FirstResponseMs:     stats.p95FirstResponseMs,
+		RuntimeAvailable:       runtimeAvailable,
+		AvailabilityReason:     availabilityReason,
+		ProbeAvailable:         probeAvailable,
+		ProbeUnavailableReason: probeUnavailableReason,
 		WarmupStartedAt:        unixOrZero(state.warmupStartedAt),
 		WarmupEndsAt:           unixOrZero(state.warmupEndsAt),
 		WarmupPercent:          warmupPercent,
+		WarmupThrottlePercent:  state.warmupThrottlePercent,
 	}
 }
 
@@ -1558,7 +1972,237 @@ func channelActiveInflightCountLocked(state *channelHealthStateData) int {
 	return count
 }
 
+func channelStuckInflightCountLocked(state *channelHealthStateData) int {
+	if state == nil {
+		return 0
+	}
+	count := 0
+	for _, attempt := range state.inflight {
+		if attempt == nil || !attempt.stuck {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func channelRuntimeAvailabilityLocked(state *channelHealthStateData, now time.Time, warmupPercent int) (bool, string) {
+	if state == nil || state.state == ChannelHealthStateHealthy {
+		return true, ""
+	}
+	switch state.state {
+	case ChannelHealthStateWarming:
+		if isChannelWarmupCompleteLocked(state, now) {
+			return true, ""
+		}
+		if warmupPercent >= 100 {
+			return true, "warming complete"
+		}
+		return true, fmt.Sprintf("warming retained traffic %d%%", warmupPercent)
+	case ChannelHealthStateProbing:
+		if state.probeInProgress {
+			return false, "probe in progress"
+		}
+		return false, strings.TrimSpace(state.reason)
+	case ChannelHealthStateOpen:
+		reason := strings.TrimSpace(state.reason)
+		if reason == "" {
+			reason = "runtime isolated"
+		}
+		if !state.nextProbeAt.IsZero() && now.Before(state.nextProbeAt) {
+			return false, fmt.Sprintf("%s; next probe at %s", reason, state.nextProbeAt.Format(time.RFC3339))
+		}
+		return false, reason
+	default:
+		return true, ""
+	}
+}
+
+func channelProbeAvailabilityLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting) (bool, string) {
+	if state == nil || state.state == ChannelHealthStateHealthy {
+		return true, ""
+	}
+	if state.state != ChannelHealthStateOpen && state.state != ChannelHealthStateProbing {
+		return false, fmt.Sprintf("state %s is not probeable", state.state)
+	}
+	if state.probeInProgress {
+		return false, "probe lock in progress"
+	}
+	if !state.nextProbeAt.IsZero() && now.Before(state.nextProbeAt) && !isChannelIsolationPastMaxLocked(state, now, setting) {
+		return false, fmt.Sprintf("waiting next probe at %s", state.nextProbeAt.Format(time.RFC3339))
+	}
+	return true, ""
+}
+
+func adjustChannelHealthWeight(channelID int, modelName string, weight int, _ int) int {
+	if weight <= 0 || channelID <= 0 || !channelHealthEnabled() {
+		return weight
+	}
+	snapshot, ok := getChannelHealthSnapshotForWeight(channelID, modelName)
+	if !ok {
+		return weight
+	}
+	adjusted := weight
+	setting := defaultChannelHealthSetting()
+	if snapshot.State == ChannelHealthStateOpen || snapshot.State == ChannelHealthStateProbing {
+		percent := setting.WarmupStartPercent
+		if percent <= 0 {
+			percent = 1
+		}
+		if percent > 100 {
+			percent = 100
+		}
+		adjusted = adjusted * percent / 100
+	}
+	if snapshot.State == ChannelHealthStateWarming {
+		percent := snapshot.WarmupPercent
+		if percent <= 0 {
+			percent = setting.WarmupStartPercent
+		}
+		if percent > 100 {
+			percent = 100
+		}
+		adjusted = adjusted * percent / 100
+	}
+	if snapshot.ErrorRate > 0 {
+		errorPenalty := 1 - snapshot.ErrorRate
+		if errorPenalty < 0.1 {
+			errorPenalty = 0.1
+		}
+		adjusted = int(float64(adjusted) * errorPenalty)
+	}
+	if setting.FirstResponseTimeoutSeconds > 0 && snapshot.AverageFirstResponseMs >= float64(setting.FirstResponseTimeoutSeconds*1000) {
+		adjusted = adjusted / 2
+	}
+	if weight > 0 && adjusted <= 0 {
+		return 1
+	}
+	return adjusted
+}
+
+func getChannelHealthSnapshotForWeight(channelID int, modelName string) (ChannelHealthSnapshot, bool) {
+	now := channelHealthNow()
+	setting := defaultChannelHealthSetting()
+	scope := channelHealthScopeFor(channelID, modelName, setting)
+	if snapshot, found := getChannelHealthIsolationSnapshot(scope, now); found {
+		return snapshot, true
+	}
+
+	channelHealth.Lock()
+	defer channelHealth.Unlock()
+
+	state, ok := channelHealth.channels[channelHealthScopeKey(scope)]
+	if !ok {
+		return ChannelHealthSnapshot{}, false
+	}
+	return buildChannelHealthSnapshotWithOptionsLocked(state, now, setting, false), true
+}
+
+func resetChannelRuntimeStateLocked(state *channelHealthStateData) {
+	if state == nil {
+		return
+	}
+	state.inflight = make(map[int64]*channelAttemptState)
+	state.probeInProgress = false
+	state.probeBackoff = 0
+}
+
+func pruneChannelInflightLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting) {
+	if state == nil || len(state.inflight) == 0 {
+		return
+	}
+	retention := channelInflightRetention(setting)
+	for id, attempt := range state.inflight {
+		if attempt == nil {
+			delete(state.inflight, id)
+			continue
+		}
+		if attempt.cancelled && now.Sub(attempt.startedAt) >= retention {
+			delete(state.inflight, id)
+		}
+	}
+}
+
+func channelInflightRetention(setting operation_setting.ChannelHealthSetting) time.Duration {
+	seconds := setting.SingleStuckTimeoutSeconds
+	if setting.FirstResponseTimeoutSeconds > seconds {
+		seconds = setting.FirstResponseTimeoutSeconds
+	}
+	if setting.ProbeTimeoutSeconds > seconds {
+		seconds = setting.ProbeTimeoutSeconds
+	}
+	if seconds <= 0 {
+		seconds = 75
+	}
+	return time.Duration(seconds*2) * time.Second
+}
+
+func isChannelIsolationPastMaxLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting) bool {
+	if state == nil || state.openedAt.IsZero() || setting.MaxIsolationSeconds <= 0 {
+		return false
+	}
+	return now.Sub(state.openedAt) >= time.Duration(setting.MaxIsolationSeconds)*time.Second
+}
+
+func nextProbeBackoffDuration(current time.Duration, setting operation_setting.ChannelHealthSetting, reason string) time.Duration {
+	interval := time.Duration(setting.ProbeIntervalSeconds) * time.Second
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	maxBackoff := time.Duration(setting.ProbeBackoffMaxSeconds) * time.Second
+	if maxBackoff <= 0 {
+		maxBackoff = 300 * time.Second
+	}
+	if isPermanentProbeFailure(reason) {
+		return maxBackoff
+	}
+	if current <= 0 {
+		current = interval
+	} else {
+		current *= 2
+	}
+	if current > maxBackoff {
+		return maxBackoff
+	}
+	if current < interval {
+		return interval
+	}
+	return current
+}
+
+func isPermanentProbeFailure(reason string) bool {
+	reason = strings.ToLower(strings.TrimSpace(reason))
+	if reason == "" {
+		return false
+	}
+	permanentMarkers := []string{
+		"401",
+		"403",
+		"unauthorized",
+		"forbidden",
+		"invalid api key",
+		"invalid_api_key",
+		"insufficient_quota",
+		"quota insufficient",
+		"balance",
+		"model not found",
+		"model_not_found",
+		"not support",
+		"unsupported",
+	}
+	for _, marker := range permanentMarkers {
+		if strings.Contains(reason, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func channelWarmupPercentLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting) int {
+	return channelWarmupPercentWithOptionsLocked(state, now, setting, true)
+}
+
+func channelWarmupPercentWithOptionsLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting, includeP95 bool) int {
 	if state == nil {
 		return 100
 	}
@@ -1594,6 +2238,22 @@ func channelWarmupPercentLocked(state *channelHealthStateData, now time.Time, se
 	if percent > 100 {
 		percent = 100
 	}
+	stats := channelHealthWindowStatsWithOptionsLocked(state, now, setting, includeP95)
+	if shouldThrottleWarmupLocked(stats, setting) || channelActiveInflightCountLocked(state) >= setting.StuckInflightThreshold {
+		state.warmupThrottlePercent = setting.WarmupStartPercent
+		if state.warmupThrottlePercent <= 0 {
+			state.warmupThrottlePercent = 1
+		}
+	}
+	if stats.samples >= setting.MinSamples && stats.failures == 0 && stats.slowFirstResponses == 0 && state.warmupThrottlePercent == 0 {
+		percent += setting.WarmupStepPercent
+		if percent > 100 {
+			percent = 100
+		}
+	}
+	if state.warmupThrottlePercent > 0 && percent > state.warmupThrottlePercent {
+		percent = state.warmupThrottlePercent
+	}
 	return percent
 }
 
@@ -1620,7 +2280,11 @@ func channelWarmupPercentFromSnapshot(snapshot ChannelHealthSnapshot, now time.T
 		warmupStartedAt: startedAt,
 		warmupEndsAt:    endsAt,
 	}
-	return channelWarmupPercentLocked(state, now, setting)
+	percent := channelWarmupPercentLocked(state, now, setting)
+	if snapshot.WarmupThrottlePercent > 0 && percent > snapshot.WarmupThrottlePercent {
+		return snapshot.WarmupThrottlePercent
+	}
+	return percent
 }
 
 func persistChannelHealthIsolationLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting) {
@@ -1656,4 +2320,11 @@ func unixOrZero(t time.Time) int64 {
 		return 0
 	}
 	return t.Unix()
+}
+
+func unixToTime(value int64) time.Time {
+	if value <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(value, 0)
 }

@@ -114,30 +114,13 @@ func GetChannel(group string, model string, retry int, requestPath string, exclu
 }
 
 func GetChannelWithOptions(group string, model string, retry int, requestPath string, excludedChannelIDs map[int]struct{}, options ChannelSelectionOptions) (*Channel, error) {
-	abilities, err := getHealthyAbilities(group, model, retry, excludedChannelIDs, options)
+	abilities, err := getHealthyAbilities(group, model, retry, requestPath, excludedChannelIDs, options)
 	if err != nil {
 		return nil, err
 	}
-	abilities = filterAbilitiesByRequestPath(abilities, requestPath)
 	channel := Channel{}
 	if len(abilities) > 0 {
-		// Randomly choose one
-		weightSum := uint(0)
-		for _, ability_ := range abilities {
-			_, inflight := getChannelRuntimeState(ability_.ChannelId, model)
-			weightSum += uint(adjustedChannelWeight(int(ability_.Weight), inflight)) + 10
-		}
-		// Randomly choose one
-		weight := common.GetRandomInt(int(weightSum))
-		for _, ability_ := range abilities {
-			_, inflight := getChannelRuntimeState(ability_.ChannelId, model)
-			weight -= adjustedChannelWeight(int(ability_.Weight), inflight) + 10
-			//log.Printf("weight: %d, ability weight: %d", weight, *ability_.Weight)
-			if weight <= 0 {
-				channel.Id = ability_.ChannelId
-				break
-			}
-		}
+		channel.Id = abilities[0].ChannelId
 	} else {
 		return nil, nil
 	}
@@ -145,7 +128,12 @@ func GetChannelWithOptions(group string, model string, retry int, requestPath st
 	return &channel, err
 }
 
-func getHealthyAbilities(group string, modelName string, retry int, excludedChannelIDs map[int]struct{}, options ChannelSelectionOptions) ([]Ability, error) {
+type abilityRuntimeCandidate struct {
+	ability   Ability
+	candidate runtimeSelectionCandidate
+}
+
+func getHealthyAbilities(group string, modelName string, retry int, requestPath string, excludedChannelIDs map[int]struct{}, options ChannelSelectionOptions) ([]Ability, error) {
 	var priorities []int
 	err := DB.Model(&Ability{}).
 		Select("DISTINCT(priority)").
@@ -162,6 +150,7 @@ func getHealthyAbilities(group string, modelName string, retry int, excludedChan
 		retry = len(priorities) - 1
 	}
 
+	retainedProbeCandidates := make([]abilityRuntimeCandidate, 0)
 	for i := retry; i < len(priorities); i++ {
 		var abilities []Ability
 		err = DB.Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = ?", group, modelName, true, priorities[i]).
@@ -174,55 +163,114 @@ func getHealthyAbilities(group string, modelName string, retry int, excludedChan
 		if err != nil {
 			return nil, err
 		}
-		filtered := abilities[:0]
-		for _, ability := range abilities {
-			if _, excluded := excludedChannelIDs[ability.ChannelId]; excluded {
-				continue
+		abilities = filterAbilitiesByRequestPath(abilities, requestPath)
+		normalCandidates := collectAbilityRuntimeCandidates(abilities, modelName, false, excludedChannelIDs)
+		probeCandidates := collectAbilityRuntimeCandidates(abilities, modelName, true, excludedChannelIDs)
+		probeCandidates = filterAbilityProbeCandidates(probeCandidates, normalCandidates)
+		if len(normalCandidates) > 0 {
+			candidates := make([]abilityRuntimeCandidate, 0, len(retainedProbeCandidates)+len(normalCandidates)+len(probeCandidates))
+			candidates = append(candidates, retainedProbeCandidates...)
+			candidates = append(candidates, normalCandidates...)
+			candidates = append(candidates, probeCandidates...)
+			selected, ok, err := selectAbilityRuntimeCandidate(group, modelName, candidates)
+			if err != nil {
+				return nil, err
 			}
-			available, _ := getChannelRuntimeState(ability.ChannelId, modelName)
-			if available {
-				filtered = append(filtered, ability)
+			if ok {
+				return []Ability{selected}, nil
 			}
+			return nil, nil
 		}
-		if len(filtered) > 0 {
-			return filtered, nil
-		}
+		retainedProbeCandidates = append(retainedProbeCandidates, probeCandidates...)
 	}
-
-	for i := retry; i < len(priorities); i++ {
-		var abilities []Ability
-		err = DB.Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = ?", group, modelName, true, priorities[i]).
-			Order("weight DESC").
-			Find(&abilities).Error
+	if len(retainedProbeCandidates) > 0 {
+		selected, ok, err := selectAbilityRuntimeCandidate(group, modelName, retainedProbeCandidates)
 		if err != nil {
 			return nil, err
 		}
-		abilities, err = filterAbilitiesBySelectionOptions(abilities, options)
-		if err != nil {
-			return nil, err
-		}
-		filtered := abilities[:0]
-		for _, ability := range abilities {
-			if _, excluded := excludedChannelIDs[ability.ChannelId]; excluded {
-				continue
-			}
-			available, _ := getChannelProbeRuntimeState(ability.ChannelId, modelName)
-			if available {
-				filtered = append(filtered, ability)
-			}
-		}
-		for len(filtered) > 0 {
-			idx := weightedAbilityIndex(filtered, true)
-			if idx < 0 {
-				break
-			}
-			if claimChannelProbeRuntimeState(filtered[idx].ChannelId, modelName) {
-				return []Ability{filtered[idx]}, nil
-			}
-			filtered = append(filtered[:idx], filtered[idx+1:]...)
+		if ok {
+			return []Ability{selected}, nil
 		}
 	}
 	return nil, nil
+}
+
+func collectAbilityRuntimeCandidates(abilities []Ability, modelName string, probe bool, excludedChannelIDs map[int]struct{}) []abilityRuntimeCandidate {
+	candidates := make([]abilityRuntimeCandidate, 0, len(abilities))
+	for _, ability := range abilities {
+		if _, excluded := excludedChannelIDs[ability.ChannelId]; excluded {
+			continue
+		}
+		var available bool
+		var inflight int
+		if probe {
+			available, inflight = getChannelProbeRuntimeState(ability.ChannelId, modelName)
+		} else {
+			available, inflight = getChannelRuntimeState(ability.ChannelId, modelName)
+		}
+		if !available {
+			continue
+		}
+		priority := int64(0)
+		if ability.Priority != nil {
+			priority = *ability.Priority
+		}
+		weight := int(ability.Weight)
+		candidates = append(candidates, abilityRuntimeCandidate{
+			ability: ability,
+			candidate: runtimeSelectionCandidate{
+				ChannelID:       ability.ChannelId,
+				Priority:        priority,
+				ModelName:       modelName,
+				Weight:          weight,
+				EffectiveWeight: runtimeCandidateEffectiveWeight(ability.ChannelId, modelName, weight, inflight, probe),
+				Inflight:        inflight,
+				Probe:           probe,
+			},
+		})
+	}
+	return candidates
+}
+
+func filterAbilityProbeCandidates(probeCandidates []abilityRuntimeCandidate, normalCandidates []abilityRuntimeCandidate) []abilityRuntimeCandidate {
+	if len(probeCandidates) == 0 || len(normalCandidates) == 0 {
+		return probeCandidates
+	}
+	normalByChannelID := make(map[int]struct{}, len(normalCandidates))
+	for _, candidate := range normalCandidates {
+		normalByChannelID[candidate.candidate.ChannelID] = struct{}{}
+	}
+	filtered := probeCandidates[:0]
+	for _, candidate := range probeCandidates {
+		if _, normal := normalByChannelID[candidate.candidate.ChannelID]; normal {
+			continue
+		}
+		filtered = append(filtered, candidate)
+	}
+	return filtered
+}
+
+func selectAbilityRuntimeCandidate(group string, modelName string, candidates []abilityRuntimeCandidate) (Ability, bool, error) {
+	for len(candidates) > 0 {
+		runtimeCandidates := make([]runtimeSelectionCandidate, 0, len(candidates))
+		for _, candidate := range candidates {
+			runtimeCandidates = append(runtimeCandidates, candidate.candidate)
+		}
+		selected, err := selectRuntimeCandidateWithProbeClaim(group, modelName, runtimeCandidates)
+		if err != nil {
+			return Ability{}, false, err
+		}
+		for i, candidate := range candidates {
+			if candidate.candidate.ChannelID == selected.ChannelID && candidate.candidate.Probe == selected.Probe {
+				return candidate.ability, true, nil
+			}
+			if candidate.candidate.ChannelID == selected.ChannelID {
+				candidates = append(candidates[:i], candidates[i+1:]...)
+				break
+			}
+		}
+	}
+	return Ability{}, false, nil
 }
 
 func filterAbilitiesBySelectionOptions(abilities []Ability, options ChannelSelectionOptions) ([]Ability, error) {
@@ -256,36 +304,6 @@ func filterAbilitiesBySelectionOptions(abilities []Ability, options ChannelSelec
 		}
 	}
 	return filtered, nil
-}
-
-func weightedAbilityIndex(abilities []Ability, probe bool) int {
-	if len(abilities) == 0 {
-		return -1
-	}
-	weightSum := uint(0)
-	for _, ability := range abilities {
-		var inflight int
-		if probe {
-			_, inflight = getChannelProbeRuntimeState(ability.ChannelId, ability.Model)
-		} else {
-			_, inflight = getChannelRuntimeState(ability.ChannelId, ability.Model)
-		}
-		weightSum += uint(adjustedChannelWeight(int(ability.Weight), inflight)) + 10
-	}
-	weight := common.GetRandomInt(int(weightSum))
-	for i, ability := range abilities {
-		var inflight int
-		if probe {
-			_, inflight = getChannelProbeRuntimeState(ability.ChannelId, ability.Model)
-		} else {
-			_, inflight = getChannelRuntimeState(ability.ChannelId, ability.Model)
-		}
-		weight -= adjustedChannelWeight(int(ability.Weight), inflight) + 10
-		if weight <= 0 {
-			return i
-		}
-	}
-	return -1
 }
 
 // filterAbilitiesByRequestPath restricts candidates by request path for the DB

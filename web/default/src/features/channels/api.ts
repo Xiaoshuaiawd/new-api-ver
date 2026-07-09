@@ -155,6 +155,21 @@ export async function getChannelRuntimeHealthReport(params?: {
       group?: string
       count: number
     }>
+    selection_summary: Array<{
+      channel_id?: number
+      group?: string
+      model?: string
+      priority?: number
+      selected: number
+      skipped: number
+      runtime_unavailable: number
+      health_degraded: number
+      priority_fallbacks: number
+      probe_fallbacks: number
+      last_health_state?: string
+      last_reason?: string
+      last_seen_at: number
+    }>
     events: Array<{
       type: string
       channel_id: number
@@ -163,6 +178,20 @@ export async function getChannelRuntimeHealthReport(params?: {
       state: string
       reason?: string
       occurred_at: number
+      snapshot?: {
+        active_inflight: number
+        stuck_inflight: number
+        window_samples: number
+        window_failures: number
+        error_rate: number
+        average_first_response_ms: number
+        p95_first_response_ms: number
+        probe_backoff_seconds: number
+        next_probe_at: number
+        probe_in_progress: boolean
+        warmup_percent: number
+        warmup_throttle_percent?: number
+      }
       alert_sent: boolean
       alert_subject?: string
     }>

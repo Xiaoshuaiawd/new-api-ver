@@ -198,5 +198,15 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			return nil, param.TokenGroup, err
 		}
 	}
+	if channel != nil && traceFn != nil {
+		traceFn(model.ChannelSelectionTraceEvent{
+			Stage:     string(ChannelSelectionTraceStageFinal),
+			Action:    string(ChannelSelectionTraceActionSelect),
+			Group:     selectGroup,
+			Model:     param.ModelName,
+			ChannelID: channel.Id,
+			Priority:  channel.GetPriority(),
+		})
+	}
 	return channel, selectGroup, nil
 }
