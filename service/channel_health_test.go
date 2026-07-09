@@ -111,7 +111,8 @@ func TestChannelHealthOpensOnStuckInflightThreshold(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, ChannelHealthStateOpen, snapshot.State)
 	require.Contains(t, snapshot.Reason, "stuck")
-	require.Equal(t, 3, snapshot.Inflight)
+	require.Contains(t, snapshot.Reason, "inflight=3")
+	require.Equal(t, 0, snapshot.Inflight)
 }
 
 func TestChannelHealthCancelsStuckInflightWhenOpened(t *testing.T) {
@@ -135,6 +136,59 @@ func TestChannelHealthCancelsStuckInflightWhenOpened(t *testing.T) {
 
 	require.False(t, IsChannelAvailable(channelID))
 	require.Equal(t, 3, cancelled)
+}
+
+func TestChannelHealthDoesNotReopenAfterCancelledStuckInflightRecovers(t *testing.T) {
+	setting := withChannelHealthTestSettings(t)
+	setting.WarmupEnabled = false
+	now := time.Unix(1_700_000_000, 0)
+	SetChannelHealthNowFuncForTest(func() time.Time { return now })
+
+	const channelID = 8815
+	for i := 0; i < 3; i++ {
+		RecordAttemptStart(ChannelAttemptMeta{ChannelID: channelID})
+	}
+
+	now = now.Add(46 * time.Second)
+	CheckChannelHealthStuckRequests()
+	snapshot, ok := GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateOpen, snapshot.State)
+	require.Equal(t, 0, snapshot.Inflight)
+
+	RecordProbeResult(channelID, true, "")
+	RecordProbeResult(channelID, true, "")
+	require.True(t, IsChannelAvailable(channelID))
+
+	now = now.Add(time.Second)
+	CheckChannelHealthStuckRequests()
+
+	snapshot, ok = GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateHealthy, snapshot.State)
+	require.Equal(t, 0, snapshot.Inflight)
+}
+
+func TestChannelHealthStuckProbeReleasesProbeInProgress(t *testing.T) {
+	withChannelHealthTestSettings(t)
+	now := time.Unix(1_700_000_000, 0)
+	SetChannelHealthNowFuncForTest(func() time.Time { return now })
+
+	const channelID = 8817
+	OpenChannel(channelID, "test open")
+	now = now.Add(31 * time.Second)
+	require.True(t, MarkChannelProbing(channelID))
+	RecordAttemptStart(ChannelAttemptMeta{ChannelID: channelID})
+
+	now = now.Add(76 * time.Second)
+	CheckChannelHealthStuckRequests()
+	snapshot, ok := GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateOpen, snapshot.State)
+	require.False(t, snapshot.ProbeInProgress)
+
+	now = now.Add(31 * time.Second)
+	require.True(t, IsChannelProbeAvailable(channelID))
 }
 
 func TestChannelHealthRequiresTwoProbeSuccessesToRecover(t *testing.T) {

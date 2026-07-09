@@ -535,7 +535,7 @@ func GetChannelInflightForModel(channelID int, modelName string) int {
 	if !ok {
 		return 0
 	}
-	return len(state.inflight)
+	return channelActiveInflightCountLocked(state)
 }
 
 func RecordAttemptStart(meta ChannelAttemptMeta) AttemptHandle {
@@ -716,7 +716,7 @@ func RecordAttemptFinish(handle AttemptHandle, result ChannelAttemptResult) {
 	}
 	clearChannelID := 0
 	shouldClearAffinity := false
-	if shouldSample {
+	if shouldSample && !attempt.cancelled {
 		recordChannelHealthSampleLocked(state, now, setting, failed, reason, status, errCode)
 		if attempt.meta.Probe {
 			clearChannelID, shouldClearAffinity = recordProbeAttemptResultLocked(state, now, setting, !failed, reason)
@@ -1302,7 +1302,7 @@ func CheckChannelHealthStuckRequests() {
 		stuckCount := 0
 		var maxAge time.Duration
 		for _, attempt := range state.inflight {
-			if attempt.firstResponseSeen {
+			if attempt == nil || attempt.cancelled || attempt.firstResponseSeen {
 				continue
 			}
 			age := now.Sub(attempt.startedAt)
@@ -1310,21 +1310,26 @@ func CheckChannelHealthStuckRequests() {
 				continue
 			}
 			attempt.stuck = true
+			if attempt.meta.Probe {
+				state.probeInProgress = false
+			}
 			stuckCount++
 			if age > maxAge {
 				maxAge = age
 			}
 		}
 		if stuckCount >= setting.StuckInflightThreshold || (stuckCount > 0 && maxAge >= singleStuckTimeout) {
-			if channelID, shouldClear := openChannelLocked(state, now, setting, fmt.Sprintf("stuck inflight=%d max_age=%s", stuckCount, maxAge.Round(time.Second))); shouldClear {
-				clearChannelIDs = append(clearChannelIDs, channelID)
-			}
 			for _, attempt := range state.inflight {
-				if !attempt.stuck || attempt.cancelled || attempt.meta.Cancel == nil {
+				if !attempt.stuck || attempt.cancelled {
 					continue
 				}
 				attempt.cancelled = true
-				cancelStuckAttempts = append(cancelStuckAttempts, attempt.meta.Cancel)
+				if attempt.meta.Cancel != nil {
+					cancelStuckAttempts = append(cancelStuckAttempts, attempt.meta.Cancel)
+				}
+			}
+			if channelID, shouldClear := openChannelLocked(state, now, setting, fmt.Sprintf("stuck inflight=%d max_age=%s", stuckCount, maxAge.Round(time.Second))); shouldClear {
+				clearChannelIDs = append(clearChannelIDs, channelID)
 			}
 		}
 	}
@@ -1528,7 +1533,7 @@ func buildChannelHealthSnapshotLocked(state *channelHealthStateData, now time.Ti
 		ConsecutiveFailure:     state.consecutiveFailure,
 		ProbeSuccesses:         state.probeSuccesses,
 		ProbeFailures:          state.probeFailures,
-		Inflight:               len(state.inflight),
+		Inflight:               channelActiveInflightCountLocked(state),
 		WindowSamples:          samples,
 		WindowFailures:         failures,
 		ErrorRate:              errorRate,
@@ -1537,6 +1542,20 @@ func buildChannelHealthSnapshotLocked(state *channelHealthStateData, now time.Ti
 		WarmupEndsAt:           unixOrZero(state.warmupEndsAt),
 		WarmupPercent:          warmupPercent,
 	}
+}
+
+func channelActiveInflightCountLocked(state *channelHealthStateData) int {
+	if state == nil {
+		return 0
+	}
+	count := 0
+	for _, attempt := range state.inflight {
+		if attempt == nil || attempt.cancelled {
+			continue
+		}
+		count++
+	}
+	return count
 }
 
 func channelWarmupPercentLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting) int {
