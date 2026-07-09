@@ -87,7 +87,7 @@ func getChatLogLocation() *time.Location {
 	return chatLogLoc
 }
 
-func chatLogCurrentDBType() string {
+func chatLogCurrentDBType() common.DatabaseType {
 	chatLogDB := getChatLogDB()
 	if chatLogDB != nil {
 		if chatLogDB != LOG_DB {
