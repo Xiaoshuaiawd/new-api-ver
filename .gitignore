@@ -9,6 +9,7 @@ build
 *.db-journal
 logs
 web/dist
+web/*/dist/
 .env
 one-api
 new-api
@@ -24,6 +25,7 @@ plans
 .claude
 
 electron/node_modules
+node_modules/
 electron/dist
 data/
 .gomodcache/
