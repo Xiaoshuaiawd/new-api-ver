@@ -389,6 +389,9 @@ func migrateDB() error {
 	if err != nil {
 		return err
 	}
+	if err := ensureLogUpstreamRequestIDIndex(DB); err != nil {
+		return err
+	}
 	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
 		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
 			return err
@@ -461,6 +464,9 @@ func migrateDBFast() error {
 			return err
 		}
 	}
+	if err := ensureLogUpstreamRequestIDIndex(DB); err != nil {
+		return err
+	}
 	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
 		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
 			return err
@@ -478,7 +484,24 @@ func migrateLOGDB() error {
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		return migrateClickHouseLogDB()
 	}
-	return LOG_DB.AutoMigrate(&Log{})
+	if err := LOG_DB.AutoMigrate(&Log{}); err != nil {
+		return err
+	}
+	return ensureLogUpstreamRequestIDIndex(LOG_DB)
+}
+
+func ensureLogUpstreamRequestIDIndex(db *gorm.DB) error {
+	if db == nil {
+		return nil
+	}
+	migrator := db.Migrator()
+	if migrator.HasIndex(&Log{}, "idx_logs_upstream_request_id") {
+		return nil
+	}
+	if db.Dialector.Name() == "postgres" {
+		return db.Exec(`CREATE INDEX idx_logs_upstream_request_id ON "logs" ("upstream_request_id")`).Error
+	}
+	return db.Exec("CREATE INDEX `idx_logs_upstream_request_id` ON `logs` (`upstream_request_id`)").Error
 }
 
 func migrateClickHouseLogDB() error {
