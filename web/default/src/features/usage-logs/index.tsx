@@ -27,6 +27,7 @@ import { CacheStatsDialog } from '@/features/system-settings/general/channel-aff
 import { UserInfoDialog } from './components/dialogs/user-info-dialog'
 import {
   UsageLogsProvider,
+  useLogsViewScope,
   useUsageLogsContext,
 } from './components/usage-logs-provider'
 import { CommonLogsHeaderActions } from './components/common-logs-header-actions'
@@ -68,6 +69,7 @@ function UsageLogsContent() {
     affinityDialogOpen,
     setAffinityDialogOpen,
   } = useUsageLogsContext()
+  const { canManageScope, viewScope, setViewScope } = useLogsViewScope()
   const tabNavGroups = useMemo<NavGroup[]>(
     () => [
       {
@@ -103,6 +105,12 @@ function UsageLogsContent() {
     },
     [navigate]
   )
+  const handleViewScopeChange = useCallback(
+    (scope: string) => {
+      if (scope === 'all' || scope === 'self') setViewScope(scope)
+    },
+    [setViewScope]
+  )
 
   const pageMeta =
     activeCategory === 'common' ? SECTION_META.common : SECTION_META.task
@@ -115,9 +123,17 @@ function UsageLogsContent() {
         <SectionPageLayout.Title>
           {t(pageMeta.titleKey)}
         </SectionPageLayout.Title>
-        {activeCategory === 'common' ? (
+        {activeCategory === 'common' || canManageScope ? (
           <SectionPageLayout.Actions>
-            <CommonLogsHeaderActions />
+            {activeCategory === 'common' ? <CommonLogsHeaderActions /> : null}
+            {canManageScope ? (
+              <Tabs value={viewScope} onValueChange={handleViewScopeChange}>
+                <TabsList>
+                  <TabsTrigger value='all'>{t('All')}</TabsTrigger>
+                  <TabsTrigger value='self'>{t('Only Mine')}</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            ) : null}
           </SectionPageLayout.Actions>
         ) : null}
         <SectionPageLayout.Content>

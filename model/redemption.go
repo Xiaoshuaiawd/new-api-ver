@@ -94,7 +94,7 @@ func GetAllRedemptions(startIdx int, num int) (redemptions []*Redemption, total 
 	return redemptions, total, nil
 }
 
-func SearchRedemptions(keyword string, startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
+func SearchRedemptions(keyword string, status string, startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
 	tx := DB.Begin()
 	if tx.Error != nil {
 		return nil, 0, tx.Error
@@ -105,18 +105,40 @@ func SearchRedemptions(keyword string, startIdx int, num int) (redemptions []*Re
 		}
 	}()
 
-	// Build query based on keyword type
 	query := tx.Model(&Redemption{})
 	keyCol := "`key`"
 	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
 		keyCol = `"key"`
 	}
 
-	// Only try to convert to ID if the string represents a valid integer
-	if id, err := strconv.Atoi(keyword); err == nil {
-		query = query.Where("id = ? OR name LIKE ? OR "+keyCol+" LIKE ?", id, keyword+"%", keyword+"%")
-	} else {
-		query = query.Where("name LIKE ? OR "+keyCol+" LIKE ?", keyword+"%", keyword+"%")
+	if keyword != "" {
+		if id, err := strconv.Atoi(keyword); err == nil {
+			query = query.Where("id = ? OR name LIKE ? OR "+keyCol+" LIKE ?", id, keyword+"%", keyword+"%")
+		} else {
+			query = query.Where("name LIKE ? OR "+keyCol+" LIKE ?", keyword+"%", keyword+"%")
+		}
+	}
+
+	if status != "" {
+		now := common.GetTimestamp()
+		switch status {
+		case "expired":
+			query = query.Where(
+				"status = ? AND expired_time != 0 AND expired_time < ?",
+				common.RedemptionCodeStatusEnabled,
+				now,
+			)
+		case strconv.Itoa(common.RedemptionCodeStatusEnabled):
+			query = query.Where(
+				"status = ? AND (expired_time = 0 OR expired_time >= ?)",
+				common.RedemptionCodeStatusEnabled,
+				now,
+			)
+		case strconv.Itoa(common.RedemptionCodeStatusDisabled):
+			query = query.Where("status = ?", common.RedemptionCodeStatusDisabled)
+		case strconv.Itoa(common.RedemptionCodeStatusUsed):
+			query = query.Where("status = ?", common.RedemptionCodeStatusUsed)
+		}
 	}
 
 	// Get total count
@@ -165,7 +187,7 @@ func Redeem(key string, userId int) (result RedemptionRedeemResult, err error) {
 	}
 	common.RandomSleep()
 	err = DB.Transaction(func(tx *gorm.DB) error {
-		err := tx.Set("gorm:query_option", "FOR UPDATE").Where(keyCol+" = ?", key).First(redemption).Error
+		err := lockForUpdate(tx).Where(keyCol+" = ?", key).First(redemption).Error
 		if err != nil {
 			return errors.New("无效的兑换码")
 		}
@@ -178,34 +200,51 @@ func Redeem(key string, userId int) (result RedemptionRedeemResult, err error) {
 
 		redemption.NormalizeRewardType()
 		result.Type = redemption.RewardType
-		switch redemption.RewardType {
-		case RedemptionRewardTypeSubscription:
-			plan, err := getSubscriptionPlanByIdTx(tx, redemption.PlanId)
+
+		var plan *SubscriptionPlan
+		if redemption.RewardType == RedemptionRewardTypeSubscription {
+			var err error
+			plan, err = getSubscriptionPlanByIdTx(tx, redemption.PlanId)
 			if err != nil {
 				return err
 			}
 			if !plan.Enabled {
 				return errors.New("套餐未启用")
 			}
+		}
+
+		cas := tx.Model(&Redemption{}).
+			Where("id = ? AND status = ?", redemption.Id, common.RedemptionCodeStatusEnabled).
+			Updates(map[string]interface{}{
+				"redeemed_time": common.GetTimestamp(),
+				"status":        common.RedemptionCodeStatusUsed,
+				"used_user_id":  userId,
+			})
+		if cas.Error != nil {
+			return cas.Error
+		}
+		if cas.RowsAffected == 0 {
+			return errors.New("该兑换码已被使用")
+		}
+
+		switch redemption.RewardType {
+		case RedemptionRewardTypeSubscription:
 			if _, err := CreateUserSubscriptionFromPlanTx(tx, userId, plan, "redemption"); err != nil {
 				return err
 			}
 			result.PlanId = plan.Id
 			result.PlanTitle = plan.Title
 		default:
-			err = tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota)).Error
-			if err != nil {
+			if err := tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota)).Error; err != nil {
 				return err
 			}
 			result.Type = RedemptionRewardTypeQuota
 			result.Quota = redemption.Quota
 		}
-
 		redemption.RedeemedTime = common.GetTimestamp()
 		redemption.Status = common.RedemptionCodeStatusUsed
 		redemption.UsedUserId = userId
-		err = tx.Save(redemption).Error
-		return err
+		return nil
 	})
 	if err != nil {
 		common.SysError("redemption failed: " + err.Error())

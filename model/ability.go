@@ -163,7 +163,7 @@ func getHealthyAbilities(group string, modelName string, retry int, requestPath 
 		if err != nil {
 			return nil, err
 		}
-		abilities = filterAbilitiesByRequestPath(abilities, requestPath)
+		abilities = filterAbilitiesByRequestPathAndModel(abilities, requestPath, modelName)
 		normalCandidates := collectAbilityRuntimeCandidates(abilities, modelName, false, excludedChannelIDs)
 		probeCandidates := collectAbilityRuntimeCandidates(abilities, modelName, true, excludedChannelIDs)
 		probeCandidates = filterAbilityProbeCandidates(probeCandidates, normalCandidates)
@@ -306,11 +306,11 @@ func filterAbilitiesBySelectionOptions(abilities []Ability, options ChannelSelec
 	return filtered, nil
 }
 
-// filterAbilitiesByRequestPath restricts candidates by request path for the DB
+// filterAbilitiesByRequestPathAndModel restricts candidates by request path and model for the DB
 // (non-memory-cache) selection path. Only Advanced Custom (type 58) channels are
-// path-checked: kept only when one of their routes matches requestPath; all other
+// path-checked: kept only when one of their routes matches requestPath and model; all other
 // channel types always pass. When requestPath is empty, filtering is skipped.
-func filterAbilitiesByRequestPath(abilities []Ability, requestPath string) []Ability {
+func filterAbilitiesByRequestPathAndModel(abilities []Ability, requestPath string, model string) []Ability {
 	if requestPath == "" || len(abilities) == 0 {
 		return abilities
 	}
@@ -345,7 +345,7 @@ func filterAbilitiesByRequestPath(abilities []Ability, requestPath string) []Abi
 			filtered = append(filtered, ability)
 			continue
 		}
-		if config != nil && config.SupportsPath(requestPath) {
+		if config != nil && config.SupportsPathForModel(requestPath, model) {
 			filtered = append(filtered, ability)
 		}
 	}
