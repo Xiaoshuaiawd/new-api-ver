@@ -182,17 +182,18 @@ func TestChannelHealthPrunesCancelledInflightAfterRetention(t *testing.T) {
 	now = now.Add(46 * time.Second)
 	CheckChannelHealthStuckRequests()
 
-	channelHealth.Lock()
-	state := channelHealth.channels[channelHealthScopeKey(channelHealthScope{channelID: channelID})]
+	shard := channelHealthShardFor(channelID)
+	shard.Lock()
+	state := shard.channels[channelHealthScopeKey(channelHealthScope{channelID: channelID})]
 	require.Len(t, state.inflight, 3)
-	channelHealth.Unlock()
+	shard.Unlock()
 
 	now = now.Add(10 * time.Minute)
 	CheckChannelHealthStuckRequests()
 
-	channelHealth.Lock()
+	shard.Lock()
 	require.Len(t, state.inflight, 0)
-	channelHealth.Unlock()
+	shard.Unlock()
 }
 
 func TestChannelHealthStuckProbeReleasesProbeInProgress(t *testing.T) {
@@ -225,10 +226,11 @@ func TestRunDueChannelHealthProbesBypassesBackoffAfterMaxIsolation(t *testing.T)
 	SetChannelHealthNowFuncForTest(func() time.Time { return now })
 
 	OpenChannel(9101, "runtime isolate")
-	channelHealth.Lock()
-	state := channelHealth.channels[channelHealthScopeKey(channelHealthScope{channelID: 9101})]
+	shard := channelHealthShardFor(9101)
+	shard.Lock()
+	state := shard.channels[channelHealthScopeKey(channelHealthScope{channelID: 9101})]
 	state.nextProbeAt = now.Add(time.Hour)
-	channelHealth.Unlock()
+	shard.Unlock()
 
 	probed := make(chan struct{}, 1)
 	SetChannelHealthProbeFunc(func(ctx context.Context, channel *model.Channel, modelName string) error {
@@ -465,9 +467,13 @@ func TestChannelHealthAvailabilityReadsIsolationCache(t *testing.T) {
 	const channelID = 8805
 	OpenChannel(channelID, "cached isolate")
 
-	channelHealth.Lock()
-	channelHealth.channels = make(map[string]*channelHealthStateData)
-	channelHealth.Unlock()
+	// Drop the in-memory state so availability must be resolved from the
+	// isolation cache. Clear every shard to stay independent of the hash.
+	for i := range channelHealthShards {
+		channelHealthShards[i].Lock()
+		channelHealthShards[i].channels = make(map[string]*channelHealthStateData)
+		channelHealthShards[i].Unlock()
+	}
 
 	require.False(t, IsChannelAvailable(channelID))
 }

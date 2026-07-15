@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -193,25 +194,138 @@ type channelHealthStateData struct {
 	samples               []channelHealthSample
 }
 
-var channelHealth = struct {
+// channelHealthShardCount must be a power of two so that channelHealthShardFor
+// can map a channelID to a shard with a cheap bitmask instead of a modulo.
+const channelHealthShardCount = 32
+
+// channelHealthPendingOp is a single isolation-cache mutation collected while a
+// shard lock is held and flushed to Redis only after the lock is released, so a
+// slow Redis round-trip never stalls the shard's hot path.
+type channelHealthPendingOp struct {
+	scope    channelHealthScope
+	snapshot ChannelHealthSnapshot
+	ttl      time.Duration
+	isDelete bool
+}
+
+// channelHealthShard owns the runtime health state for every channel whose ID
+// hashes to it. All per-channel mutation happens under the shard's Mutex; the
+// Redis isolation writes those mutations imply are queued on pending and
+// drained by unlockAndFlush after the lock is released.
+type channelHealthShard struct {
 	sync.Mutex
-	nextAttemptID int64
-	channels      map[string]*channelHealthStateData
-	now           func() time.Time
-	workerOnce    sync.Once
-	probeFunc     ChannelHealthProbeFunc
-	cacheOnce     sync.Once
-	cache         *cachex.HybridCache[ChannelHealthSnapshot]
-	events        []ChannelHealthEvent
-	lastAlertAt   map[string]time.Time
-	notifyFunc    func(event ChannelHealthEvent)
+	channels map[string]*channelHealthStateData
+	pending  []channelHealthPendingOp
+}
+
+// queueIsolationPersist records that scope's isolation snapshot must be written
+// to Redis. Callers must hold the shard lock; the actual SetWithTTL happens in
+// unlockAndFlush.
+func (s *channelHealthShard) queueIsolationPersist(scope channelHealthScope, snapshot ChannelHealthSnapshot, ttl time.Duration) {
+	s.pending = append(s.pending, channelHealthPendingOp{scope: scope, snapshot: snapshot, ttl: ttl})
+}
+
+// queueIsolationDelete records that scope's isolation entry must be removed from
+// Redis. Callers must hold the shard lock; the actual DeleteMany happens in
+// unlockAndFlush.
+func (s *channelHealthShard) queueIsolationDelete(scope channelHealthScope) {
+	s.pending = append(s.pending, channelHealthPendingOp{scope: scope, isDelete: true})
+}
+
+// unlockAndFlush releases the shard lock and then performs any Redis isolation
+// writes queued while it was held. Draining the queue under the lock (into a
+// local slice) keeps the critical section free of network I/O while still
+// preserving the causal order in which the ops were queued.
+func (s *channelHealthShard) unlockAndFlush() {
+	pending := s.pending
+	s.pending = nil
+	s.Unlock()
+	if len(pending) == 0 {
+		return
+	}
+	cache := getChannelHealthIsolationCache()
+	for _, op := range pending {
+		if op.isDelete {
+			if _, err := cache.DeleteMany([]string{channelHealthCacheKey(op.scope)}); err != nil {
+				common.SysError(fmt.Sprintf("channel health isolation cache delete failed: channel_id=%d, model=%s, err=%v", op.scope.channelID, op.scope.modelName, err))
+			}
+			continue
+		}
+		if err := cache.SetWithTTL(channelHealthCacheKey(op.scope), op.snapshot, op.ttl); err != nil {
+			common.SysError(fmt.Sprintf("channel health isolation cache set failed: channel_id=%d, model=%s, err=%v", op.scope.channelID, op.scope.modelName, err))
+		}
+	}
+}
+
+var channelHealthShards [channelHealthShardCount]channelHealthShard
+
+// channelHealthShardFor returns the shard that owns channelID. Sharding is keyed
+// on channelID (not the full scope key) so that every model-level scope of one
+// channel lands on the same shard, letting the runtime-control operations mutate
+// all of a channel's scopes atomically under a single lock.
+func channelHealthShardFor(channelID int) *channelHealthShard {
+	return &channelHealthShards[uint(channelID)&(channelHealthShardCount-1)]
+}
+
+// nextChannelHealthAttemptID is a process-wide monotonic counter for attempt
+// handles. It is independent of any channel state, so an atomic keeps it off the
+// shard locks entirely.
+var nextChannelHealthAttemptID int64
+
+// channelHealthNowFunc / channelHealthProbeFuncPtr / channelHealthNotifyFuncPtr
+// are read on hot paths and written only at startup or in tests, so they live in
+// atomics rather than behind a lock.
+var (
+	channelHealthNowFunc       atomic.Pointer[func() time.Time]
+	channelHealthProbeFuncPtr  atomic.Pointer[ChannelHealthProbeFunc]
+	channelHealthNotifyFuncPtr atomic.Pointer[func(event ChannelHealthEvent)]
+)
+
+// channelHealthEventLog holds the cross-channel event ring buffer and alert
+// dedup map. It has its own lock; when a state transition under a shard lock
+// records an event, the lock order is always shard -> eventLog (never the
+// reverse), which is why the event-reading paths take eventLog alone.
+var channelHealthEventLog = struct {
+	sync.Mutex
+	events      []ChannelHealthEvent
+	lastAlertAt map[string]time.Time
 }{
-	channels:    make(map[string]*channelHealthStateData),
-	now:         time.Now,
 	lastAlertAt: make(map[string]time.Time),
 }
 
+// channelHealthCache holds the lazily-initialized isolation cache singleton.
+var channelHealthCache = struct {
+	once  sync.Once
+	cache *cachex.HybridCache[ChannelHealthSnapshot]
+}{}
+
+var channelHealthProbeWorkerOnce sync.Once
+
+// loadChannelHealthProbeFunc returns the registered probe callback, or nil if
+// none has been set. It reads the atomic so callers never touch a shard lock.
+func loadChannelHealthProbeFunc() ChannelHealthProbeFunc {
+	if fn := channelHealthProbeFuncPtr.Load(); fn != nil {
+		return *fn
+	}
+	return nil
+}
+
+// loadChannelHealthNotifyFunc returns the registered notify callback, or nil if
+// none has been set (production then falls back to NotifyRootUser).
+func loadChannelHealthNotifyFunc() func(event ChannelHealthEvent) {
+	if fn := channelHealthNotifyFuncPtr.Load(); fn != nil {
+		return *fn
+	}
+	return nil
+}
+
 func init() {
+	for i := range channelHealthShards {
+		channelHealthShards[i].channels = make(map[string]*channelHealthStateData)
+	}
+	defaultNow := time.Now
+	channelHealthNowFunc.Store(&defaultNow)
+
 	model.SetChannelRuntimeStateFunc(func(channelID int, modelName string, mode model.ChannelRuntimeStateMode) (bool, int) {
 		switch mode {
 		case model.ChannelRuntimeStateProbe:
@@ -232,8 +346,8 @@ func init() {
 }
 
 func getChannelHealthIsolationCache() *cachex.HybridCache[ChannelHealthSnapshot] {
-	channelHealth.cacheOnce.Do(func() {
-		channelHealth.cache = cachex.NewHybridCache[ChannelHealthSnapshot](cachex.HybridCacheConfig[ChannelHealthSnapshot]{
+	channelHealthCache.once.Do(func() {
+		channelHealthCache.cache = cachex.NewHybridCache[ChannelHealthSnapshot](cachex.HybridCacheConfig[ChannelHealthSnapshot]{
 			Namespace:  cachex.Namespace(channelHealthIsolationCacheNamespace),
 			Redis:      common.RDB,
 			RedisCodec: cachex.JSONCodec[ChannelHealthSnapshot]{},
@@ -248,7 +362,7 @@ func getChannelHealthIsolationCache() *cachex.HybridCache[ChannelHealthSnapshot]
 			},
 		})
 	})
-	return channelHealth.cache
+	return channelHealthCache.cache
 }
 
 func channelHealthIsolationTTL(setting operation_setting.ChannelHealthSetting) time.Duration {
@@ -328,10 +442,10 @@ func channelHealthEnabled() bool {
 }
 
 func channelHealthNow() time.Time {
-	if channelHealth.now == nil {
-		return time.Now()
+	if fn := channelHealthNowFunc.Load(); fn != nil {
+		return (*fn)()
 	}
-	return channelHealth.now()
+	return time.Now()
 }
 
 type channelHealthScope struct {
@@ -416,12 +530,15 @@ func channelRuntimeControlModelNames(channel *model.Channel) []string {
 	return modelNames
 }
 
-func getOrCreateChannelHealthLocked(scope channelHealthScope) *channelHealthStateData {
-	if channelHealth.channels == nil {
-		channelHealth.channels = make(map[string]*channelHealthStateData)
+// getOrCreateChannelHealthLocked looks up (or creates) the state for scope.
+// The caller must hold shard's lock, and shard must be the one that owns
+// scope.channelID (channelHealthShardFor(scope.channelID)).
+func getOrCreateChannelHealthLocked(shard *channelHealthShard, scope channelHealthScope) *channelHealthStateData {
+	if shard.channels == nil {
+		shard.channels = make(map[string]*channelHealthStateData)
 	}
 	key := channelHealthScopeKey(scope)
-	state, ok := channelHealth.channels[key]
+	state, ok := shard.channels[key]
 	if ok {
 		return state
 	}
@@ -431,47 +548,89 @@ func getOrCreateChannelHealthLocked(scope channelHealthScope) *channelHealthStat
 		state:     ChannelHealthStateHealthy,
 		inflight:  make(map[int64]*channelAttemptState),
 	}
-	channelHealth.channels[key] = state
+	shard.channels[key] = state
 	return state
 }
 
 func ResetChannelHealthForTest() {
-	channelHealth.Lock()
-	defer channelHealth.Unlock()
+	for i := range channelHealthShards {
+		shard := &channelHealthShards[i]
+		shard.Lock()
+		shard.channels = make(map[string]*channelHealthStateData)
+		shard.pending = nil
+		shard.Unlock()
+	}
 
-	channelHealth.nextAttemptID = 0
-	channelHealth.channels = make(map[string]*channelHealthStateData)
-	channelHealth.now = time.Now
-	channelHealth.workerOnce = sync.Once{}
-	channelHealth.probeFunc = nil
-	channelHealth.cacheOnce = sync.Once{}
-	channelHealth.cache = nil
-	channelHealth.events = nil
-	channelHealth.lastAlertAt = make(map[string]time.Time)
-	channelHealth.notifyFunc = nil
+	atomic.StoreInt64(&nextChannelHealthAttemptID, 0)
+	defaultNow := time.Now
+	channelHealthNowFunc.Store(&defaultNow)
+	channelHealthProbeFuncPtr.Store(nil)
+	channelHealthNotifyFuncPtr.Store(nil)
+
+	channelHealthEventLog.Lock()
+	channelHealthEventLog.events = nil
+	channelHealthEventLog.lastAlertAt = make(map[string]time.Time)
+	channelHealthEventLog.Unlock()
+
+	// Purge the isolation cache contents so snapshots do not leak between
+	// tests (the pre-refactor reset cleared cacheOnce/cache for the same
+	// reason). Purging through the stable singleton — rather than swapping the
+	// cache pointer/sync.Once — avoids racing the unlocked read in
+	// getChannelHealthIsolationCache from any background probe goroutine a prior
+	// test may have left running.
+	if err := getChannelHealthIsolationCache().Purge(); err != nil {
+		common.SysError(fmt.Sprintf("channel health isolation cache purge failed: %v", err))
+	}
+
 	ResetChannelSelectionTraceSummaryForTest()
 }
 
+// clearChannelHealthInMemoryForTest drops every in-memory shard state without
+// touching the isolation cache, so tests can verify the cache-backed recovery
+// path after the local state has been evicted.
+func clearChannelHealthInMemoryForTest() {
+	for i := range channelHealthShards {
+		shard := &channelHealthShards[i]
+		shard.Lock()
+		shard.channels = make(map[string]*channelHealthStateData)
+		shard.pending = nil
+		shard.Unlock()
+	}
+}
+
+// channelHealthStateForTest returns the in-memory state for a channel scope, or
+// nil when none exists. It exists so tests can assert on internal state without
+// reaching into shard internals directly.
+func channelHealthStateForTest(scope channelHealthScope) *channelHealthStateData {
+	shard := channelHealthShardFor(scope.channelID)
+	shard.Lock()
+	defer shard.Unlock()
+	return shard.channels[channelHealthScopeKey(scope)]
+}
+
 func SetChannelHealthNowFuncForTest(now func() time.Time) {
-	channelHealth.Lock()
-	defer channelHealth.Unlock()
 	if now == nil {
-		channelHealth.now = time.Now
+		defaultNow := time.Now
+		channelHealthNowFunc.Store(&defaultNow)
 		return
 	}
-	channelHealth.now = now
+	channelHealthNowFunc.Store(&now)
 }
 
 func SetChannelHealthProbeFunc(fn ChannelHealthProbeFunc) {
-	channelHealth.Lock()
-	defer channelHealth.Unlock()
-	channelHealth.probeFunc = fn
+	if fn == nil {
+		channelHealthProbeFuncPtr.Store(nil)
+		return
+	}
+	channelHealthProbeFuncPtr.Store(&fn)
 }
 
 func SetChannelHealthEventNotifyFuncForTest(fn func(event ChannelHealthEvent)) {
-	channelHealth.Lock()
-	defer channelHealth.Unlock()
-	channelHealth.notifyFunc = fn
+	if fn == nil {
+		channelHealthNotifyFuncPtr.Store(nil)
+		return
+	}
+	channelHealthNotifyFuncPtr.Store(&fn)
 }
 
 func IsChannelAvailable(channelID int) bool {
@@ -486,32 +645,33 @@ func IsChannelAvailableForModel(channelID int, modelName string) bool {
 	now := channelHealthNow()
 	setting := defaultChannelHealthSetting()
 	scope := channelHealthScopeFor(channelID, modelName, setting)
+	shard := channelHealthShardFor(channelID)
 	if snapshot, found := getChannelHealthIsolationSnapshot(scope, now); found {
 		if snapshot.State == ChannelHealthStateHealthy {
-			channelHealth.Lock()
-			if state, ok := channelHealth.channels[channelHealthScopeKey(scope)]; ok && state.state == ChannelHealthStateWarming && isChannelWarmupCompleteLocked(state, now) {
+			shard.Lock()
+			if state, ok := shard.channels[channelHealthScopeKey(scope)]; ok && state.state == ChannelHealthStateWarming && isChannelWarmupCompleteLocked(state, now) {
 				completeChannelWarmupLocked(state, now, setting, "warmup complete")
 			}
-			channelHealth.Unlock()
+			shard.unlockAndFlush()
 			return true
 		}
 		if shouldHydrateChannelHealthSnapshotForProbe(snapshot, now, setting) {
-			channelHealth.Lock()
-			state := hydrateChannelHealthStateFromSnapshotLocked(scope, snapshot, now, setting)
+			shard.Lock()
+			state := hydrateChannelHealthStateFromSnapshotLocked(shard, scope, snapshot, now, setting)
 			persistChannelHealthIsolationLocked(state, now, setting)
-			channelHealth.Unlock()
+			shard.unlockAndFlush()
 		}
 		return isChannelHealthSnapshotAvailable(snapshot, now)
 	}
 
-	channelHealth.Lock()
-	state, ok := channelHealth.channels[channelHealthScopeKey(scope)]
+	shard.Lock()
+	state, ok := shard.channels[channelHealthScopeKey(scope)]
 	if ok {
 		available := isChannelAvailableLocked(state, now, setting)
-		channelHealth.Unlock()
+		shard.unlockAndFlush()
 		return available
 	}
-	channelHealth.Unlock()
+	shard.unlockAndFlush()
 
 	return true
 }
@@ -528,14 +688,15 @@ func IsChannelProbeAvailableForModel(channelID int, modelName string) bool {
 	now := channelHealthNow()
 	setting := defaultChannelHealthSetting()
 	scope := channelHealthScopeFor(channelID, modelName, setting)
-	channelHealth.Lock()
-	state, ok := channelHealth.channels[channelHealthScopeKey(scope)]
+	shard := channelHealthShardFor(channelID)
+	shard.Lock()
+	state, ok := shard.channels[channelHealthScopeKey(scope)]
 	if ok {
 		available := isChannelProbeAvailableLocked(state, now)
-		channelHealth.Unlock()
+		shard.unlockAndFlush()
 		return available
 	}
-	channelHealth.Unlock()
+	shard.unlockAndFlush()
 
 	snapshot, found := getChannelHealthIsolationSnapshot(scope, now)
 	if !found {
@@ -547,11 +708,11 @@ func IsChannelProbeAvailableForModel(channelID int, modelName string) bool {
 	if !shouldHydrateChannelHealthSnapshotForProbe(snapshot, now, setting) {
 		return false
 	}
-	channelHealth.Lock()
-	state = hydrateChannelHealthStateFromSnapshotLocked(scope, snapshot, now, setting)
+	shard.Lock()
+	state = hydrateChannelHealthStateFromSnapshotLocked(shard, scope, snapshot, now, setting)
 	available := isChannelProbeAvailableLocked(state, now)
 	persistChannelHealthIsolationLocked(state, now, setting)
-	channelHealth.Unlock()
+	shard.unlockAndFlush()
 	return available
 }
 
@@ -615,7 +776,7 @@ func getChannelHealthIsolationSnapshot(scope channelHealthScope, now time.Time) 
 			snapshot.WarmupStartedAt = 0
 			snapshot.WarmupEndsAt = 0
 			snapshot.WarmupPercent = 100
-			deleteChannelHealthIsolation(scope)
+			deleteChannelHealthIsolationDirect(scope)
 		}
 	}
 	return snapshot, true
@@ -652,8 +813,8 @@ func shouldHydrateChannelHealthSnapshotForProbe(snapshot ChannelHealthSnapshot, 
 	return snapshot.NextProbeAt <= 0 || now.Unix() >= snapshot.NextProbeAt
 }
 
-func hydrateChannelHealthStateFromSnapshotLocked(scope channelHealthScope, snapshot ChannelHealthSnapshot, now time.Time, setting operation_setting.ChannelHealthSetting) *channelHealthStateData {
-	state := getOrCreateChannelHealthLocked(scope)
+func hydrateChannelHealthStateFromSnapshotLocked(shard *channelHealthShard, scope channelHealthScope, snapshot ChannelHealthSnapshot, now time.Time, setting operation_setting.ChannelHealthSetting) *channelHealthStateData {
+	state := getOrCreateChannelHealthLocked(shard, scope)
 	state.state = snapshot.State
 	state.reason = snapshot.Reason
 	state.openedAt = unixToTime(snapshot.OpenedAt)
@@ -686,11 +847,12 @@ func GetChannelInflightForModel(channelID int, modelName string) int {
 		return 0
 	}
 
-	channelHealth.Lock()
-	defer channelHealth.Unlock()
-
 	scope := channelHealthScopeFor(channelID, modelName, defaultChannelHealthSetting())
-	state, ok := channelHealth.channels[channelHealthScopeKey(scope)]
+	shard := channelHealthShardFor(channelID)
+	shard.Lock()
+	defer shard.Unlock()
+
+	state, ok := shard.channels[channelHealthScopeKey(scope)]
 	if !ok {
 		return 0
 	}
@@ -702,19 +864,19 @@ func RecordAttemptStart(meta ChannelAttemptMeta) AttemptHandle {
 		return AttemptHandle{}
 	}
 
-	channelHealth.Lock()
-	defer channelHealth.Unlock()
-
-	channelHealth.nextAttemptID++
 	handle := AttemptHandle{
 		channelID: meta.ChannelID,
 		modelName: strings.TrimSpace(meta.ModelName),
-		attemptID: channelHealth.nextAttemptID,
+		attemptID: atomic.AddInt64(&nextChannelHealthAttemptID, 1),
 	}
 	setting := defaultChannelHealthSetting()
 	scope := channelHealthScopeFor(meta.ChannelID, meta.ModelName, setting)
 	handle.modelName = scope.modelName
-	state := getOrCreateChannelHealthLocked(scope)
+	shard := channelHealthShardFor(meta.ChannelID)
+	shard.Lock()
+	defer shard.unlockAndFlush()
+
+	state := getOrCreateChannelHealthLocked(shard, scope)
 	if group := strings.TrimSpace(meta.Group); group != "" {
 		state.group = group
 	}
@@ -815,11 +977,12 @@ func RecordFirstResponse(handle AttemptHandle) {
 		return
 	}
 
-	channelHealth.Lock()
-	defer channelHealth.Unlock()
+	shard := channelHealthShardFor(handle.channelID)
+	shard.Lock()
+	defer shard.Unlock()
 
 	scope := channelHealthScopeFor(handle.channelID, handle.modelName, defaultChannelHealthSetting())
-	state, ok := channelHealth.channels[channelHealthScopeKey(scope)]
+	state, ok := shard.channels[channelHealthScopeKey(scope)]
 	if !ok {
 		return
 	}
@@ -848,19 +1011,20 @@ func RecordAttemptFinish(handle AttemptHandle, result ChannelAttemptResult) {
 
 	shouldSample, failed := classifyChannelAttemptResult(result)
 
-	channelHealth.Lock()
+	shard := channelHealthShardFor(handle.channelID)
+	shard.Lock()
 
 	now := channelHealthNow()
 	setting := defaultChannelHealthSetting()
 	scope := channelHealthScopeFor(handle.channelID, handle.modelName, setting)
-	state, ok := channelHealth.channels[channelHealthScopeKey(scope)]
+	state, ok := shard.channels[channelHealthScopeKey(scope)]
 	if !ok {
-		channelHealth.Unlock()
+		shard.unlockAndFlush()
 		return
 	}
 	attempt, ok := state.inflight[handle.attemptID]
 	if !ok {
-		channelHealth.Unlock()
+		shard.unlockAndFlush()
 		return
 	}
 	delete(state.inflight, handle.attemptID)
@@ -884,7 +1048,7 @@ func RecordAttemptFinish(handle AttemptHandle, result ChannelAttemptResult) {
 			clearChannelID, shouldClearAffinity = evaluateChannelHealthLocked(state, now, setting)
 		}
 	}
-	channelHealth.Unlock()
+	shard.unlockAndFlush()
 
 	if release != nil {
 		release()
@@ -1124,13 +1288,14 @@ func OpenChannelForModel(channelID int, modelName string, reason string) {
 		return
 	}
 
-	channelHealth.Lock()
+	shard := channelHealthShardFor(channelID)
+	shard.Lock()
 
 	setting := defaultChannelHealthSetting()
 	scope := channelHealthScopeFor(channelID, modelName, setting)
-	state := getOrCreateChannelHealthLocked(scope)
+	state := getOrCreateChannelHealthLocked(shard, scope)
 	clearChannelID, shouldClearAffinity := openChannelLocked(state, channelHealthNow(), setting, reason)
-	channelHealth.Unlock()
+	shard.unlockAndFlush()
 
 	if shouldClearAffinity {
 		ClearChannelAffinityByChannelID(clearChannelID)
@@ -1154,12 +1319,13 @@ func ForceOpenChannelRuntime(channelID int, reason string, duration time.Duratio
 	setting := defaultChannelHealthSetting()
 	scopes := channelRuntimeControlScopes(channel, setting)
 
-	channelHealth.Lock()
+	shard := channelHealthShardFor(channelID)
+	shard.Lock()
 	now := channelHealthNow()
 	shouldClearAffinity := false
 	snapshot := ChannelHealthSnapshot{ChannelID: channelID}
 	for i, scope := range scopes {
-		state := getOrCreateChannelHealthLocked(scope)
+		state := getOrCreateChannelHealthLocked(shard, scope)
 		_, shouldClear := openChannelLocked(state, now, setting, reason)
 		shouldClearAffinity = shouldClearAffinity || shouldClear
 		if duration > 0 {
@@ -1170,7 +1336,7 @@ func ForceOpenChannelRuntime(channelID int, reason string, duration time.Duratio
 			snapshot = buildChannelHealthSnapshotLocked(state, now, setting)
 		}
 	}
-	channelHealth.Unlock()
+	shard.unlockAndFlush()
 
 	deleted := 0
 	if shouldClearAffinity {
@@ -1200,19 +1366,20 @@ func ClearChannelRuntimeIsolation(channelID int) (ChannelRuntimeControlResult, e
 	setting := defaultChannelHealthSetting()
 	scopes := channelRuntimeControlScopes(channel, setting)
 
-	channelHealth.Lock()
+	shard := channelHealthShardFor(channelID)
+	shard.Lock()
 	now := channelHealthNow()
 	snapshot := ChannelHealthSnapshot{ChannelID: channelID, State: ChannelHealthStateHealthy, RuntimeAvailable: true, ProbeAvailable: true, WarmupPercent: 100}
 	for i, scope := range scopes {
-		state := getOrCreateChannelHealthLocked(scope)
+		state := getOrCreateChannelHealthLocked(shard, scope)
 		resetChannelRuntimeStateLocked(state)
 		markChannelHealthyLocked(state)
-		deleteChannelHealthIsolation(scope)
+		deleteChannelHealthIsolationLocked(scope)
 		if i == 0 {
 			snapshot = buildChannelHealthSnapshotLocked(state, now, setting)
 		}
 	}
-	channelHealth.Unlock()
+	shard.unlockAndFlush()
 
 	return ChannelRuntimeControlResult{
 		ChannelID: channelID,
@@ -1237,11 +1404,12 @@ func ForceChannelRuntimeProbeNow(channelID int) (ChannelRuntimeControlResult, er
 	setting := defaultChannelHealthSetting()
 	scopes := channelRuntimeControlScopes(channel, setting)
 
-	channelHealth.Lock()
+	shard := channelHealthShardFor(channelID)
+	shard.Lock()
 	now := channelHealthNow()
 	snapshot := ChannelHealthSnapshot{ChannelID: channelID}
 	for i, scope := range scopes {
-		state := getOrCreateChannelHealthLocked(scope)
+		state := getOrCreateChannelHealthLocked(shard, scope)
 		if state.state == ChannelHealthStateHealthy || state.state == ChannelHealthStateWarming {
 			state.state = ChannelHealthStateOpen
 			state.reason = "operator requested probe"
@@ -1255,7 +1423,7 @@ func ForceChannelRuntimeProbeNow(channelID int) (ChannelRuntimeControlResult, er
 		}
 	}
 	if len(scopes) == 0 {
-		state := getOrCreateChannelHealthLocked(channelHealthScopeFor(channelID, "", setting))
+		state := getOrCreateChannelHealthLocked(shard, channelHealthScopeFor(channelID, "", setting))
 		state.state = ChannelHealthStateOpen
 		state.reason = "operator requested probe"
 		state.openedAt = now
@@ -1264,7 +1432,7 @@ func ForceChannelRuntimeProbeNow(channelID int) (ChannelRuntimeControlResult, er
 		persistChannelHealthIsolationLocked(state, now, setting)
 		snapshot = buildChannelHealthSnapshotLocked(state, now, setting)
 	}
-	channelHealth.Unlock()
+	shard.unlockAndFlush()
 
 	return ChannelRuntimeControlResult{
 		ChannelID: channelID,
@@ -1281,19 +1449,33 @@ func MarkChannelProbingForModel(channelID int, modelName string) bool {
 		return false
 	}
 
-	channelHealth.Lock()
-	defer channelHealth.Unlock()
-
 	now := channelHealthNow()
 	setting := defaultChannelHealthSetting()
 	scope := channelHealthScopeFor(channelID, modelName, setting)
-	state, ok := channelHealth.channels[channelHealthScopeKey(scope)]
-	if !ok {
+	shard := channelHealthShardFor(channelID)
+	key := channelHealthScopeKey(scope)
+
+	// Cold path: if this instance has never seen the channel, pull its isolation
+	// snapshot from the cache and hydrate it. The snapshot read (Redis GET, plus a
+	// possible warmup-expiry delete) is done outside the shard lock so it never
+	// blocks the shard on a Redis round-trip.
+	shard.Lock()
+	_, inMemory := shard.channels[key]
+	shard.Unlock()
+	if !inMemory {
 		if snapshot, found := getChannelHealthIsolationSnapshot(scope, now); found && snapshot.State != ChannelHealthStateHealthy {
-			state = hydrateChannelHealthStateFromSnapshotLocked(scope, snapshot, now, setting)
-		} else {
-			state = getOrCreateChannelHealthLocked(scope)
+			shard.Lock()
+			hydrateChannelHealthStateFromSnapshotLocked(shard, scope, snapshot, now, setting)
+			shard.unlockAndFlush()
 		}
+	}
+
+	shard.Lock()
+	defer shard.unlockAndFlush()
+
+	state, ok := shard.channels[key]
+	if !ok {
+		state = getOrCreateChannelHealthLocked(shard, scope)
 	}
 	if state.state == ChannelHealthStateHealthy {
 		return true
@@ -1346,12 +1528,13 @@ func RecordProbeResultForModel(channelID int, modelName string, success bool, re
 		return
 	}
 
-	channelHealth.Lock()
-	defer channelHealth.Unlock()
+	shard := channelHealthShardFor(channelID)
+	shard.Lock()
+	defer shard.unlockAndFlush()
 
 	now := channelHealthNow()
 	setting := defaultChannelHealthSetting()
-	state := getOrCreateChannelHealthLocked(channelHealthScopeFor(channelID, modelName, setting))
+	state := getOrCreateChannelHealthLocked(shard, channelHealthScopeFor(channelID, modelName, setting))
 	recordProbeAttemptResultLocked(state, now, setting, success, reason)
 }
 
@@ -1390,7 +1573,7 @@ func recordProbeAttemptResultLocked(state *channelHealthStateData, now time.Time
 				recordChannelHealthEventLocked(setting, ChannelHealthEventTypeWarming, state, "probe recovered into warming", now)
 			} else {
 				markChannelHealthyLocked(state)
-				deleteChannelHealthIsolation(channelHealthScope{channelID: state.channelID, modelName: state.modelName})
+				deleteChannelHealthIsolationLocked(channelHealthScope{channelID: state.channelID, modelName: state.modelName})
 				recordChannelHealthEventLocked(setting, ChannelHealthEventTypeRecovered, state, "probe recovered", now)
 			}
 		} else {
@@ -1434,16 +1617,18 @@ func completeChannelWarmupLocked(state *channelHealthStateData, now time.Time, s
 		return
 	}
 	markChannelHealthyLocked(state)
-	deleteChannelHealthIsolation(channelHealthScope{channelID: state.channelID, modelName: state.modelName})
+	deleteChannelHealthIsolationLocked(channelHealthScope{channelID: state.channelID, modelName: state.modelName})
 	recordChannelHealthEventLocked(setting, ChannelHealthEventTypeRecovered, state, reason, now)
 }
 
+// recordChannelHealthEventLocked is called while the state's shard lock is held.
+// It builds the event snapshot from state under that lock, then takes the
+// separate event-log lock to append the event and evaluate alert dedup. The
+// lock order is always shard -> eventLog; no path takes the shard lock while
+// holding eventLog, so this cannot deadlock.
 func recordChannelHealthEventLocked(setting operation_setting.ChannelHealthSetting, eventType string, state *channelHealthStateData, reason string, now time.Time) {
 	if state == nil || !setting.EventsEnabled {
 		return
-	}
-	if channelHealth.lastAlertAt == nil {
-		channelHealth.lastAlertAt = make(map[string]time.Time)
 	}
 	event := ChannelHealthEvent{
 		Type:       eventType,
@@ -1460,20 +1645,26 @@ func recordChannelHealthEventLocked(setting operation_setting.ChannelHealthSetti
 	if minInterval <= 0 {
 		minInterval = 60 * time.Second
 	}
+
+	channelHealthEventLog.Lock()
+	if channelHealthEventLog.lastAlertAt == nil {
+		channelHealthEventLog.lastAlertAt = make(map[string]time.Time)
+	}
 	if channelHealthEventAlertable(eventType) {
-		if last, ok := channelHealth.lastAlertAt[alertKey]; !ok || now.Sub(last) >= minInterval {
-			channelHealth.lastAlertAt[alertKey] = now
+		if last, ok := channelHealthEventLog.lastAlertAt[alertKey]; !ok || now.Sub(last) >= minInterval {
+			channelHealthEventLog.lastAlertAt[alertKey] = now
 			event.AlertSent = true
 			event.AlertSubject = channelHealthAlertSubject(event)
 		}
 	}
-	channelHealth.events = append(channelHealth.events, event)
-	if len(channelHealth.events) > 1000 {
-		channelHealth.events = append([]ChannelHealthEvent(nil), channelHealth.events[len(channelHealth.events)-1000:]...)
+	channelHealthEventLog.events = append(channelHealthEventLog.events, event)
+	if len(channelHealthEventLog.events) > 1000 {
+		channelHealthEventLog.events = append([]ChannelHealthEvent(nil), channelHealthEventLog.events[len(channelHealthEventLog.events)-1000:]...)
 	}
+	channelHealthEventLog.Unlock()
+
 	if event.AlertSent {
-		notify := channelHealth.notifyFunc
-		go notifyChannelHealthEvent(event, notify)
+		go notifyChannelHealthEvent(event, loadChannelHealthNotifyFunc())
 	}
 }
 
@@ -1551,16 +1742,16 @@ func channelHealthAlertContent(event ChannelHealthEvent) string {
 }
 
 func GetChannelHealthEvents(filter ChannelHealthEventFilter) []ChannelHealthEvent {
-	channelHealth.Lock()
-	defer channelHealth.Unlock()
+	channelHealthEventLog.Lock()
+	defer channelHealthEventLog.Unlock()
 
 	limit := filter.Limit
 	if limit <= 0 || limit > 200 {
 		limit = 200
 	}
-	events := make([]ChannelHealthEvent, 0, len(channelHealth.events))
-	for i := len(channelHealth.events) - 1; i >= 0 && len(events) < limit; i-- {
-		event := channelHealth.events[i]
+	events := make([]ChannelHealthEvent, 0, len(channelHealthEventLog.events))
+	for i := len(channelHealthEventLog.events) - 1; i >= 0 && len(events) < limit; i-- {
+		event := channelHealthEventLog.events[i]
 		if filter.ChannelID > 0 && event.ChannelID != filter.ChannelID {
 			continue
 		}
@@ -1626,29 +1817,33 @@ func GetChannelHealthReport(filter ChannelHealthEventFilter) ChannelHealthReport
 }
 
 func averageFirstResponseMsForFilter(filter ChannelHealthEventFilter) float64 {
-	channelHealth.Lock()
-	defer channelHealth.Unlock()
-
 	var total time.Duration
 	count := 0
-	for _, state := range channelHealth.channels {
-		if state == nil || state.firstResponseCount <= 0 {
-			continue
+	// Snapshot each shard under its own lock in turn; the aggregate does not need
+	// a globally consistent view, only per-shard consistency.
+	for shard := range channelHealthShards {
+		s := &channelHealthShards[shard]
+		s.Lock()
+		for _, state := range s.channels {
+			if state == nil || state.firstResponseCount <= 0 {
+				continue
+			}
+			if filter.ChannelID > 0 && state.channelID != filter.ChannelID {
+				continue
+			}
+			if filter.ModelName != "" && state.modelName != filter.ModelName {
+				continue
+			}
+			if filter.Group != "" && state.group != filter.Group {
+				continue
+			}
+			if filter.State != "" && string(state.state) != filter.State {
+				continue
+			}
+			total += state.firstResponseTotal
+			count += state.firstResponseCount
 		}
-		if filter.ChannelID > 0 && state.channelID != filter.ChannelID {
-			continue
-		}
-		if filter.ModelName != "" && state.modelName != filter.ModelName {
-			continue
-		}
-		if filter.Group != "" && state.group != filter.Group {
-			continue
-		}
-		if filter.State != "" && string(state.state) != filter.State {
-			continue
-		}
-		total += state.firstResponseTotal
-		count += state.firstResponseCount
+		s.Unlock()
 	}
 	if count == 0 {
 		return 0
@@ -1661,8 +1856,6 @@ func CheckChannelHealthStuckRequests() {
 		return
 	}
 
-	channelHealth.Lock()
-
 	now := channelHealthNow()
 	setting := defaultChannelHealthSetting()
 	firstResponseTimeout := time.Duration(setting.FirstResponseTimeoutSeconds) * time.Second
@@ -1670,43 +1863,50 @@ func CheckChannelHealthStuckRequests() {
 	clearChannelIDs := make([]int, 0)
 	cancelStuckAttempts := make([]func(), 0)
 
-	for _, state := range channelHealth.channels {
-		pruneChannelInflightLocked(state, now, setting)
-		stuckCount := 0
-		var maxAge time.Duration
-		for _, attempt := range state.inflight {
-			if attempt == nil || attempt.cancelled || attempt.firstResponseSeen {
-				continue
-			}
-			age := now.Sub(attempt.startedAt)
-			if age < firstResponseTimeout {
-				continue
-			}
-			attempt.stuck = true
-			if attempt.meta.Probe {
-				state.probeInProgress = false
-			}
-			stuckCount++
-			if age > maxAge {
-				maxAge = age
-			}
-		}
-		if stuckCount >= setting.StuckInflightThreshold || (stuckCount > 0 && maxAge >= singleStuckTimeout) {
+	// Each shard is locked in turn so a slow shard never blocks the others; the
+	// stuck-attempt cancels and affinity clears they imply are collected and run
+	// after every shard lock has been released.
+	for i := range channelHealthShards {
+		shard := &channelHealthShards[i]
+		shard.Lock()
+		for _, state := range shard.channels {
+			pruneChannelInflightLocked(state, now, setting)
+			stuckCount := 0
+			var maxAge time.Duration
 			for _, attempt := range state.inflight {
-				if !attempt.stuck || attempt.cancelled {
+				if attempt == nil || attempt.cancelled || attempt.firstResponseSeen {
 					continue
 				}
-				attempt.cancelled = true
-				if attempt.meta.Cancel != nil {
-					cancelStuckAttempts = append(cancelStuckAttempts, attempt.meta.Cancel)
+				age := now.Sub(attempt.startedAt)
+				if age < firstResponseTimeout {
+					continue
+				}
+				attempt.stuck = true
+				if attempt.meta.Probe {
+					state.probeInProgress = false
+				}
+				stuckCount++
+				if age > maxAge {
+					maxAge = age
 				}
 			}
-			if channelID, shouldClear := openChannelLocked(state, now, setting, fmt.Sprintf("stuck inflight=%d max_age=%s", stuckCount, maxAge.Round(time.Second))); shouldClear {
-				clearChannelIDs = append(clearChannelIDs, channelID)
+			if stuckCount >= setting.StuckInflightThreshold || (stuckCount > 0 && maxAge >= singleStuckTimeout) {
+				for _, attempt := range state.inflight {
+					if !attempt.stuck || attempt.cancelled {
+						continue
+					}
+					attempt.cancelled = true
+					if attempt.meta.Cancel != nil {
+						cancelStuckAttempts = append(cancelStuckAttempts, attempt.meta.Cancel)
+					}
+				}
+				if channelID, shouldClear := openChannelLocked(state, now, setting, fmt.Sprintf("stuck inflight=%d max_age=%s", stuckCount, maxAge.Round(time.Second))); shouldClear {
+					clearChannelIDs = append(clearChannelIDs, channelID)
+				}
 			}
 		}
+		shard.unlockAndFlush()
 	}
-	channelHealth.Unlock()
 
 	for _, cancel := range cancelStuckAttempts {
 		cancel()
@@ -1717,7 +1917,7 @@ func CheckChannelHealthStuckRequests() {
 }
 
 func RunChannelHealthProbeWorker() {
-	channelHealth.workerOnce.Do(func() {
+	channelHealthProbeWorkerOnce.Do(func() {
 		go func() {
 			ticker := time.NewTicker(5 * time.Second)
 			defer ticker.Stop()
@@ -1736,40 +1936,69 @@ func RunDueChannelHealthProbes() {
 
 	now := channelHealthNow()
 	setting := defaultChannelHealthSetting()
+	probeFn := loadChannelHealthProbeFunc()
+	if probeFn == nil {
+		return
+	}
 	type probeTarget struct {
 		channelID int
 		modelName string
-		probeFn   ChannelHealthProbeFunc
 	}
-	targets := make([]probeTarget, 0)
 
-	channelHealth.Lock()
-	for _, state := range channelHealth.channels {
-		if state.state != ChannelHealthStateOpen && state.state != ChannelHealthStateProbing {
+	// Phase 1: collect probe candidates per shard without mutating state or
+	// touching Redis, so the shard lock is held only for the in-memory scan.
+	candidates := make([]probeTarget, 0)
+	for i := range channelHealthShards {
+		shard := &channelHealthShards[i]
+		shard.Lock()
+		for _, state := range shard.channels {
+			if state.state != ChannelHealthStateOpen && state.state != ChannelHealthStateProbing {
+				continue
+			}
+			if state.probeInProgress {
+				continue
+			}
+			if !state.nextProbeAt.IsZero() && now.Before(state.nextProbeAt) && !isChannelIsolationPastMaxLocked(state, now, setting) {
+				continue
+			}
+			candidates = append(candidates, probeTarget{channelID: state.channelID, modelName: state.modelName})
+		}
+		shard.Unlock()
+	}
+
+	// Phase 2: for each candidate acquire the cross-instance probe lock (Redis
+	// SetNX) OUTSIDE any shard lock, then re-lock the shard and re-check the
+	// state still needs probing before committing the transition. The re-check
+	// covers the window between the two lock acquisitions, where a request or
+	// runtime-control call may have changed the state.
+	targets := make([]probeTarget, 0, len(candidates))
+	for _, candidate := range candidates {
+		if !tryAcquireChannelHealthProbeLock(candidate.channelID, candidate.modelName, setting) {
 			continue
 		}
-		if state.probeInProgress {
-			continue
-		}
-		if !state.nextProbeAt.IsZero() && now.Before(state.nextProbeAt) && !isChannelIsolationPastMaxLocked(state, now, setting) {
-			continue
-		}
-		if channelHealth.probeFunc == nil {
-			continue
-		}
-		if !tryAcquireChannelHealthProbeLock(state.channelID, state.modelName, setting) {
+		scope := channelHealthScope{channelID: candidate.channelID, modelName: candidate.modelName}
+		shard := channelHealthShardFor(candidate.channelID)
+		shard.Lock()
+		state, ok := shard.channels[channelHealthScopeKey(scope)]
+		stillDue := ok && state != nil &&
+			(state.state == ChannelHealthStateOpen || state.state == ChannelHealthStateProbing) &&
+			!state.probeInProgress &&
+			(state.nextProbeAt.IsZero() || !now.Before(state.nextProbeAt) || isChannelIsolationPastMaxLocked(state, now, setting))
+		if !stillDue {
+			shard.unlockAndFlush()
+			releaseChannelHealthProbeLock(candidate.channelID, candidate.modelName)
 			continue
 		}
 		state.probeInProgress = true
 		state.state = ChannelHealthStateProbing
 		persistChannelHealthIsolationLocked(state, now, setting)
 		recordChannelHealthEventLocked(setting, ChannelHealthEventTypeProbing, state, "probe started", now)
-		targets = append(targets, probeTarget{channelID: state.channelID, modelName: state.modelName, probeFn: channelHealth.probeFunc})
+		shard.unlockAndFlush()
+		targets = append(targets, candidate)
 	}
-	channelHealth.Unlock()
 
 	for _, target := range targets {
-		go runChannelHealthProbe(target.channelID, target.modelName, target.probeFn, setting)
+		go runChannelHealthProbe(target.channelID, target.modelName, probeFn, setting)
 	}
 }
 
@@ -1853,10 +2082,11 @@ func GetChannelHealthSnapshotForModel(channelID int, modelName string) (ChannelH
 		return snapshot, true
 	}
 
-	channelHealth.Lock()
-	defer channelHealth.Unlock()
+	shard := channelHealthShardFor(channelID)
+	shard.Lock()
+	defer shard.unlockAndFlush()
 
-	state, ok := channelHealth.channels[channelHealthScopeKey(scope)]
+	state, ok := shard.channels[channelHealthScopeKey(scope)]
 	if !ok {
 		return ChannelHealthSnapshot{}, false
 	}
@@ -1901,14 +2131,16 @@ func GetChannelHealthSnapshotForChannelDisplay(channel *model.Channel) ChannelHe
 }
 
 func GetChannelHealthSnapshots() []ChannelHealthSnapshot {
-	channelHealth.Lock()
-	defer channelHealth.Unlock()
-
 	now := channelHealthNow()
 	setting := defaultChannelHealthSetting()
-	snapshots := make([]ChannelHealthSnapshot, 0, len(channelHealth.channels))
-	for _, state := range channelHealth.channels {
-		snapshots = append(snapshots, buildChannelHealthSnapshotLocked(state, now, setting))
+	snapshots := make([]ChannelHealthSnapshot, 0)
+	for i := range channelHealthShards {
+		shard := &channelHealthShards[i]
+		shard.Lock()
+		for _, state := range shard.channels {
+			snapshots = append(snapshots, buildChannelHealthSnapshotLocked(state, now, setting))
+		}
+		shard.unlockAndFlush()
 	}
 	return snapshots
 }
@@ -2088,10 +2320,11 @@ func getChannelHealthSnapshotForWeight(channelID int, modelName string) (Channel
 		return snapshot, true
 	}
 
-	channelHealth.Lock()
-	defer channelHealth.Unlock()
+	shard := channelHealthShardFor(channelID)
+	shard.Lock()
+	defer shard.unlockAndFlush()
 
-	state, ok := channelHealth.channels[channelHealthScopeKey(scope)]
+	state, ok := shard.channels[channelHealthScopeKey(scope)]
 	if !ok {
 		return ChannelHealthSnapshot{}, false
 	}
@@ -2287,22 +2520,40 @@ func channelWarmupPercentFromSnapshot(snapshot ChannelHealthSnapshot, now time.T
 	return percent
 }
 
+// persistChannelHealthIsolationLocked queues the isolation write implied by the
+// current state. It is always called while the state's shard lock is held, so it
+// resolves that shard from state.channelID (same shard the caller holds, because
+// sharding is keyed on channelID) and appends to its pending buffer instead of
+// touching Redis inline. The queued op is drained by unlockAndFlush.
 func persistChannelHealthIsolationLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting) {
 	if state == nil {
 		return
 	}
 	snapshot := buildChannelHealthSnapshotLocked(state, now, setting)
+	scope := channelHealthScope{channelID: snapshot.ChannelID, modelName: snapshot.ModelName}
+	shard := channelHealthShardFor(snapshot.ChannelID)
 	if snapshot.State == ChannelHealthStateHealthy {
-		deleteChannelHealthIsolation(channelHealthScope{channelID: snapshot.ChannelID, modelName: snapshot.ModelName})
+		shard.queueIsolationDelete(scope)
 		return
 	}
-	scope := channelHealthScope{channelID: snapshot.ChannelID, modelName: snapshot.ModelName}
-	if err := getChannelHealthIsolationCache().SetWithTTL(channelHealthCacheKey(scope), snapshot, channelHealthIsolationTTL(setting)); err != nil {
-		common.SysError(fmt.Sprintf("channel health isolation cache set failed: channel_id=%d, model=%s, err=%v", snapshot.ChannelID, snapshot.ModelName, err))
-	}
+	shard.queueIsolationPersist(scope, snapshot, channelHealthIsolationTTL(setting))
 }
 
-func deleteChannelHealthIsolation(scope channelHealthScope) {
+// deleteChannelHealthIsolationLocked queues an isolation delete while the scope's
+// shard lock is held; the Redis DeleteMany runs later in unlockAndFlush.
+func deleteChannelHealthIsolationLocked(scope channelHealthScope) {
+	if scope.channelID <= 0 {
+		return
+	}
+	channelHealthShardFor(scope.channelID).queueIsolationDelete(scope)
+}
+
+// deleteChannelHealthIsolationDirect deletes an isolation entry from Redis inline.
+// It is only for callers that hold no shard lock (the read-path warmup-expiry
+// cleanup in getChannelHealthIsolationSnapshot); under-lock callers must use
+// deleteChannelHealthIsolationLocked so the network round-trip stays out of the
+// critical section.
+func deleteChannelHealthIsolationDirect(scope channelHealthScope) {
 	if scope.channelID <= 0 {
 		return
 	}
