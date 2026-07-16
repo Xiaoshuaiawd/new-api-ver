@@ -88,6 +88,7 @@ const channelHealthSchema = z.object({
     error_rate_threshold: z.coerce.number().min(0).max(1),
     consecutive_failure_threshold: z.coerce.number().int().min(1),
     first_response_timeout_seconds: z.coerce.number().int().min(1),
+    slow_first_response_seconds: z.coerce.number().int().min(1),
     stuck_inflight_threshold: z.coerce.number().int().min(1),
     single_stuck_timeout_seconds: z.coerce.number().int().min(1),
     probe_interval_seconds: z.coerce.number().int().min(1),
@@ -171,6 +172,8 @@ function buildFormDefaults(
         defaults['channel_health_setting.consecutive_failure_threshold'],
       first_response_timeout_seconds:
         defaults['channel_health_setting.first_response_timeout_seconds'],
+      slow_first_response_seconds:
+        defaults['channel_health_setting.slow_first_response_seconds'],
       stuck_inflight_threshold:
         defaults['channel_health_setting.stuck_inflight_threshold'],
       single_stuck_timeout_seconds:

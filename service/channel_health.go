@@ -454,6 +454,9 @@ func defaultChannelHealthSetting() operation_setting.ChannelHealthSetting {
 	if normalized.FirstResponseTimeoutSeconds <= 0 {
 		normalized.FirstResponseTimeoutSeconds = 45
 	}
+	if normalized.SlowFirstResponseSeconds <= 0 {
+		normalized.SlowFirstResponseSeconds = 18
+	}
 	if normalized.StuckInflightThreshold <= 0 {
 		normalized.StuckInflightThreshold = 3
 	}
@@ -1117,28 +1120,50 @@ func RecordAttemptFinish(handle AttemptHandle, result ChannelAttemptResult) {
 	}
 }
 
-func classifyChannelAttemptResult(result ChannelAttemptResult) (bool, bool) {
-	if result.Error != nil {
-		if !ShouldRecordChannelHealthFailure(nil, result.Error) {
-			return false, false
-		}
-		return true, true
-	}
-	failed := result.StatusCode == http.StatusRequestTimeout ||
-		result.StatusCode == http.StatusTooManyRequests ||
-		result.StatusCode >= http.StatusInternalServerError
-	return true, failed
+// isChannelGatewayErrorStatusCode reports whether code is an upstream gateway
+// failure (502 Bad Gateway, 503 Service Unavailable, 504 Gateway Timeout).
+// These are the only responses that count as a channel-health failure: they mean
+// the upstream itself is unusable (e.g. "no available upstream account"), as
+// opposed to rate limiting (429), model/quota errors (4xx), or a slow-but-working
+// upstream. Runtime isolation therefore fires only on gateway errors.
+func isChannelGatewayErrorStatusCode(code int) bool {
+	return code == http.StatusBadGateway ||
+		code == http.StatusServiceUnavailable ||
+		code == http.StatusGatewayTimeout
 }
 
-func ShouldRecordChannelHealthFailure(_ *gin.Context, err *types.NewAPIError) bool {
+// classifyChannelAttemptResult returns (shouldSample, failed) for an attempt.
+//
+//   - Gateway errors (502/503/504) are sampled and counted as failures — the sole
+//     trigger for the error-rate and consecutive-failure isolation paths. They are
+//     matched before the sampling gate because 504 is classified always-skip-retry,
+//     which the gate below would otherwise drop.
+//   - Any other error that reached upstream (429, 500, 408, connection errors, …)
+//     is sampled but never a failure, so it dilutes the gateway error rate and
+//     resets the consecutive counter instead of isolating the channel.
+//   - Client/local/skip-retry errors are not sampled at all.
+//   - Successful responses are always sampled, never failures.
+func classifyChannelAttemptResult(result ChannelAttemptResult) (bool, bool) {
+	if result.Error != nil {
+		if isChannelGatewayErrorStatusCode(result.Error.StatusCode) {
+			return true, true
+		}
+		if !shouldSampleChannelHealthAttempt(result.Error) {
+			return false, false
+		}
+		return true, false
+	}
+	return true, false
+}
+
+// shouldSampleChannelHealthAttempt reports whether a non-gateway error should
+// enter the sliding health window (as a non-failure sample). Client-side, local,
+// and always-skip-retry errors are excluded; anything that represents a genuine
+// upstream response is sampled so the gateway error rate has an accurate
+// denominator.
+func shouldSampleChannelHealthAttempt(err *types.NewAPIError) bool {
 	if err == nil {
 		return false
-	}
-	if types.IsChannelError(err) {
-		return true
-	}
-	if ShouldDisableChannel(err) {
-		return true
 	}
 	if types.IsSkipRetryError(err) {
 		return false
@@ -2362,7 +2387,16 @@ func adjustChannelHealthWeight(channelID int, modelName string, weight int, _ in
 		}
 		adjusted = int(float64(adjusted) * errorPenalty)
 	}
-	if setting.FirstResponseTimeoutSeconds > 0 && snapshot.AverageFirstResponseMs >= float64(setting.FirstResponseTimeoutSeconds*1000) {
+	// Slow first response degrades the channel's selection weight rather than
+	// isolating it: a channel that still answers, just slowly, stays usable but
+	// loses share to faster peers. The bar is SlowFirstResponseSeconds (default
+	// 18s), independent of the 45s FirstResponseTimeoutSeconds that governs
+	// stuck-request isolation and probe recovery.
+	slowSeconds := setting.SlowFirstResponseSeconds
+	if slowSeconds <= 0 {
+		slowSeconds = setting.FirstResponseTimeoutSeconds
+	}
+	if slowSeconds > 0 && snapshot.AverageFirstResponseMs >= float64(slowSeconds*1000) {
 		adjusted = adjusted / 2
 	}
 	if weight > 0 && adjusted <= 0 {

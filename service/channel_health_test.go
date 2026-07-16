@@ -13,7 +13,6 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
-	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -375,6 +374,10 @@ func TestChannelHealthWarmupRampsSnapshotPercent(t *testing.T) {
 func TestChannelHealthAdjustedWeightReducesWarmingAndSlowChannels(t *testing.T) {
 	setting := withChannelHealthTestSettings(t)
 	setting.FirstResponseTimeoutSeconds = 10
+	// Slow-response weight halving keys off SlowFirstResponseSeconds (a slow but
+	// working upstream is degraded, never isolated), so drive it at the same 10s
+	// bar this test uses for the timeout knobs.
+	setting.SlowFirstResponseSeconds = 10
 	now := time.Unix(1_700_000_000, 0)
 	SetChannelHealthNowFuncForTest(func() time.Time { return now })
 
@@ -632,15 +635,46 @@ func TestClassifyChannelHealthFailureIgnoresClientErrors(t *testing.T) {
 	withChannelHealthTestSettings(t)
 
 	err := types.NewOpenAIError(errors.New("bad request"), types.ErrorCodeInvalidRequest, http.StatusBadRequest)
-	require.False(t, ShouldRecordChannelHealthFailure((*gin.Context)(nil), err))
+	sample, failed := classifyChannelAttemptResult(ChannelAttemptResult{Error: err})
+	require.False(t, sample, "client 4xx must not enter the health window")
+	require.False(t, failed)
 }
 
-func TestClassifyChannelHealthFailureCountsChannelErrorsEvenWhenSkipRetry(t *testing.T) {
+func TestClassifyChannelHealthGatewayErrorsAreFailures(t *testing.T) {
+	withChannelHealthTestSettings(t)
+
+	for _, code := range []int{http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout} {
+		err := types.NewOpenAIError(errors.New("upstream unusable"), types.ErrorCodeDoRequestFailed, code)
+		sample, failed := classifyChannelAttemptResult(ChannelAttemptResult{Error: err})
+		require.Truef(t, sample, "gateway %d must be sampled", code)
+		require.Truef(t, failed, "gateway %d must count as a failure", code)
+	}
+}
+
+// Channel/model-mapped errors used to force isolation. Under the gateway-only
+// contract they are no longer failures — they are not gateway errors and are
+// skip-retry, so they are neither sampled nor failed and never isolate a channel.
+func TestClassifyChannelHealthChannelErrorNoLongerFails(t *testing.T) {
 	withChannelHealthTestSettings(t)
 
 	err := types.NewError(errors.New("model mapping failed"), types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
+	sample, failed := classifyChannelAttemptResult(ChannelAttemptResult{Error: err})
+	require.False(t, failed, "channel errors must no longer trigger isolation")
+	require.False(t, sample)
+}
 
-	require.True(t, ShouldRecordChannelHealthFailure((*gin.Context)(nil), err))
+// 429 rate limiting and 500 internal errors reach upstream, so they are sampled
+// (to give the gateway error rate an honest denominator) but never count as
+// failures — they must not isolate the channel.
+func TestClassifyChannelHealthRateLimitAndServerErrorSampledNotFailed(t *testing.T) {
+	withChannelHealthTestSettings(t)
+
+	for _, code := range []int{http.StatusTooManyRequests, http.StatusInternalServerError} {
+		err := types.NewOpenAIError(errors.New("transient"), types.ErrorCodeDoRequestFailed, code)
+		sample, failed := classifyChannelAttemptResult(ChannelAttemptResult{Error: err})
+		require.Truef(t, sample, "status %d should be sampled", code)
+		require.Falsef(t, failed, "status %d must not count as a failure", code)
+	}
 }
 
 func TestRecordAttemptFinishDoesNotSampleIgnoredClientErrors(t *testing.T) {
@@ -657,6 +691,94 @@ func TestRecordAttemptFinishDoesNotSampleIgnoredClientErrors(t *testing.T) {
 	require.Equal(t, 0, snapshot.WindowSamples)
 	require.Equal(t, 0, snapshot.WindowFailures)
 	require.True(t, IsChannelAvailable(channelID))
+}
+
+// 503 (service unavailable, e.g. "no available upstream account") reaching the
+// error-rate threshold isolates the channel — requirement 1.
+func TestChannelHealthIsolatesOnGatewayServiceUnavailable(t *testing.T) {
+	setting := withChannelHealthTestSettings(t)
+	setting.ConsecutiveFailureThreshold = 100
+
+	const channelID = 8830
+	unavailable := types.NewOpenAIError(errors.New("no available upstream account"), types.ErrorCodeDoRequestFailed, http.StatusServiceUnavailable)
+	for i := 0; i < 5; i++ {
+		handle := RecordAttemptStart(ChannelAttemptMeta{ChannelID: channelID})
+		RecordAttemptFinish(handle, ChannelAttemptResult{Error: unavailable})
+	}
+	for i := 0; i < 5; i++ {
+		handle := RecordAttemptStart(ChannelAttemptMeta{ChannelID: channelID})
+		RecordFirstResponse(handle)
+		RecordAttemptFinish(handle, ChannelAttemptResult{})
+	}
+
+	require.False(t, IsChannelAvailable(channelID))
+	snapshot, ok := GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateOpen, snapshot.State)
+}
+
+// Consecutive 504 gateway timeouts mean the upstream is unusable — requirement 3.
+// 504 is always-skip-retry, so this also guards that gateway matching runs before
+// the sampling gate.
+func TestChannelHealthIsolatesOnConsecutiveGatewayTimeouts(t *testing.T) {
+	setting := withChannelHealthTestSettings(t)
+	setting.ConsecutiveFailureThreshold = 5
+
+	const channelID = 8831
+	timeout := types.NewOpenAIError(errors.New("gateway timeout"), types.ErrorCodeDoRequestFailed, http.StatusGatewayTimeout)
+	for i := 0; i < 5; i++ {
+		handle := RecordAttemptStart(ChannelAttemptMeta{ChannelID: channelID})
+		RecordAttemptFinish(handle, ChannelAttemptResult{Error: timeout})
+	}
+
+	require.False(t, IsChannelAvailable(channelID))
+	snapshot, ok := GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateOpen, snapshot.State)
+	require.Contains(t, snapshot.Reason, "consecutive")
+}
+
+// A flood of 429 rate limits (or 500s) must never isolate: they are not gateway
+// errors, only rate limiting / transient server errors on a reachable upstream.
+func TestChannelHealthDoesNotIsolateOnRateLimitFlood(t *testing.T) {
+	setting := withChannelHealthTestSettings(t)
+	setting.ConsecutiveFailureThreshold = 5
+
+	const channelID = 8832
+	rateLimited := types.NewOpenAIError(errors.New("rate limited"), types.ErrorCodeDoRequestFailed, http.StatusTooManyRequests)
+	for i := 0; i < 30; i++ {
+		handle := RecordAttemptStart(ChannelAttemptMeta{ChannelID: channelID})
+		RecordAttemptFinish(handle, ChannelAttemptResult{Error: rateLimited})
+	}
+
+	require.True(t, IsChannelAvailable(channelID), "429 rate limiting must not isolate a channel")
+	snapshot, ok := GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateHealthy, snapshot.State)
+}
+
+// A slow-but-working upstream (first response >= SlowFirstResponseSeconds) is
+// degraded via weight, never isolated — requirement 2.
+func TestChannelHealthSlowFirstResponseDegradesWeightWithoutIsolation(t *testing.T) {
+	setting := withChannelHealthTestSettings(t)
+	setting.SlowFirstResponseSeconds = 18
+	now := time.Unix(1_700_000_000, 0)
+	SetChannelHealthNowFuncForTest(func() time.Time { return now })
+
+	const channelID = 8833
+	for i := 0; i < 10; i++ {
+		handle := RecordAttemptStart(ChannelAttemptMeta{ChannelID: channelID})
+		now = now.Add(20 * time.Second) // first byte after 20s (>= 18s bar)
+		RecordFirstResponse(handle)
+		RecordAttemptFinish(handle, ChannelAttemptResult{StatusCode: http.StatusOK})
+	}
+
+	require.True(t, IsChannelAvailable(channelID), "slow first response must degrade, not isolate")
+	snapshot, ok := GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateHealthy, snapshot.State)
+	// Weight halved for the slow-but-healthy channel.
+	require.Equal(t, 50, adjustChannelHealthWeight(channelID, "", 100, 0))
 }
 
 func TestCacheGetRandomSatisfiedChannelSkipsRuntimeOpenChannel(t *testing.T) {

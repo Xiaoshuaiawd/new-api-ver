@@ -46,6 +46,7 @@ describe('channel health setting metadata', () => {
       'channel_health_setting.error_rate_threshold',
       'channel_health_setting.consecutive_failure_threshold',
       'channel_health_setting.first_response_timeout_seconds',
+      'channel_health_setting.slow_first_response_seconds',
       'channel_health_setting.stuck_inflight_threshold',
       'channel_health_setting.single_stuck_timeout_seconds',
       'channel_health_setting.probe_interval_seconds',
@@ -57,7 +58,7 @@ describe('channel health setting metadata', () => {
       'channel_health_setting.warmup_step_percent',
     ])
 
-    assert.equal(CHANNEL_HEALTH_SETTING_FIELDS.length, 15)
+    assert.equal(CHANNEL_HEALTH_SETTING_FIELDS.length, 16)
     assert.deepEqual(CHANNEL_HEALTH_DEFAULT_VALUES, {
       'channel_health_setting.enabled': true,
       'channel_health_setting.warmup_enabled': true,
@@ -71,6 +72,7 @@ describe('channel health setting metadata', () => {
       'channel_health_setting.error_rate_threshold': 0.4,
       'channel_health_setting.consecutive_failure_threshold': 5,
       'channel_health_setting.first_response_timeout_seconds': 45,
+      'channel_health_setting.slow_first_response_seconds': 18,
       'channel_health_setting.stuck_inflight_threshold': 3,
       'channel_health_setting.single_stuck_timeout_seconds': 75,
       'channel_health_setting.probe_interval_seconds': 30,

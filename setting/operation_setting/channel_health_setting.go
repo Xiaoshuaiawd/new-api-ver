@@ -21,7 +21,14 @@ type ChannelHealthSetting struct {
 	ErrorRateThreshold          float64 `json:"error_rate_threshold"`
 	ConsecutiveFailureThreshold int     `json:"consecutive_failure_threshold"`
 	FirstResponseTimeoutSeconds int     `json:"first_response_timeout_seconds"`
-	StuckInflightThreshold      int     `json:"stuck_inflight_threshold"`
+	// SlowFirstResponseSeconds is the first-response latency (seconds) above which
+	// a channel is treated as slow and has its runtime selection weight reduced.
+	// It never triggers isolation — a slow-but-completing upstream stays usable at
+	// a lower weight. It is intentionally smaller than FirstResponseTimeoutSeconds
+	// (which governs stuck-request isolation and recovery), so degradation kicks in
+	// well before a request is considered hung.
+	SlowFirstResponseSeconds int `json:"slow_first_response_seconds"`
+	StuckInflightThreshold   int `json:"stuck_inflight_threshold"`
 	SingleStuckTimeoutSeconds   int     `json:"single_stuck_timeout_seconds"`
 	ProbeIntervalSeconds        int     `json:"probe_interval_seconds"`
 	ProbeTimeoutSeconds         int     `json:"probe_timeout_seconds"`
@@ -46,6 +53,7 @@ var channelHealthSetting = ChannelHealthSetting{
 	ErrorRateThreshold:          0.40,
 	ConsecutiveFailureThreshold: 5,
 	FirstResponseTimeoutSeconds: 45,
+	SlowFirstResponseSeconds:    18,
 	StuckInflightThreshold:      3,
 	SingleStuckTimeoutSeconds:   75,
 	ProbeIntervalSeconds:        30,
