@@ -27,8 +27,9 @@ type ChannelHealthSetting struct {
 	// a lower weight. It is intentionally smaller than FirstResponseTimeoutSeconds
 	// (which governs stuck-request isolation and recovery), so degradation kicks in
 	// well before a request is considered hung.
-	SlowFirstResponseSeconds int `json:"slow_first_response_seconds"`
-	StuckInflightThreshold   int `json:"stuck_inflight_threshold"`
+	SlowFirstResponseSeconds    int  `json:"slow_first_response_seconds"`
+	StuckDetectionEnabled       bool `json:"stuck_detection_enabled"`
+	StuckInflightThreshold      int  `json:"stuck_inflight_threshold"`
 	SingleStuckTimeoutSeconds   int     `json:"single_stuck_timeout_seconds"`
 	ProbeIntervalSeconds        int     `json:"probe_interval_seconds"`
 	ProbeTimeoutSeconds         int     `json:"probe_timeout_seconds"`
@@ -54,6 +55,7 @@ var channelHealthSetting = ChannelHealthSetting{
 	ConsecutiveFailureThreshold: 5,
 	FirstResponseTimeoutSeconds: 45,
 	SlowFirstResponseSeconds:    18,
+	StuckDetectionEnabled:       false,
 	StuckInflightThreshold:      3,
 	SingleStuckTimeoutSeconds:   75,
 	ProbeIntervalSeconds:        30,

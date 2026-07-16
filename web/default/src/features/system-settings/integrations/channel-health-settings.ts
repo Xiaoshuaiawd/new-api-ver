@@ -41,6 +41,7 @@ export type ChannelHealthNumberFieldKey =
 export type ChannelHealthSettingKey =
   | 'channel_health_setting.enabled'
   | 'channel_health_setting.warmup_enabled'
+  | 'channel_health_setting.stuck_detection_enabled'
   | 'channel_health_setting.preset'
   | 'channel_health_setting.model_level_enabled'
   | 'channel_health_setting.events_enabled'
@@ -50,6 +51,7 @@ export type ChannelHealthSettingKey =
 export type ChannelHealthSettings = {
   'channel_health_setting.enabled': boolean
   'channel_health_setting.warmup_enabled': boolean
+  'channel_health_setting.stuck_detection_enabled': boolean
   'channel_health_setting.preset': ChannelHealthPreset
   'channel_health_setting.model_level_enabled': boolean
   'channel_health_setting.events_enabled': boolean
@@ -277,6 +279,7 @@ export const CHANNEL_HEALTH_SETTING_FIELDS = [
 export const CHANNEL_HEALTH_SETTING_KEYS = [
   'channel_health_setting.enabled',
   'channel_health_setting.warmup_enabled',
+  'channel_health_setting.stuck_detection_enabled',
   'channel_health_setting.preset',
   'channel_health_setting.model_level_enabled',
   'channel_health_setting.events_enabled',
@@ -287,6 +290,7 @@ export const CHANNEL_HEALTH_SETTING_KEYS = [
   'channel_health_setting.error_rate_threshold',
   'channel_health_setting.consecutive_failure_threshold',
   'channel_health_setting.first_response_timeout_seconds',
+  'channel_health_setting.slow_first_response_seconds',
   'channel_health_setting.stuck_inflight_threshold',
   'channel_health_setting.single_stuck_timeout_seconds',
   'channel_health_setting.probe_interval_seconds',
@@ -301,6 +305,7 @@ export const CHANNEL_HEALTH_SETTING_KEYS = [
 export const CHANNEL_HEALTH_DEFAULT_VALUES = {
   'channel_health_setting.enabled': true,
   'channel_health_setting.warmup_enabled': true,
+  'channel_health_setting.stuck_detection_enabled': false,
   'channel_health_setting.preset': 'balanced',
   'channel_health_setting.model_level_enabled': false,
   'channel_health_setting.events_enabled': true,

@@ -1215,7 +1215,7 @@ func evaluateChannelHealthLocked(state *channelHealthStateData, now time.Time, s
 			return openChannelLocked(state, now, setting, "warmup unhealthy window")
 		}
 		stats := channelHealthWindowStatsLocked(state, now, setting)
-		if shouldThrottleWarmupLocked(stats, setting) || state.consecutiveFailure > 0 || channelActiveInflightCountLocked(state) >= setting.StuckInflightThreshold {
+		if shouldThrottleWarmupLocked(stats, setting) || state.consecutiveFailure > 0 || (setting.StuckDetectionEnabled && channelActiveInflightCountLocked(state) >= setting.StuckInflightThreshold) {
 			state.warmupThrottlePercent = setting.WarmupStartPercent
 			if state.warmupThrottlePercent <= 0 {
 				state.warmupThrottlePercent = 1
@@ -1975,6 +1975,9 @@ func CheckChannelHealthStuckRequests() {
 				}
 			}
 			if stuckCount >= setting.StuckInflightThreshold || (stuckCount > 0 && maxAge >= singleStuckTimeout) {
+				if !setting.StuckDetectionEnabled {
+					continue
+				}
 				for _, attempt := range state.inflight {
 					if !attempt.stuck || attempt.cancelled {
 						continue
@@ -2565,7 +2568,7 @@ func channelWarmupPercentWithOptionsLocked(state *channelHealthStateData, now ti
 		percent = 100
 	}
 	stats := channelHealthWindowStatsWithOptionsLocked(state, now, setting, includeP95)
-	if shouldThrottleWarmupLocked(stats, setting) || channelActiveInflightCountLocked(state) >= setting.StuckInflightThreshold {
+	if shouldThrottleWarmupLocked(stats, setting) || (setting.StuckDetectionEnabled && channelActiveInflightCountLocked(state) >= setting.StuckInflightThreshold) {
 		state.warmupThrottlePercent = setting.WarmupStartPercent
 		if state.warmupThrottlePercent <= 0 {
 			state.warmupThrottlePercent = 1

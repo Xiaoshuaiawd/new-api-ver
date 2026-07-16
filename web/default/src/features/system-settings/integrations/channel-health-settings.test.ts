@@ -36,6 +36,7 @@ describe('channel health setting metadata', () => {
     assert.deepEqual(CHANNEL_HEALTH_SETTING_KEYS, [
       'channel_health_setting.enabled',
       'channel_health_setting.warmup_enabled',
+      'channel_health_setting.stuck_detection_enabled',
       'channel_health_setting.preset',
       'channel_health_setting.model_level_enabled',
       'channel_health_setting.events_enabled',
@@ -62,6 +63,7 @@ describe('channel health setting metadata', () => {
     assert.deepEqual(CHANNEL_HEALTH_DEFAULT_VALUES, {
       'channel_health_setting.enabled': true,
       'channel_health_setting.warmup_enabled': true,
+      'channel_health_setting.stuck_detection_enabled': false,
       'channel_health_setting.preset': 'balanced',
       'channel_health_setting.model_level_enabled': false,
       'channel_health_setting.events_enabled': true,

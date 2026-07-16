@@ -89,6 +89,7 @@ const channelHealthSchema = z.object({
     consecutive_failure_threshold: z.coerce.number().int().min(1),
     first_response_timeout_seconds: z.coerce.number().int().min(1),
     slow_first_response_seconds: z.coerce.number().int().min(1),
+    stuck_detection_enabled: z.boolean(),
     stuck_inflight_threshold: z.coerce.number().int().min(1),
     single_stuck_timeout_seconds: z.coerce.number().int().min(1),
     probe_interval_seconds: z.coerce.number().int().min(1),
@@ -174,6 +175,8 @@ function buildFormDefaults(
         defaults['channel_health_setting.first_response_timeout_seconds'],
       slow_first_response_seconds:
         defaults['channel_health_setting.slow_first_response_seconds'],
+      stuck_detection_enabled:
+        defaults['channel_health_setting.stuck_detection_enabled'],
       stuck_inflight_threshold:
         defaults['channel_health_setting.stuck_inflight_threshold'],
       single_stuck_timeout_seconds:
@@ -237,6 +240,8 @@ function normalizeFormValues(
       values.channel_health_setting.alert_min_interval_seconds,
     'channel_health_setting.warmup_enabled':
       values.channel_health_setting.warmup_enabled,
+    'channel_health_setting.stuck_detection_enabled':
+      values.channel_health_setting.stuck_detection_enabled,
     [CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY]:
       values.channel_multiplier_monitor_setting.interval_minutes,
     'channel_auto_priority_setting.enabled':
@@ -513,6 +518,29 @@ export function ChannelHealthSettingsSection({
                   <FormDescription>
                     {t(
                       'Gradually restores traffic after probes confirm a channel recovered.'
+                    )}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+              </SettingsSwitchItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='channel_health_setting.stuck_detection_enabled'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>{t('Stuck request detection')}</FormLabel>
+                  <FormDescription>
+                    {t(
+                      'Isolate channels when too many requests exceed first-response timeout.'
                     )}
                   </FormDescription>
                 </SettingsSwitchContent>
