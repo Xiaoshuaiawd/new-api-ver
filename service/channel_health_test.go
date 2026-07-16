@@ -752,6 +752,95 @@ func TestRecordAttemptFinishDoesNotSampleIgnoredClientErrors(t *testing.T) {
 	require.True(t, IsChannelAvailable(channelID))
 }
 
+func TestChannelHealthImmediatelyIsolatesUnauthorizedChannel(t *testing.T) {
+	setting := withChannelHealthTestSettings(t)
+	setting.MinSamples = 100
+	setting.MinFailures = 100
+	setting.ConsecutiveFailureThreshold = 100
+
+	const channelID = 8834
+	handle := RecordAttemptStart(ChannelAttemptMeta{ChannelID: channelID})
+	unauthorized := types.NewOpenAIError(errors.New("invalid API key"), "invalid_api_key", http.StatusUnauthorized)
+	RecordAttemptFinish(handle, ChannelAttemptResult{Error: unauthorized})
+
+	require.False(t, IsChannelAvailable(channelID))
+	snapshot, ok := GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateOpen, snapshot.State)
+	require.Contains(t, snapshot.Reason, "status_code=401")
+	require.Equal(t, 0, snapshot.WindowSamples, "terminal account errors must not pollute gateway error-rate samples")
+}
+
+func TestChannelHealthImmediatelyIsolatesExhaustedBalance(t *testing.T) {
+	tests := []struct {
+		name       string
+		channelID  int
+		statusCode int
+		errorCode  types.ErrorCode
+		message    string
+	}{
+		{name: "payment required", channelID: 8835, statusCode: http.StatusPaymentRequired, errorCode: types.ErrorCodeDoRequestFailed, message: "payment required"},
+		{name: "insufficient quota code", channelID: 8836, statusCode: http.StatusTooManyRequests, errorCode: "insufficient_quota", message: "quota exhausted"},
+		{name: "english balance message", channelID: 8837, statusCode: http.StatusForbidden, errorCode: types.ErrorCodeDoRequestFailed, message: "credit balance is too low"},
+		{name: "chinese balance message", channelID: 8838, statusCode: http.StatusBadRequest, errorCode: types.ErrorCodeDoRequestFailed, message: "账户余额不足"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			withChannelHealthTestSettings(t)
+			handle := RecordAttemptStart(ChannelAttemptMeta{ChannelID: tt.channelID})
+			err := types.NewOpenAIError(errors.New(tt.message), tt.errorCode, tt.statusCode)
+
+			RecordAttemptFinish(handle, ChannelAttemptResult{Error: err})
+
+			require.False(t, IsChannelAvailable(tt.channelID))
+			snapshot, ok := GetChannelHealthSnapshot(tt.channelID)
+			require.True(t, ok)
+			require.Equal(t, ChannelHealthStateOpen, snapshot.State)
+			require.Contains(t, snapshot.Reason, "terminal upstream error")
+			require.Equal(t, 0, snapshot.WindowSamples)
+		})
+	}
+}
+
+func TestChannelHealthDoesNotMisclassifyBalanceOrLocalQuotaErrors(t *testing.T) {
+	tests := []struct {
+		name      string
+		channelID int
+		err       *types.NewAPIError
+	}{
+		{
+			name:      "unrelated balance wording",
+			channelID: 8839,
+			err:       types.NewOpenAIError(errors.New("request has an invalid load balance option"), types.ErrorCodeInvalidRequest, http.StatusBadRequest),
+		},
+		{
+			name:      "local user quota",
+			channelID: 8840,
+			err:       types.NewErrorWithStatusCode(errors.New("用户额度不足"), types.ErrorCodeInsufficientUserQuota, http.StatusForbidden),
+		},
+		{
+			name:      "local pre-consume quota",
+			channelID: 8841,
+			err:       types.NewErrorWithStatusCode(errors.New("预扣费失败：余额不足"), types.ErrorCodePreConsumeTokenQuotaFailed, http.StatusForbidden),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			withChannelHealthTestSettings(t)
+			handle := RecordAttemptStart(ChannelAttemptMeta{ChannelID: tt.channelID})
+
+			RecordAttemptFinish(handle, ChannelAttemptResult{Error: tt.err})
+
+			require.True(t, IsChannelAvailable(tt.channelID))
+			snapshot, ok := GetChannelHealthSnapshot(tt.channelID)
+			require.True(t, ok)
+			require.Equal(t, ChannelHealthStateHealthy, snapshot.State)
+		})
+	}
+}
+
 // 503 (service unavailable, e.g. "no available upstream account") reaching the
 // error-rate threshold isolates the channel — requirement 1.
 func TestChannelHealthIsolatesOnGatewayServiceUnavailable(t *testing.T) {

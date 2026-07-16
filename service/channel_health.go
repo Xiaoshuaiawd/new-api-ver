@@ -1130,6 +1130,7 @@ func RecordAttemptFinish(handle AttemptHandle, result ChannelAttemptResult) {
 	}
 
 	shouldSample, failed := classifyChannelAttemptResult(result)
+	immediateIsolationReason, shouldIsolateImmediately := channelHealthImmediateIsolationReason(result)
 
 	shard := channelHealthShardFor(handle.channelID)
 	shard.Lock()
@@ -1160,7 +1161,13 @@ func RecordAttemptFinish(handle AttemptHandle, result ChannelAttemptResult) {
 	}
 	clearChannelID := 0
 	shouldClearAffinity := false
-	if shouldSample && !attempt.cancelled {
+	if shouldIsolateImmediately && !attempt.cancelled {
+		if attempt.meta.Probe {
+			clearChannelID, shouldClearAffinity = recordProbeAttemptResultLocked(state, now, setting, false, immediateIsolationReason)
+		} else {
+			clearChannelID, shouldClearAffinity = openChannelLocked(state, now, setting, immediateIsolationReason)
+		}
+	} else if shouldSample && !attempt.cancelled {
 		recordChannelHealthSampleLocked(state, now, setting, failed, reason, status, errCode, attempt.firstResponse)
 		if attempt.meta.Probe {
 			clearChannelID, shouldClearAffinity = recordProbeAttemptResultLocked(state, now, setting, !failed, reason)
@@ -1180,14 +1187,76 @@ func RecordAttemptFinish(handle AttemptHandle, result ChannelAttemptResult) {
 
 // isChannelGatewayErrorStatusCode reports whether code is an upstream gateway
 // failure (502 Bad Gateway, 503 Service Unavailable, 504 Gateway Timeout).
-// These are the only responses that count as a channel-health failure: they mean
-// the upstream itself is unusable (e.g. "no available upstream account"), as
-// opposed to rate limiting (429), model/quota errors (4xx), or a slow-but-working
-// upstream. Runtime isolation therefore fires only on gateway errors.
+// These are the only responses that count as a sliding-window channel-health
+// failure. Authentication and exhausted-balance errors use a separate immediate
+// isolation path because waiting for a statistical threshold only repeats calls
+// against a channel that cannot currently serve traffic.
 func isChannelGatewayErrorStatusCode(code int) bool {
 	return code == http.StatusBadGateway ||
 		code == http.StatusServiceUnavailable ||
 		code == http.StatusGatewayTimeout
+}
+
+// channelHealthImmediateIsolationReason identifies terminal upstream account
+// failures that cannot recover by retrying the same channel. Local user quota
+// errors are explicitly excluded because they say nothing about channel health.
+func channelHealthImmediateIsolationReason(result ChannelAttemptResult) (string, bool) {
+	status := result.StatusCode
+	errCode := ""
+	errMessage := ""
+	if result.Error != nil {
+		status = result.Error.StatusCode
+		errCode = strings.ToLower(strings.TrimSpace(string(result.Error.GetErrorCode())))
+		errMessage = strings.ToLower(strings.TrimSpace(result.Error.Error()))
+	}
+	if errCode == string(types.ErrorCodeInsufficientUserQuota) ||
+		errCode == string(types.ErrorCodePreConsumeTokenQuotaFailed) {
+		return "", false
+	}
+
+	terminal := status == http.StatusUnauthorized || status == http.StatusPaymentRequired
+	if !terminal {
+		detail := errCode + " " + errMessage
+		for _, marker := range []string{
+			"unauthorized",
+			"invalid_api_key",
+			"invalid api key",
+			"insufficient_quota",
+			"insufficient quota",
+			"quota insufficient",
+			"insufficient_balance",
+			"insufficient balance",
+			"balance insufficient",
+			"credit balance is too low",
+			"credit balance too low",
+			"account balance is too low",
+			"balance is too low",
+			"余额不足",
+			"额度不足",
+			"余额已用完",
+			"额度已用完",
+			"余额耗尽",
+			"额度耗尽",
+			"账户欠费",
+		} {
+			if strings.Contains(detail, marker) {
+				terminal = true
+				break
+			}
+		}
+	}
+	if !terminal {
+		return "", false
+	}
+
+	detail := fmt.Sprintf("status_code=%d", status)
+	if result.Error != nil {
+		detail = result.Error.ErrorWithStatusCode()
+		if errCode != "" {
+			detail = fmt.Sprintf("%s, error_code=%s", detail, errCode)
+		}
+	}
+	return "terminal upstream error: " + detail, true
 }
 
 // classifyChannelAttemptResult returns (shouldSample, failed) for an attempt.
