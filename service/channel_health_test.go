@@ -45,6 +45,7 @@ func withChannelHealthTestSettings(t *testing.T) *operation_setting.ChannelHealt
 		ModelLevelEnabled:           false,
 		EventsEnabled:               true,
 		AlertMinIntervalSeconds:     60,
+		StuckDetectionEnabled:       true,
 	}
 	t.Cleanup(func() {
 		*setting = original
