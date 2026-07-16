@@ -210,12 +210,29 @@ type channelHealthPendingOp struct {
 
 // channelHealthShard owns the runtime health state for every channel whose ID
 // hashes to it. All per-channel mutation happens under the shard's Mutex; the
-// Redis isolation writes those mutations imply are queued on pending and
-// drained by unlockAndFlush after the lock is released.
+// Redis isolation writes those mutations imply are queued on pending and, once
+// the lock is released, appended to flushQueue and drained in FIFO order by a
+// single drainer goroutine.
+//
+// The single-drainer FIFO is what keeps Redis consistent with memory. Because
+// batches are enqueued while the shard lock is held (in unlockAndFlush) and a
+// lone drainer replays them strictly in enqueue order, the last isolation write
+// to reach Redis for a scope always corresponds to the last in-memory
+// transition for that scope. A naive "flush after unlock" (which this replaced)
+// let two goroutines that transitioned the same channel under the lock reorder
+// their Set/Delete on the way to Redis, so a stale Open could overwrite a newer
+// Healthy delete and re-isolate a recovered channel.
 type channelHealthShard struct {
 	sync.Mutex
 	channels map[string]*channelHealthStateData
-	pending  []channelHealthPendingOp
+	// pending accumulates isolation ops for the current lock hold; it is moved
+	// onto flushQueue as one batch by unlockAndFlush.
+	pending []channelHealthPendingOp
+	// flushQueue holds batches awaiting Redis I/O, oldest first. flushing is
+	// true iff a drainer goroutine is actively replaying the queue. Both are
+	// guarded by the shard Mutex.
+	flushQueue [][]channelHealthPendingOp
+	flushing   bool
 }
 
 // queueIsolationPersist records that scope's isolation snapshot must be written
@@ -232,27 +249,67 @@ func (s *channelHealthShard) queueIsolationDelete(scope channelHealthScope) {
 	s.pending = append(s.pending, channelHealthPendingOp{scope: scope, isDelete: true})
 }
 
-// unlockAndFlush releases the shard lock and then performs any Redis isolation
-// writes queued while it was held. Draining the queue under the lock (into a
-// local slice) keeps the critical section free of network I/O while still
-// preserving the causal order in which the ops were queued.
+// unlockAndFlush appends the ops collected during the current lock hold as one
+// batch, then releases the shard lock and drains the flush queue if no other
+// goroutine is already doing so. All Redis I/O happens after the lock is
+// released (so a slow round-trip never stalls the shard's hot path), yet a
+// single drainer replays batches in strict enqueue order, so the last
+// isolation write to reach Redis for a scope matches the last in-memory
+// transition for that scope.
 func (s *channelHealthShard) unlockAndFlush() {
-	pending := s.pending
+	batch := s.pending
 	s.pending = nil
-	s.Unlock()
-	if len(pending) == 0 {
+	if len(batch) == 0 {
+		// No isolation I/O to do; if a drainer is already running it owns the
+		// queue, otherwise there is nothing to drain.
+		s.Unlock()
 		return
 	}
+	s.flushQueue = append(s.flushQueue, batch)
+	if s.flushing {
+		// A drainer is active; it will pick up this batch in order. Handing off
+		// keeps ordering intact and lets this goroutine return without blocking
+		// on Redis.
+		s.Unlock()
+		return
+	}
+	s.flushing = true
+	s.Unlock()
+	s.drainFlushQueue()
+}
+
+// drainFlushQueue replays queued isolation batches to the cache in FIFO order.
+// Exactly one goroutine per shard runs this at a time (guarded by s.flushing).
+// It pops one batch under the lock, performs that batch's I/O with the lock
+// released, then loops; batches enqueued meanwhile are drained by the same
+// goroutine, preserving global order for the shard.
+func (s *channelHealthShard) drainFlushQueue() {
 	cache := getChannelHealthIsolationCache()
-	for _, op := range pending {
-		if op.isDelete {
-			if _, err := cache.DeleteMany([]string{channelHealthCacheKey(op.scope)}); err != nil {
-				common.SysError(fmt.Sprintf("channel health isolation cache delete failed: channel_id=%d, model=%s, err=%v", op.scope.channelID, op.scope.modelName, err))
-			}
-			continue
+	for {
+		s.Lock()
+		if len(s.flushQueue) == 0 {
+			s.flushing = false
+			s.Unlock()
+			return
 		}
-		if err := cache.SetWithTTL(channelHealthCacheKey(op.scope), op.snapshot, op.ttl); err != nil {
-			common.SysError(fmt.Sprintf("channel health isolation cache set failed: channel_id=%d, model=%s, err=%v", op.scope.channelID, op.scope.modelName, err))
+		batch := s.flushQueue[0]
+		s.flushQueue[0] = nil
+		s.flushQueue = s.flushQueue[1:]
+		if len(s.flushQueue) == 0 {
+			s.flushQueue = nil
+		}
+		s.Unlock()
+
+		for _, op := range batch {
+			if op.isDelete {
+				if _, err := cache.DeleteMany([]string{channelHealthCacheKey(op.scope)}); err != nil {
+					common.SysError(fmt.Sprintf("channel health isolation cache delete failed: channel_id=%d, model=%s, err=%v", op.scope.channelID, op.scope.modelName, err))
+				}
+				continue
+			}
+			if err := cache.SetWithTTL(channelHealthCacheKey(op.scope), op.snapshot, op.ttl); err != nil {
+				common.SysError(fmt.Sprintf("channel health isolation cache set failed: channel_id=%d, model=%s, err=%v", op.scope.channelID, op.scope.modelName, err))
+			}
 		}
 	}
 }
@@ -558,6 +615,8 @@ func ResetChannelHealthForTest() {
 		shard.Lock()
 		shard.channels = make(map[string]*channelHealthStateData)
 		shard.pending = nil
+		shard.flushQueue = nil
+		shard.flushing = false
 		shard.Unlock()
 	}
 

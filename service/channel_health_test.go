@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -1078,4 +1079,139 @@ func addChannelHealthSelectionModel(t *testing.T, modelName string) {
 	}
 	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id IN ?", []int{9101, 9102}).Update("models", "gpt-health-test,"+modelName).Error)
 	model.InitChannelCache()
+}
+
+// waitForChannelHealthFlushIdle blocks until every shard has drained its flush
+// queue, so a test can assert on the isolation cache without racing an
+// in-flight drainer.
+func waitForChannelHealthFlushIdle(t *testing.T) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		idle := true
+		for i := range channelHealthShards {
+			shard := &channelHealthShards[i]
+			shard.Lock()
+			busy := shard.flushing || len(shard.flushQueue) > 0 || len(shard.pending) > 0
+			shard.Unlock()
+			if busy {
+				idle = false
+				break
+			}
+		}
+		if idle {
+			return
+		}
+		require.False(t, time.Now().After(deadline), "flush queue did not drain in time")
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// TestChannelHealthFlushQueuePreservesScopeOrder pins the P1 invariant that the
+// single-drainer FIFO restored: when a stale Set(Open) is enqueued before a
+// newer Delete for the same scope, the last write to reach the isolation cache
+// must be the Delete, so a recovered channel is never re-isolated by a
+// reordered flush. It drives the drainer directly with two ordered batches
+// (the shape two goroutines produce when they transition one channel under the
+// shard lock) instead of relying on Redis timing.
+func TestChannelHealthFlushQueuePreservesScopeOrder(t *testing.T) {
+	withChannelHealthTestSettings(t)
+
+	const channelID = 8899
+	scope := channelHealthScope{channelID: channelID}
+	shard := channelHealthShardFor(channelID)
+	setting := defaultChannelHealthSetting()
+	openSnapshot := ChannelHealthSnapshot{ChannelID: channelID, State: ChannelHealthStateOpen}
+
+	// Older transition (Open) enqueued first, newer transition (Delete/Healthy)
+	// second — the drainer must apply them in that order and leave the cache
+	// empty.
+	shard.Lock()
+	shard.queueIsolationPersist(scope, openSnapshot, channelHealthIsolationTTL(setting))
+	shard.flushQueue = append(shard.flushQueue, shard.pending)
+	shard.pending = nil
+	shard.queueIsolationDelete(scope)
+	shard.flushQueue = append(shard.flushQueue, shard.pending)
+	shard.pending = nil
+	shard.flushing = true
+	shard.Unlock()
+	shard.drainFlushQueue()
+
+	_, found, err := getChannelHealthIsolationCache().Get(channelHealthCacheKey(scope))
+	require.NoError(t, err)
+	require.False(t, found, "Delete enqueued after Open must win; recovered channel stayed isolated")
+
+	// Reverse order: Delete first, then Open. Open is the last transition, so it
+	// must persist.
+	shard.Lock()
+	shard.queueIsolationDelete(scope)
+	shard.flushQueue = append(shard.flushQueue, shard.pending)
+	shard.pending = nil
+	shard.queueIsolationPersist(scope, openSnapshot, channelHealthIsolationTTL(setting))
+	shard.flushQueue = append(shard.flushQueue, shard.pending)
+	shard.pending = nil
+	shard.flushing = true
+	shard.Unlock()
+	shard.drainFlushQueue()
+
+	stored, found, err := getChannelHealthIsolationCache().Get(channelHealthCacheKey(scope))
+	require.NoError(t, err)
+	require.True(t, found, "Open enqueued last must persist")
+	require.Equal(t, ChannelHealthStateOpen, stored.State)
+}
+
+// recoverChannelHealthToHealthyForTest drives the Healthy transition the probe
+// recovery path performs (mark healthy in memory + queue the isolation delete),
+// so a test can race it against OpenChannel on the same channel.
+func recoverChannelHealthToHealthyForTest(channelID int) {
+	scope := channelHealthScope{channelID: channelID}
+	shard := channelHealthShardFor(channelID)
+	shard.Lock()
+	defer shard.unlockAndFlush()
+	state := getOrCreateChannelHealthLocked(shard, scope)
+	markChannelHealthyLocked(state)
+	shard.queueIsolationDelete(scope)
+}
+
+// TestChannelHealthConcurrentTransitionsConvergeCacheAndMemory hammers one
+// channel with interleaved Open and recovery transitions from many goroutines
+// (the exact concurrency that reordered flushes under the old design) and then
+// asserts, after a final deterministic recovery, that the isolation cache
+// agrees with the in-memory state. Run under -race it also guards the shard's
+// pending/flushQueue bookkeeping.
+func TestChannelHealthConcurrentTransitionsConvergeCacheAndMemory(t *testing.T) {
+	withChannelHealthTestSettings(t)
+
+	const channelID = 8901
+	scope := channelHealthScope{channelID: channelID}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			OpenChannel(channelID, "concurrent isolate")
+		}()
+		go func() {
+			defer wg.Done()
+			recoverChannelHealthToHealthyForTest(channelID)
+		}()
+	}
+	wg.Wait()
+
+	// Settle the churn, then apply a single known-last transition so the
+	// expected end state is deterministic regardless of who won the race.
+	waitForChannelHealthFlushIdle(t)
+	recoverChannelHealthToHealthyForTest(channelID)
+	waitForChannelHealthFlushIdle(t)
+
+	shard := channelHealthShardFor(channelID)
+	shard.Lock()
+	memState := shard.channels[channelHealthScopeKey(scope)].state
+	shard.Unlock()
+	require.Equal(t, ChannelHealthStateHealthy, memState)
+
+	_, found, err := getChannelHealthIsolationCache().Get(channelHealthCacheKey(scope))
+	require.NoError(t, err)
+	require.False(t, found, "cache must match the final Healthy memory state, not a stale Open")
 }

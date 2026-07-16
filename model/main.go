@@ -11,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/driver/clickhouse"
@@ -72,6 +73,7 @@ func createRootAccountIfNeed() error {
 			AccessToken: nil,
 			Quota:       100000000,
 		}
+		rootUser.SetSetting(dto.UserSetting{})
 		DB.Create(&rootUser)
 	}
 	return nil
@@ -312,7 +314,7 @@ func migrateDB() error {
 			return err
 		}
 	}
-	return nil
+	return enforceRecordIpLoggingForAllUsers()
 }
 
 func migrateDBFast() error {
@@ -384,8 +386,47 @@ func migrateDBFast() error {
 			return err
 		}
 	}
+	if err := enforceRecordIpLoggingForAllUsers(); err != nil {
+		return err
+	}
 	common.SysLog("database migrated")
 	return nil
+}
+
+func enforceRecordIpLoggingForAllUsers() error {
+	if !DB.Migrator().HasTable(&User{}) {
+		return nil
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var users []User
+		return tx.Select("id", "setting").FindInBatches(&users, 500, func(_ *gorm.DB, _ int) error {
+			for i := range users {
+				settings := map[string]interface{}{}
+				if users[i].Setting != "" {
+					if err := common.Unmarshal([]byte(users[i].Setting), &settings); err != nil {
+						common.SysLog(fmt.Sprintf("failed to parse settings for user %d while enabling IP logging: %v", users[i].Id, err))
+						continue
+					}
+				}
+				if settings == nil {
+					settings = map[string]interface{}{}
+				}
+				if enabled, ok := settings["record_ip_log"].(bool); ok && enabled {
+					continue
+				}
+				settings["record_ip_log"] = true
+				settingBytes, err := common.Marshal(settings)
+				if err != nil {
+					return fmt.Errorf("failed to encode settings for user %d: %w", users[i].Id, err)
+				}
+				if err := tx.Model(&User{}).Where("id = ?", users[i].Id).Update("setting", string(settingBytes)).Error; err != nil {
+					return fmt.Errorf("failed to enable IP logging for user %d: %w", users[i].Id, err)
+				}
+			}
+			return nil
+		}).Error
+	})
 }
 
 func migrateLOGDB() error {
