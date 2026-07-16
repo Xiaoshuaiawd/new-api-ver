@@ -76,31 +76,41 @@ import {
 } from './channel-health-settings'
 
 const channelHealthSchema = z.object({
-  channel_health_setting: z.object({
-    enabled: z.boolean(),
-    preset: z.enum(CHANNEL_HEALTH_PRESETS),
-    model_level_enabled: z.boolean(),
-    events_enabled: z.boolean(),
-    alert_min_interval_seconds: z.coerce.number().int().min(1),
-    window_seconds: z.coerce.number().int().min(1),
-    min_samples: z.coerce.number().int().min(1),
-    min_failures: z.coerce.number().int().min(1),
-    error_rate_threshold: z.coerce.number().min(0).max(1),
-    consecutive_failure_threshold: z.coerce.number().int().min(1),
-    first_response_timeout_seconds: z.coerce.number().int().min(1),
-    slow_first_response_seconds: z.coerce.number().int().min(1),
-    stuck_detection_enabled: z.boolean(),
-    stuck_inflight_threshold: z.coerce.number().int().min(1),
-    single_stuck_timeout_seconds: z.coerce.number().int().min(1),
-    probe_interval_seconds: z.coerce.number().int().min(1),
-    probe_timeout_seconds: z.coerce.number().int().min(1),
-    probe_successes_to_recover: z.coerce.number().int().min(1),
-    probe_backoff_max_seconds: z.coerce.number().int().min(1),
-    warmup_enabled: z.boolean(),
-    warmup_duration_seconds: z.coerce.number().int().min(1),
-    warmup_start_percent: z.coerce.number().int().min(1).max(100),
-    warmup_step_percent: z.coerce.number().int().min(1).max(100),
-  }),
+  channel_health_setting: z
+    .object({
+      enabled: z.boolean(),
+      preset: z.enum(CHANNEL_HEALTH_PRESETS),
+      model_level_enabled: z.boolean(),
+      events_enabled: z.boolean(),
+      alert_min_interval_seconds: z.coerce.number().int().min(1),
+      window_seconds: z.coerce.number().int().min(1),
+      min_samples: z.coerce.number().int().min(1),
+      min_failures: z.coerce.number().int().min(1),
+      degradation_threshold: z.coerce.number().min(0.01).max(0.99),
+      error_rate_threshold: z.coerce.number().min(0).max(1),
+      consecutive_failure_threshold: z.coerce.number().int().min(1),
+      first_response_timeout_seconds: z.coerce.number().int().min(1),
+      slow_first_response_seconds: z.coerce.number().int().min(1),
+      stuck_detection_enabled: z.boolean(),
+      stuck_inflight_threshold: z.coerce.number().int().min(1),
+      single_stuck_timeout_seconds: z.coerce.number().int().min(1),
+      probe_interval_seconds: z.coerce.number().int().min(1),
+      probe_timeout_seconds: z.coerce.number().int().min(1),
+      probe_successes_to_recover: z.coerce.number().int().min(1),
+      probe_backoff_max_seconds: z.coerce.number().int().min(1),
+      max_isolation_seconds: z.coerce.number().int().min(1),
+      warmup_enabled: z.boolean(),
+      warmup_duration_seconds: z.coerce.number().int().min(1),
+      warmup_start_percent: z.coerce.number().int().min(1).max(100),
+      warmup_step_percent: z.coerce.number().int().min(1).max(100),
+    })
+    .refine(
+      (value) => value.degradation_threshold < value.error_rate_threshold,
+      {
+        path: ['degradation_threshold'],
+        message: 'Degradation threshold',
+      }
+    ),
   channel_multiplier_monitor_setting: z.object({
     interval_minutes: z.coerce.number().int().min(1),
   }),
@@ -167,6 +177,8 @@ function buildFormDefaults(
       window_seconds: defaults['channel_health_setting.window_seconds'],
       min_samples: defaults['channel_health_setting.min_samples'],
       min_failures: defaults['channel_health_setting.min_failures'],
+      degradation_threshold:
+        defaults['channel_health_setting.degradation_threshold'],
       error_rate_threshold:
         defaults['channel_health_setting.error_rate_threshold'],
       consecutive_failure_threshold:
@@ -189,6 +201,8 @@ function buildFormDefaults(
         defaults['channel_health_setting.probe_successes_to_recover'],
       probe_backoff_max_seconds:
         defaults['channel_health_setting.probe_backoff_max_seconds'],
+      max_isolation_seconds:
+        defaults['channel_health_setting.max_isolation_seconds'],
       warmup_enabled: defaults['channel_health_setting.warmup_enabled'],
       warmup_duration_seconds:
         defaults['channel_health_setting.warmup_duration_seconds'],
@@ -219,7 +233,9 @@ function buildFormDefaults(
           'channel_auto_priority_setting.latency_recovery_ratio_threshold'
         ],
       latency_retained_weight_percent:
-        defaults['channel_auto_priority_setting.latency_retained_weight_percent'],
+        defaults[
+          'channel_auto_priority_setting.latency_retained_weight_percent'
+        ],
       latency_priority_penalty:
         defaults['channel_auto_priority_setting.latency_priority_penalty'],
     },

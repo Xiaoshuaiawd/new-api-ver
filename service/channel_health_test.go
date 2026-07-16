@@ -28,6 +28,7 @@ func withChannelHealthTestSettings(t *testing.T) *operation_setting.ChannelHealt
 		WindowSeconds:               180,
 		MinSamples:                  10,
 		MinFailures:                 5,
+		DegradationThreshold:        0.10,
 		ErrorRateThreshold:          0.40,
 		ConsecutiveFailureThreshold: 5,
 		FirstResponseTimeoutSeconds: 45,
@@ -48,10 +49,12 @@ func withChannelHealthTestSettings(t *testing.T) *operation_setting.ChannelHealt
 		StuckDetectionEnabled:       true,
 	}
 	t.Cleanup(func() {
+		channelHealthProbeWaitGroup.Wait()
 		*setting = original
 		ResetChannelHealthForTest()
 	})
 	ResetChannelHealthForTest()
+	SetChannelHealthEventNotifyFuncForTest(func(ChannelHealthEvent) {})
 	return setting
 }
 
@@ -92,6 +95,53 @@ func TestChannelHealthKeepsChannelAvailableBelowErrorThreshold(t *testing.T) {
 	}
 
 	require.True(t, IsChannelAvailable(channelID))
+}
+
+func TestChannelHealthDegradesTrafficWithoutReusingWarmupState(t *testing.T) {
+	setting := withChannelHealthTestSettings(t)
+	setting.ConsecutiveFailureThreshold = 100
+
+	const channelID = 8826
+	for i := 0; i < 2; i++ {
+		handle := RecordAttemptStart(ChannelAttemptMeta{ChannelID: channelID})
+		RecordAttemptFinish(handle, ChannelAttemptResult{Error: channelHealthTestUpstreamError()})
+	}
+	for i := 0; i < 8; i++ {
+		handle := RecordAttemptStart(ChannelAttemptMeta{ChannelID: channelID})
+		RecordFirstResponse(handle)
+		RecordAttemptFinish(handle, ChannelAttemptResult{})
+	}
+
+	snapshot, ok := GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateHealthy, snapshot.State)
+	require.Equal(t, ChannelHealthStateV2Degraded, snapshot.StateV2)
+	require.Equal(t, channelHealthDegradedTrafficPercent, snapshot.TrafficPercent)
+	require.True(t, snapshot.RuntimeAvailable)
+	require.Equal(t, 30, adjustChannelHealthWeight(channelID, "", 100, 0))
+	degradedEvents := GetChannelHealthEvents(ChannelHealthEventFilter{ChannelID: channelID, State: string(ChannelHealthStateV2Degraded)})
+	require.Len(t, degradedEvents, 1)
+	require.Equal(t, ChannelHealthEventTypeDegraded, degradedEvents[0].Type)
+	require.Equal(t, string(ChannelHealthStateV2Degraded), degradedEvents[0].StateV2)
+
+	for i := 0; i < 11; i++ {
+		handle := RecordAttemptStart(ChannelAttemptMeta{ChannelID: channelID})
+		RecordFirstResponse(handle)
+		RecordAttemptFinish(handle, ChannelAttemptResult{})
+	}
+
+	snapshot, ok = GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateHealthy, snapshot.State)
+	require.Equal(t, ChannelHealthStateV2Healthy, snapshot.StateV2)
+	require.Equal(t, 100, snapshot.TrafficPercent)
+	require.Empty(t, snapshot.Reason)
+	// The discrete degraded state is gone, while the existing proportional
+	// error-rate penalty remains until the failed samples age out of the window.
+	require.Equal(t, 90, adjustChannelHealthWeight(channelID, "", 100, 0))
+	restoredEvents := GetChannelHealthEvents(ChannelHealthEventFilter{ChannelID: channelID, Type: ChannelHealthEventTypeRestored})
+	require.Len(t, restoredEvents, 1)
+	require.Equal(t, string(ChannelHealthStateV2Healthy), restoredEvents[0].StateV2)
 }
 
 func TestChannelHealthOpensOnStuckInflightThreshold(t *testing.T) {
@@ -307,7 +357,9 @@ func TestChannelHealthRequiresTwoProbeSuccessesToRecover(t *testing.T) {
 	snapshot, ok = GetChannelHealthSnapshot(channelID)
 	require.True(t, ok)
 	require.Equal(t, ChannelHealthStateWarming, snapshot.State)
+	require.Equal(t, ChannelHealthStateV2Degraded, snapshot.StateV2)
 	require.Equal(t, 10, snapshot.WarmupPercent)
+	require.Equal(t, 10, snapshot.TrafficPercent)
 }
 
 func TestChannelHealthWarmupCompletesAfterDuration(t *testing.T) {
@@ -326,7 +378,9 @@ func TestChannelHealthWarmupCompletesAfterDuration(t *testing.T) {
 	snapshot, ok := GetChannelHealthSnapshot(channelID)
 	require.True(t, ok)
 	require.Equal(t, ChannelHealthStateHealthy, snapshot.State)
+	require.Equal(t, ChannelHealthStateV2Healthy, snapshot.StateV2)
 	require.Equal(t, 100, snapshot.WarmupPercent)
+	require.Equal(t, 100, snapshot.TrafficPercent)
 }
 
 func TestChannelHealthWarmupRampsSnapshotPercent(t *testing.T) {
@@ -500,6 +554,10 @@ func TestChannelHealthAvailabilityHonorsIsolationCacheOverLocalHealthyState(t *t
 	require.NoError(t, err)
 
 	require.False(t, IsChannelAvailable(channelID))
+	snapshot, ok := GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Equal(t, ChannelHealthStateV2Unavailable, snapshot.StateV2)
+	require.Equal(t, 0, snapshot.TrafficPercent)
 }
 
 func TestChannelHealthStaleIsolationSnapshotCanBeClaimedForRecoveryProbe(t *testing.T) {
@@ -1140,9 +1198,9 @@ func withChannelHealthSelectionDB(t *testing.T) {
 	oldMemoryCacheEnabled := common.MemoryCacheEnabled
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	model.DB = db
 	common.MemoryCacheEnabled = true
 	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}))
+	model.DB = db
 
 	pHigh := int64(10)
 	pLow := int64(1)
@@ -1174,6 +1232,7 @@ func withChannelHealthSelectionDB(t *testing.T) {
 	model.InitChannelCache()
 
 	t.Cleanup(func() {
+		channelHealthProbeWaitGroup.Wait()
 		model.DB = oldDB
 		common.MemoryCacheEnabled = oldMemoryCacheEnabled
 		model.InitChannelCache()

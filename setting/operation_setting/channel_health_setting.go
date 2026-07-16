@@ -10,14 +10,17 @@ const (
 )
 
 type ChannelHealthSetting struct {
-	Enabled                     bool    `json:"enabled"`
-	Preset                      string  `json:"preset"`
-	ModelLevelEnabled           bool    `json:"model_level_enabled"`
-	EventsEnabled               bool    `json:"events_enabled"`
-	AlertMinIntervalSeconds     int     `json:"alert_min_interval_seconds"`
-	WindowSeconds               int     `json:"window_seconds"`
-	MinSamples                  int     `json:"min_samples"`
-	MinFailures                 int     `json:"min_failures"`
+	Enabled                 bool   `json:"enabled"`
+	Preset                  string `json:"preset"`
+	ModelLevelEnabled       bool   `json:"model_level_enabled"`
+	EventsEnabled           bool   `json:"events_enabled"`
+	AlertMinIntervalSeconds int    `json:"alert_min_interval_seconds"`
+	WindowSeconds           int    `json:"window_seconds"`
+	MinSamples              int    `json:"min_samples"`
+	MinFailures             int    `json:"min_failures"`
+	// DegradationThreshold is the sampled upstream failure rate at which a
+	// healthy channel remains available with reduced traffic.
+	DegradationThreshold        float64 `json:"degradation_threshold"`
 	ErrorRateThreshold          float64 `json:"error_rate_threshold"`
 	ConsecutiveFailureThreshold int     `json:"consecutive_failure_threshold"`
 	FirstResponseTimeoutSeconds int     `json:"first_response_timeout_seconds"`
@@ -27,19 +30,19 @@ type ChannelHealthSetting struct {
 	// a lower weight. It is intentionally smaller than FirstResponseTimeoutSeconds
 	// (which governs stuck-request isolation and recovery), so degradation kicks in
 	// well before a request is considered hung.
-	SlowFirstResponseSeconds    int  `json:"slow_first_response_seconds"`
-	StuckDetectionEnabled       bool `json:"stuck_detection_enabled"`
-	StuckInflightThreshold      int  `json:"stuck_inflight_threshold"`
-	SingleStuckTimeoutSeconds   int     `json:"single_stuck_timeout_seconds"`
-	ProbeIntervalSeconds        int     `json:"probe_interval_seconds"`
-	ProbeTimeoutSeconds         int     `json:"probe_timeout_seconds"`
-	ProbeSuccessesToRecover     int     `json:"probe_successes_to_recover"`
-	ProbeBackoffMaxSeconds      int     `json:"probe_backoff_max_seconds"`
-	MaxIsolationSeconds         int     `json:"max_isolation_seconds"`
-	WarmupEnabled               bool    `json:"warmup_enabled"`
-	WarmupDurationSeconds       int     `json:"warmup_duration_seconds"`
-	WarmupStartPercent          int     `json:"warmup_start_percent"`
-	WarmupStepPercent           int     `json:"warmup_step_percent"`
+	SlowFirstResponseSeconds  int  `json:"slow_first_response_seconds"`
+	StuckDetectionEnabled     bool `json:"stuck_detection_enabled"`
+	StuckInflightThreshold    int  `json:"stuck_inflight_threshold"`
+	SingleStuckTimeoutSeconds int  `json:"single_stuck_timeout_seconds"`
+	ProbeIntervalSeconds      int  `json:"probe_interval_seconds"`
+	ProbeTimeoutSeconds       int  `json:"probe_timeout_seconds"`
+	ProbeSuccessesToRecover   int  `json:"probe_successes_to_recover"`
+	ProbeBackoffMaxSeconds    int  `json:"probe_backoff_max_seconds"`
+	MaxIsolationSeconds       int  `json:"max_isolation_seconds"`
+	WarmupEnabled             bool `json:"warmup_enabled"`
+	WarmupDurationSeconds     int  `json:"warmup_duration_seconds"`
+	WarmupStartPercent        int  `json:"warmup_start_percent"`
+	WarmupStepPercent         int  `json:"warmup_step_percent"`
 }
 
 var channelHealthSetting = ChannelHealthSetting{
@@ -51,6 +54,7 @@ var channelHealthSetting = ChannelHealthSetting{
 	WindowSeconds:               180,
 	MinSamples:                  10,
 	MinFailures:                 5,
+	DegradationThreshold:        0.10,
 	ErrorRateThreshold:          0.40,
 	ConsecutiveFailureThreshold: 5,
 	FirstResponseTimeoutSeconds: 45,

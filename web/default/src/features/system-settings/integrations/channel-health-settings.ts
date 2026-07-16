@@ -20,6 +20,7 @@ export const CHANNEL_HEALTH_NUMBER_FIELD_KEYS = [
   'window_seconds',
   'min_samples',
   'min_failures',
+  'degradation_threshold',
   'error_rate_threshold',
   'consecutive_failure_threshold',
   'first_response_timeout_seconds',
@@ -30,6 +31,7 @@ export const CHANNEL_HEALTH_NUMBER_FIELD_KEYS = [
   'probe_timeout_seconds',
   'probe_successes_to_recover',
   'probe_backoff_max_seconds',
+  'max_isolation_seconds',
   'warmup_duration_seconds',
   'warmup_start_percent',
   'warmup_step_percent',
@@ -152,10 +154,22 @@ export const CHANNEL_HEALTH_SETTING_FIELDS = [
     group: 'errors',
   },
   {
+    key: 'degradation_threshold',
+    optionKey: 'channel_health_setting.degradation_threshold',
+    labelKey: 'Degradation threshold',
+    descriptionKey:
+      'Error rate (0-1) that triggers degraded state with reduced weight (30%), not full isolation',
+    min: 0.01,
+    max: 0.99,
+    step: 0.01,
+    group: 'errors',
+  },
+  {
     key: 'error_rate_threshold',
     optionKey: 'channel_health_setting.error_rate_threshold',
-    labelKey: 'Error rate threshold',
-    descriptionKey: 'Failure ratio from 0 to 1 required to isolate a channel',
+    labelKey: 'Isolation threshold',
+    descriptionKey:
+      'Error rate (0-1) that triggers full isolation (unavailable state)',
     min: 0,
     max: 1,
     step: 0.01,
@@ -246,6 +260,16 @@ export const CHANNEL_HEALTH_SETTING_FIELDS = [
     group: 'probe',
   },
   {
+    key: 'max_isolation_seconds',
+    optionKey: 'channel_health_setting.max_isolation_seconds',
+    labelKey: 'Maximum isolation duration (seconds)',
+    descriptionKey:
+      'Force a recovery probe after a channel stays isolated this long',
+    min: 1,
+    step: 1,
+    group: 'probe',
+  },
+  {
     key: 'warmup_duration_seconds',
     optionKey: 'channel_health_setting.warmup_duration_seconds',
     labelKey: 'Warm-up duration (seconds)',
@@ -258,7 +282,8 @@ export const CHANNEL_HEALTH_SETTING_FIELDS = [
     key: 'warmup_start_percent',
     optionKey: 'channel_health_setting.warmup_start_percent',
     labelKey: 'Warm-up start percent',
-    descriptionKey: 'Initial percentage of new selections allowed during warm-up',
+    descriptionKey:
+      'Initial percentage of new selections allowed during warm-up',
     min: 1,
     max: 100,
     step: 1,
@@ -287,6 +312,7 @@ export const CHANNEL_HEALTH_SETTING_KEYS = [
   'channel_health_setting.window_seconds',
   'channel_health_setting.min_samples',
   'channel_health_setting.min_failures',
+  'channel_health_setting.degradation_threshold',
   'channel_health_setting.error_rate_threshold',
   'channel_health_setting.consecutive_failure_threshold',
   'channel_health_setting.first_response_timeout_seconds',
@@ -297,6 +323,7 @@ export const CHANNEL_HEALTH_SETTING_KEYS = [
   'channel_health_setting.probe_timeout_seconds',
   'channel_health_setting.probe_successes_to_recover',
   'channel_health_setting.probe_backoff_max_seconds',
+  'channel_health_setting.max_isolation_seconds',
   'channel_health_setting.warmup_duration_seconds',
   'channel_health_setting.warmup_start_percent',
   'channel_health_setting.warmup_step_percent',
@@ -313,6 +340,7 @@ export const CHANNEL_HEALTH_DEFAULT_VALUES = {
   'channel_health_setting.window_seconds': 180,
   'channel_health_setting.min_samples': 10,
   'channel_health_setting.min_failures': 5,
+  'channel_health_setting.degradation_threshold': 0.1,
   'channel_health_setting.error_rate_threshold': 0.4,
   'channel_health_setting.consecutive_failure_threshold': 5,
   'channel_health_setting.first_response_timeout_seconds': 45,
@@ -323,6 +351,7 @@ export const CHANNEL_HEALTH_DEFAULT_VALUES = {
   'channel_health_setting.probe_timeout_seconds': 30,
   'channel_health_setting.probe_successes_to_recover': 2,
   'channel_health_setting.probe_backoff_max_seconds': 300,
+  'channel_health_setting.max_isolation_seconds': 1800,
   'channel_health_setting.warmup_duration_seconds': 60,
   'channel_health_setting.warmup_start_percent': 10,
   'channel_health_setting.warmup_step_percent': 30,
@@ -351,6 +380,7 @@ export const CHANNEL_HEALTH_PRESET_VALUES = {
     'channel_health_setting.window_seconds': 300,
     'channel_health_setting.min_samples': 20,
     'channel_health_setting.min_failures': 8,
+    'channel_health_setting.degradation_threshold': 0.15,
     'channel_health_setting.error_rate_threshold': 0.6,
     'channel_health_setting.consecutive_failure_threshold': 8,
     'channel_health_setting.first_response_timeout_seconds': 60,
@@ -361,6 +391,7 @@ export const CHANNEL_HEALTH_PRESET_VALUES = {
     'channel_health_setting.probe_timeout_seconds': 30,
     'channel_health_setting.probe_successes_to_recover': 3,
     'channel_health_setting.probe_backoff_max_seconds': 300,
+    'channel_health_setting.max_isolation_seconds': 3600,
     'channel_health_setting.warmup_duration_seconds': 120,
     'channel_health_setting.warmup_start_percent': 10,
     'channel_health_setting.warmup_step_percent': 20,
@@ -369,6 +400,7 @@ export const CHANNEL_HEALTH_PRESET_VALUES = {
     'channel_health_setting.window_seconds': 180,
     'channel_health_setting.min_samples': 10,
     'channel_health_setting.min_failures': 5,
+    'channel_health_setting.degradation_threshold': 0.1,
     'channel_health_setting.error_rate_threshold': 0.4,
     'channel_health_setting.consecutive_failure_threshold': 5,
     'channel_health_setting.first_response_timeout_seconds': 45,
@@ -379,6 +411,7 @@ export const CHANNEL_HEALTH_PRESET_VALUES = {
     'channel_health_setting.probe_timeout_seconds': 30,
     'channel_health_setting.probe_successes_to_recover': 2,
     'channel_health_setting.probe_backoff_max_seconds': 300,
+    'channel_health_setting.max_isolation_seconds': 1800,
     'channel_health_setting.warmup_duration_seconds': 60,
     'channel_health_setting.warmup_start_percent': 10,
     'channel_health_setting.warmup_step_percent': 30,
@@ -387,6 +420,7 @@ export const CHANNEL_HEALTH_PRESET_VALUES = {
     'channel_health_setting.window_seconds': 120,
     'channel_health_setting.min_samples': 6,
     'channel_health_setting.min_failures': 3,
+    'channel_health_setting.degradation_threshold': 0.08,
     'channel_health_setting.error_rate_threshold': 0.3,
     'channel_health_setting.consecutive_failure_threshold': 3,
     'channel_health_setting.first_response_timeout_seconds': 30,
@@ -397,6 +431,7 @@ export const CHANNEL_HEALTH_PRESET_VALUES = {
     'channel_health_setting.probe_timeout_seconds': 20,
     'channel_health_setting.probe_successes_to_recover': 2,
     'channel_health_setting.probe_backoff_max_seconds': 180,
+    'channel_health_setting.max_isolation_seconds': 900,
     'channel_health_setting.warmup_duration_seconds': 45,
     'channel_health_setting.warmup_start_percent': 15,
     'channel_health_setting.warmup_step_percent': 35,
@@ -434,8 +469,9 @@ export function pickChannelHealthSettings(
   for (const key of CHANNEL_HEALTH_SETTING_KEYS) {
     const fallback = CHANNEL_HEALTH_DEFAULT_VALUES[key]
     const value = settings[key]
-    ;(picked as Record<ChannelHealthSettingKey, boolean | number | string>)[key] =
-      value ?? fallback
+    ;(picked as Record<ChannelHealthSettingKey, boolean | number | string>)[
+      key
+    ] = value ?? fallback
   }
   return picked
 }

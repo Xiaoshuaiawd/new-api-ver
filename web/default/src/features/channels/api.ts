@@ -177,6 +177,7 @@ export async function getChannelRuntimeHealthReport(params?: {
       model_name?: string
       group?: string
       state: string
+      state_v2?: string
       reason?: string
       occurred_at: number
       snapshot?: {

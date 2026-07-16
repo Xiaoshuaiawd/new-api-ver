@@ -158,8 +158,14 @@ export function ChannelHealthReportPanel() {
               <SelectGroup>
                 <SelectItem value={ALL_FILTER_VALUE}>{t('All')}</SelectItem>
                 <SelectItem value='opened'>{t('opened')}</SelectItem>
+                <SelectItem value='degraded'>{t('degraded')}</SelectItem>
+                <SelectItem value='degradation_recovered'>
+                  {t('degradation_recovered')}
+                </SelectItem>
                 <SelectItem value='recovered'>{t('recovered')}</SelectItem>
-                <SelectItem value='probe_failed'>{t('probe_failed')}</SelectItem>
+                <SelectItem value='probe_failed'>
+                  {t('probe_failed')}
+                </SelectItem>
               </SelectGroup>
             </SelectContent>
           </Select>
@@ -174,6 +180,7 @@ export function ChannelHealthReportPanel() {
               <SelectGroup>
                 <SelectItem value={ALL_FILTER_VALUE}>{t('All')}</SelectItem>
                 <SelectItem value='healthy'>healthy</SelectItem>
+                <SelectItem value='degraded'>degraded</SelectItem>
                 <SelectItem value='open'>open</SelectItem>
                 <SelectItem value='probing'>probing</SelectItem>
                 <SelectItem value='warming'>warming</SelectItem>
@@ -353,7 +360,8 @@ export function ChannelHealthReportPanel() {
                           {formatLatency(event.snapshot.p95_first_response_ms)}
                         </span>
                         <span>
-                          {t('Probe backoff')}: {event.snapshot.probe_backoff_seconds}s
+                          {t('Probe backoff')}:{' '}
+                          {event.snapshot.probe_backoff_seconds}s
                         </span>
                         {event.snapshot.warmup_percent > 0 ? (
                           <span>

@@ -38,6 +38,8 @@ export const channelRuntimeHealthSchema = z
   .object({
     channel_id: z.number().default(0),
     state: z.enum(['healthy', 'open', 'probing', 'warming']).or(z.string()),
+    state_v2: z.enum(['healthy', 'degraded', 'unavailable']).optional(),
+    traffic_percent: z.number().min(0).max(100).optional(),
     reason: z.string().default(''),
     opened_at: z.number().default(0),
     next_probe_at: z.number().default(0),

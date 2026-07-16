@@ -120,6 +120,8 @@ function getRuntimeHealth(channel: Channel): ChannelRuntimeHealth {
     channel.runtime_health ?? {
       channel_id: channel.id,
       state: 'healthy',
+      state_v2: 'healthy',
+      traffic_percent: 100,
       reason: '',
       opened_at: 0,
       next_probe_at: 0,
@@ -197,11 +199,20 @@ function getRuntimeHealthBadgeConfig(
   health: ChannelRuntimeHealth,
   t: (key: string) => string
 ): { label: string; variant: StatusVariant; pulse?: boolean } {
+  if (health.state === 'probing') {
+    return { label: t('Probing'), variant: 'warning', pulse: true }
+  }
+  if (health.state_v2 === 'unavailable' || health.state === 'open') {
+    return { label: t('Unavailable'), variant: 'danger' }
+  }
+  if (health.state_v2 === 'degraded') {
+    return {
+      label: `${t('Degraded')} ${Math.max(0, health.traffic_percent ?? 0)}%`,
+      variant: 'warning',
+    }
+  }
+
   switch (health.state) {
-    case 'open':
-      return { label: t('Isolated'), variant: 'danger' }
-    case 'probing':
-      return { label: t('Probing'), variant: 'warning', pulse: true }
     case 'warming':
       return {
         label: `${t('Warming')} ${Math.max(0, health.warmup_percent || 0)}%`,
@@ -231,20 +242,29 @@ function RuntimeHealthCell({ channel }: { channel: Channel }) {
   if (isTagRow) {
     const children = (channel as TagRow).children || []
     const total = children.length
-    const openCount = children.filter(
-      (child) => getRuntimeHealth(child).state === 'open'
-    ).length
+    const openCount = children.filter((child) => {
+      const health = getRuntimeHealth(child)
+      return (
+        health.state !== 'probing' &&
+        (health.state_v2 === 'unavailable' || health.state === 'open')
+      )
+    }).length
     const probingCount = children.filter(
       (child) => getRuntimeHealth(child).state === 'probing'
     ).length
-    const warmingCount = children.filter(
-      (child) => getRuntimeHealth(child).state === 'warming'
-    ).length
+    const degradedCount = children.filter((child) => {
+      const health = getRuntimeHealth(child)
+      return health.state_v2 === 'degraded'
+    }).length
+    const warmingCount = children.filter((child) => {
+      const health = getRuntimeHealth(child)
+      return health.state === 'warming' && health.state_v2 == null
+    }).length
 
     if (openCount > 0) {
       return (
         <StatusBadge
-          label={`${t('Isolated')} (${openCount}/${total})`}
+          label={`${t('Unavailable')} (${openCount}/${total})`}
           variant='danger'
           size='sm'
           copyable={false}
@@ -259,6 +279,17 @@ function RuntimeHealthCell({ channel }: { channel: Channel }) {
           variant='warning'
           size='sm'
           pulse
+          copyable={false}
+          className='-ml-1.5'
+        />
+      )
+    }
+    if (degradedCount > 0) {
+      return (
+        <StatusBadge
+          label={`${t('Degraded')} (${degradedCount}/${total})`}
+          variant='warning'
+          size='sm'
           copyable={false}
           className='-ml-1.5'
         />
@@ -298,6 +329,7 @@ function RuntimeHealthCell({ channel }: { channel: Channel }) {
     health.probe_unavailable_reason ||
     health.average_first_response_ms > 0 ||
     health.p95_first_response_ms > 0 ||
+    health.state_v2 === 'degraded' ||
     health.state === 'warming'
 
   const badge = (
@@ -365,12 +397,14 @@ function RuntimeHealthCell({ channel }: { channel: Channel }) {
                 {t('Next probe:')} {formatHealthTimestamp(health.next_probe_at)}
               </div>
             )}
-            {health.state === 'warming' && (
+            {health.state_v2 === 'degraded' && (
+              <div>
+                {t('Traffic:')} {health.traffic_percent ?? 0}%
+              </div>
+            )}
+            {health.state === 'warming' && health.state_v2 == null && (
               <div>
                 {t('Warm-up:')} {health.warmup_percent}%
-                {health.warmup_throttle_percent > 0
-                  ? ` / ${t('throttle')} ${health.warmup_throttle_percent}%`
-                  : ''}
               </div>
             )}
           </div>

@@ -44,6 +44,8 @@ describe('channel schema runtime health', () => {
       runtime_health: {
         channel_id: 1,
         state: 'warming',
+        state_v2: 'degraded',
+        traffic_percent: 40,
         reason: 'warming',
         inflight: 2,
         window_samples: 10,
@@ -54,6 +56,8 @@ describe('channel schema runtime health', () => {
     })
 
     assert.equal(channel.runtime_health?.state, 'warming')
+    assert.equal(channel.runtime_health?.state_v2, 'degraded')
+    assert.equal(channel.runtime_health?.traffic_percent, 40)
     assert.equal(channel.runtime_health?.warmup_percent, 40)
     assert.equal(channel.runtime_health?.inflight, 2)
   })

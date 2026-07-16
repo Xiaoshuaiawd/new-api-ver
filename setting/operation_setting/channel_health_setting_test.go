@@ -19,6 +19,7 @@ func TestChannelHealthSettingExportsAndLoadsRuntimeOptions(t *testing.T) {
 	require.Equal(t, "180", exported["channel_health_setting.window_seconds"])
 	require.Equal(t, "10", exported["channel_health_setting.min_samples"])
 	require.Equal(t, "5", exported["channel_health_setting.min_failures"])
+	require.Equal(t, "0.1", exported["channel_health_setting.degradation_threshold"])
 	require.Equal(t, "0.4", exported["channel_health_setting.error_rate_threshold"])
 	require.Equal(t, "5", exported["channel_health_setting.consecutive_failure_threshold"])
 	require.Equal(t, "45", exported["channel_health_setting.first_response_timeout_seconds"])
@@ -47,6 +48,7 @@ func TestChannelHealthSettingExportsAndLoadsRuntimeOptions(t *testing.T) {
 		"channel_health_setting.window_seconds":                 "240",
 		"channel_health_setting.min_samples":                    "12",
 		"channel_health_setting.min_failures":                   "6",
+		"channel_health_setting.degradation_threshold":          "0.15",
 		"channel_health_setting.error_rate_threshold":           "0.25",
 		"channel_health_setting.consecutive_failure_threshold":  "4",
 		"channel_health_setting.first_response_timeout_seconds": "50",
@@ -71,6 +73,7 @@ func TestChannelHealthSettingExportsAndLoadsRuntimeOptions(t *testing.T) {
 	require.Equal(t, 240, setting.WindowSeconds)
 	require.Equal(t, 12, setting.MinSamples)
 	require.Equal(t, 6, setting.MinFailures)
+	require.Equal(t, 0.15, setting.DegradationThreshold)
 	require.Equal(t, 0.25, setting.ErrorRateThreshold)
 	require.Equal(t, 4, setting.ConsecutiveFailureThreshold)
 	require.Equal(t, 50, setting.FirstResponseTimeoutSeconds)

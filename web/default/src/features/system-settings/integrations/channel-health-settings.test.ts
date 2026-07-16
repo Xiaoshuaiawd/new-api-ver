@@ -44,6 +44,7 @@ describe('channel health setting metadata', () => {
       'channel_health_setting.window_seconds',
       'channel_health_setting.min_samples',
       'channel_health_setting.min_failures',
+      'channel_health_setting.degradation_threshold',
       'channel_health_setting.error_rate_threshold',
       'channel_health_setting.consecutive_failure_threshold',
       'channel_health_setting.first_response_timeout_seconds',
@@ -54,12 +55,13 @@ describe('channel health setting metadata', () => {
       'channel_health_setting.probe_timeout_seconds',
       'channel_health_setting.probe_successes_to_recover',
       'channel_health_setting.probe_backoff_max_seconds',
+      'channel_health_setting.max_isolation_seconds',
       'channel_health_setting.warmup_duration_seconds',
       'channel_health_setting.warmup_start_percent',
       'channel_health_setting.warmup_step_percent',
     ])
 
-    assert.equal(CHANNEL_HEALTH_SETTING_FIELDS.length, 16)
+    assert.equal(CHANNEL_HEALTH_SETTING_FIELDS.length, 18)
     assert.deepEqual(CHANNEL_HEALTH_DEFAULT_VALUES, {
       'channel_health_setting.enabled': true,
       'channel_health_setting.warmup_enabled': true,
@@ -71,6 +73,7 @@ describe('channel health setting metadata', () => {
       'channel_health_setting.window_seconds': 180,
       'channel_health_setting.min_samples': 10,
       'channel_health_setting.min_failures': 5,
+      'channel_health_setting.degradation_threshold': 0.1,
       'channel_health_setting.error_rate_threshold': 0.4,
       'channel_health_setting.consecutive_failure_threshold': 5,
       'channel_health_setting.first_response_timeout_seconds': 45,
@@ -81,6 +84,7 @@ describe('channel health setting metadata', () => {
       'channel_health_setting.probe_timeout_seconds': 30,
       'channel_health_setting.probe_successes_to_recover': 2,
       'channel_health_setting.probe_backoff_max_seconds': 300,
+      'channel_health_setting.max_isolation_seconds': 1800,
       'channel_health_setting.warmup_duration_seconds': 60,
       'channel_health_setting.warmup_start_percent': 10,
       'channel_health_setting.warmup_step_percent': 30,

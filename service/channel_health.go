@@ -33,12 +33,42 @@ const (
 
 	channelHealthIsolationCacheNamespace = "new-api:channel_health:isolation:v1"
 	channelHealthProbeLockNamespace      = "new-api:channel_health:probe_lock:v1"
+	channelHealthDegradedTrafficPercent  = 30
 )
+
+// ChannelHealthStateV2 represents the simplified 3-state health model
+type ChannelHealthStateV2 string
+
+const (
+	ChannelHealthStateV2Healthy     ChannelHealthStateV2 = "healthy"
+	ChannelHealthStateV2Degraded    ChannelHealthStateV2 = "degraded"
+	ChannelHealthStateV2Unavailable ChannelHealthStateV2 = "unavailable"
+)
+
+// translateStateToV2 converts the internal runtime state to the simplified
+// three-state API exposed to operators.
+func translateStateToV2(state ChannelHealthState, degraded bool) ChannelHealthStateV2 {
+	if degraded && state == ChannelHealthStateHealthy {
+		return ChannelHealthStateV2Degraded
+	}
+	switch state {
+	case ChannelHealthStateHealthy:
+		return ChannelHealthStateV2Healthy
+	case ChannelHealthStateWarming:
+		return ChannelHealthStateV2Degraded
+	case ChannelHealthStateOpen, ChannelHealthStateProbing:
+		return ChannelHealthStateV2Unavailable
+	default:
+		return ChannelHealthStateV2Healthy
+	}
+}
 
 const (
 	ChannelHealthEventTypeOpened      = "opened"
 	ChannelHealthEventTypeProbing     = "probing"
 	ChannelHealthEventTypeWarming     = "warming"
+	ChannelHealthEventTypeDegraded    = "degraded"
+	ChannelHealthEventTypeRestored    = "degradation_recovered"
 	ChannelHealthEventTypeRecovered   = "recovered"
 	ChannelHealthEventTypeProbeFailed = "probe_failed"
 )
@@ -73,6 +103,7 @@ type ChannelHealthEvent struct {
 	ModelName    string                     `json:"model_name,omitempty"`
 	Group        string                     `json:"group,omitempty"`
 	State        string                     `json:"state"`
+	StateV2      string                     `json:"state_v2"`
 	Reason       string                     `json:"reason,omitempty"`
 	OccurredAt   int64                      `json:"occurred_at"`
 	Snapshot     ChannelHealthEventSnapshot `json:"snapshot,omitempty"`
@@ -128,30 +159,32 @@ type AttemptHandle struct {
 }
 
 type ChannelHealthSnapshot struct {
-	ChannelID              int                `json:"channel_id"`
-	ModelName              string             `json:"model_name,omitempty"`
-	State                  ChannelHealthState `json:"state"`
-	Reason                 string             `json:"reason"`
-	OpenedAt               int64              `json:"opened_at"`
-	NextProbeAt            int64              `json:"next_probe_at"`
-	ProbeInProgress        bool               `json:"probe_in_progress"`
-	ConsecutiveFailure     int                `json:"consecutive_failure"`
-	ProbeSuccesses         int                `json:"probe_successes"`
-	ProbeFailures          int                `json:"probe_failures"`
-	Inflight               int                `json:"inflight"`
-	WindowSamples          int                `json:"window_samples"`
-	WindowFailures         int                `json:"window_failures"`
-	ErrorRate              float64            `json:"error_rate"`
-	AverageFirstResponseMs float64            `json:"average_first_response_ms"`
-	P95FirstResponseMs     float64            `json:"p95_first_response_ms"`
-	RuntimeAvailable       bool               `json:"runtime_available"`
-	AvailabilityReason     string             `json:"availability_reason,omitempty"`
-	ProbeAvailable         bool               `json:"probe_available"`
-	ProbeUnavailableReason string             `json:"probe_unavailable_reason,omitempty"`
-	WarmupStartedAt        int64              `json:"warmup_started_at"`
-	WarmupEndsAt           int64              `json:"warmup_ends_at"`
-	WarmupPercent          int                `json:"warmup_percent"`
-	WarmupThrottlePercent  int                `json:"warmup_throttle_percent,omitempty"`
+	ChannelID              int                  `json:"channel_id"`
+	ModelName              string               `json:"model_name,omitempty"`
+	State                  ChannelHealthState   `json:"state"`
+	StateV2                ChannelHealthStateV2 `json:"state_v2"`
+	TrafficPercent         int                  `json:"traffic_percent"`
+	Reason                 string               `json:"reason"`
+	OpenedAt               int64                `json:"opened_at"`
+	NextProbeAt            int64                `json:"next_probe_at"`
+	ProbeInProgress        bool                 `json:"probe_in_progress"`
+	ConsecutiveFailure     int                  `json:"consecutive_failure"`
+	ProbeSuccesses         int                  `json:"probe_successes"`
+	ProbeFailures          int                  `json:"probe_failures"`
+	Inflight               int                  `json:"inflight"`
+	WindowSamples          int                  `json:"window_samples"`
+	WindowFailures         int                  `json:"window_failures"`
+	ErrorRate              float64              `json:"error_rate"`
+	AverageFirstResponseMs float64              `json:"average_first_response_ms"`
+	P95FirstResponseMs     float64              `json:"p95_first_response_ms"`
+	RuntimeAvailable       bool                 `json:"runtime_available"`
+	AvailabilityReason     string               `json:"availability_reason,omitempty"`
+	ProbeAvailable         bool                 `json:"probe_available"`
+	ProbeUnavailableReason string               `json:"probe_unavailable_reason,omitempty"`
+	WarmupStartedAt        int64                `json:"warmup_started_at"`
+	WarmupEndsAt           int64                `json:"warmup_ends_at"`
+	WarmupPercent          int                  `json:"warmup_percent"`
+	WarmupThrottlePercent  int                  `json:"warmup_throttle_percent,omitempty"`
 }
 
 type channelAttemptState struct {
@@ -188,6 +221,7 @@ type channelHealthStateData struct {
 	warmupStartedAt       time.Time
 	warmupEndsAt          time.Time
 	warmupThrottlePercent int
+	degraded              bool
 	firstResponseTotal    time.Duration
 	firstResponseCount    int
 	inflight              map[int64]*channelAttemptState
@@ -357,6 +391,7 @@ var channelHealthCache = struct {
 }{}
 
 var channelHealthProbeWorkerOnce sync.Once
+var channelHealthProbeWaitGroup sync.WaitGroup
 
 // loadChannelHealthProbeFunc returns the registered probe callback, or nil if
 // none has been set. It reads the atomic so callers never touch a shard lock.
@@ -447,6 +482,9 @@ func defaultChannelHealthSetting() operation_setting.ChannelHealthSetting {
 	}
 	if normalized.ErrorRateThreshold <= 0 {
 		normalized.ErrorRateThreshold = 0.40
+	}
+	if normalized.DegradationThreshold <= 0 || normalized.DegradationThreshold >= normalized.ErrorRateThreshold {
+		normalized.DegradationThreshold = normalized.ErrorRateThreshold / 2
 	}
 	if normalized.ConsecutiveFailureThreshold <= 0 {
 		normalized.ConsecutiveFailureThreshold = 5
@@ -838,8 +876,27 @@ func getChannelHealthIsolationSnapshot(scope channelHealthScope, now time.Time) 
 			snapshot.WarmupStartedAt = 0
 			snapshot.WarmupEndsAt = 0
 			snapshot.WarmupPercent = 100
+			snapshot.StateV2 = ChannelHealthStateV2Healthy
+			snapshot.TrafficPercent = 100
 			deleteChannelHealthIsolationDirect(scope)
 		}
+	}
+	switch snapshot.State {
+	case ChannelHealthStateHealthy:
+		if snapshot.StateV2 == ChannelHealthStateV2Degraded {
+			if snapshot.TrafficPercent <= 0 {
+				snapshot.TrafficPercent = channelHealthDegradedTrafficPercent
+			}
+		} else {
+			snapshot.StateV2 = ChannelHealthStateV2Healthy
+			snapshot.TrafficPercent = 100
+		}
+	case ChannelHealthStateWarming:
+		snapshot.StateV2 = ChannelHealthStateV2Degraded
+		snapshot.TrafficPercent = snapshot.WarmupPercent
+	case ChannelHealthStateOpen, ChannelHealthStateProbing:
+		snapshot.StateV2 = ChannelHealthStateV2Unavailable
+		snapshot.TrafficPercent = 0
 	}
 	return snapshot, true
 }
@@ -888,6 +945,7 @@ func hydrateChannelHealthStateFromSnapshotLocked(shard *channelHealthShard, scop
 	state.warmupStartedAt = unixToTime(snapshot.WarmupStartedAt)
 	state.warmupEndsAt = unixToTime(snapshot.WarmupEndsAt)
 	state.warmupThrottlePercent = snapshot.WarmupThrottlePercent
+	state.degraded = snapshot.State == ChannelHealthStateHealthy && snapshot.StateV2 == ChannelHealthStateV2Degraded
 	if state.inflight == nil {
 		state.inflight = make(map[int64]*channelAttemptState)
 	}
@@ -1243,6 +1301,26 @@ func evaluateChannelHealthLocked(state *channelHealthStateData, now time.Time, s
 	if state.consecutiveFailure >= setting.ConsecutiveFailureThreshold {
 		return openChannelLocked(state, now, setting, fmt.Sprintf("consecutive_failures %d", state.consecutiveFailure))
 	}
+
+	if samples >= setting.MinSamples {
+		errorRate := float64(failures) / float64(samples)
+		if failures > 0 && errorRate >= setting.DegradationThreshold {
+			wasDegraded := state.degraded
+			state.degraded = true
+			state.reason = fmt.Sprintf("degraded: error_rate %.2f%%", errorRate*100)
+			persistChannelHealthIsolationLocked(state, now, setting)
+			if !wasDegraded {
+				recordChannelHealthEventLocked(setting, ChannelHealthEventTypeDegraded, state, state.reason, now)
+			}
+			return 0, false
+		}
+		if state.degraded && errorRate < setting.DegradationThreshold {
+			state.degraded = false
+			state.reason = ""
+			persistChannelHealthIsolationLocked(state, now, setting)
+			recordChannelHealthEventLocked(setting, ChannelHealthEventTypeRestored, state, "degradation recovered", now)
+		}
+	}
 	return 0, false
 }
 
@@ -1496,6 +1574,7 @@ func ForceChannelRuntimeProbeNow(channelID int) (ChannelRuntimeControlResult, er
 		state := getOrCreateChannelHealthLocked(shard, scope)
 		if state.state == ChannelHealthStateHealthy || state.state == ChannelHealthStateWarming {
 			state.state = ChannelHealthStateOpen
+			state.degraded = false
 			state.reason = "operator requested probe"
 			state.openedAt = now
 		}
@@ -1509,6 +1588,7 @@ func ForceChannelRuntimeProbeNow(channelID int) (ChannelRuntimeControlResult, er
 	if len(scopes) == 0 {
 		state := getOrCreateChannelHealthLocked(shard, channelHealthScopeFor(channelID, "", setting))
 		state.state = ChannelHealthStateOpen
+		state.degraded = false
 		state.reason = "operator requested probe"
 		state.openedAt = now
 		state.nextProbeAt = now
@@ -1586,6 +1666,7 @@ func openChannelLocked(state *channelHealthStateData, now time.Time, setting ope
 	}
 	wasAvailable := state.state == ChannelHealthStateHealthy || state.state == ChannelHealthStateWarming
 	state.state = ChannelHealthStateOpen
+	state.degraded = false
 	state.reason = reason
 	state.openedAt = now
 	state.nextProbeAt = now.Add(time.Duration(setting.ProbeIntervalSeconds) * time.Second)
@@ -1644,6 +1725,7 @@ func recordProbeAttemptResultLocked(state *channelHealthStateData, now time.Time
 			}
 			if setting.WarmupEnabled {
 				state.state = ChannelHealthStateWarming
+				state.degraded = false
 				state.reason = "warming"
 				state.nextProbeAt = time.Time{}
 				state.consecutiveFailure = 0
@@ -1669,6 +1751,7 @@ func recordProbeAttemptResultLocked(state *channelHealthStateData, now time.Time
 	}
 
 	state.state = ChannelHealthStateOpen
+	state.degraded = false
 	state.reason = reason
 	state.warmupStartedAt = time.Time{}
 	state.warmupEndsAt = time.Time{}
@@ -1693,6 +1776,7 @@ func markChannelHealthyLocked(state *channelHealthStateData) {
 	state.warmupStartedAt = time.Time{}
 	state.warmupEndsAt = time.Time{}
 	state.warmupThrottlePercent = 0
+	state.degraded = false
 	state.samples = nil
 }
 
@@ -1720,6 +1804,7 @@ func recordChannelHealthEventLocked(setting operation_setting.ChannelHealthSetti
 		ModelName:  state.modelName,
 		Group:      state.group,
 		State:      string(state.state),
+		StateV2:    string(translateStateToV2(state.state, state.degraded)),
 		Reason:     reason,
 		OccurredAt: now.Unix(),
 		Snapshot:   buildChannelHealthEventSnapshotLocked(state, now, setting),
@@ -1809,6 +1894,10 @@ func channelHealthAlertSubject(event ChannelHealthEvent) string {
 		return fmt.Sprintf("Channel #%d%s runtime probing", event.ChannelID, modelPart)
 	case ChannelHealthEventTypeWarming:
 		return fmt.Sprintf("Channel #%d%s runtime warming", event.ChannelID, modelPart)
+	case ChannelHealthEventTypeDegraded:
+		return fmt.Sprintf("Channel #%d%s runtime degraded", event.ChannelID, modelPart)
+	case ChannelHealthEventTypeRestored:
+		return fmt.Sprintf("Channel #%d%s runtime degradation recovered", event.ChannelID, modelPart)
 	case ChannelHealthEventTypeRecovered:
 		return fmt.Sprintf("Channel #%d%s runtime recovered", event.ChannelID, modelPart)
 	case ChannelHealthEventTypeProbeFailed:
@@ -1848,8 +1937,17 @@ func GetChannelHealthEvents(filter ChannelHealthEventFilter) []ChannelHealthEven
 		if filter.Type != "" && event.Type != filter.Type {
 			continue
 		}
-		if filter.State != "" && event.State != filter.State {
-			continue
+		if filter.State != "" {
+			switch filter.State {
+			case string(ChannelHealthStateV2Healthy), string(ChannelHealthStateV2Degraded), string(ChannelHealthStateV2Unavailable):
+				if event.StateV2 != filter.State {
+					continue
+				}
+			default:
+				if event.State != filter.State {
+					continue
+				}
+			}
 		}
 		events = append(events, event)
 	}
@@ -2085,7 +2183,11 @@ func RunDueChannelHealthProbes() {
 	}
 
 	for _, target := range targets {
-		go runChannelHealthProbe(target.channelID, target.modelName, probeFn, setting)
+		channelHealthProbeWaitGroup.Add(1)
+		go func(target probeTarget) {
+			defer channelHealthProbeWaitGroup.Done()
+			runChannelHealthProbe(target.channelID, target.modelName, probeFn, setting)
+		}(target)
 	}
 }
 
@@ -2187,6 +2289,8 @@ func GetChannelHealthSnapshotForDisplay(channelID int) ChannelHealthSnapshot {
 	return ChannelHealthSnapshot{
 		ChannelID:        channelID,
 		State:            ChannelHealthStateHealthy,
+		StateV2:          ChannelHealthStateV2Healthy,
+		TrafficPercent:   100,
 		RuntimeAvailable: true,
 		ProbeAvailable:   true,
 		WarmupPercent:    100,
@@ -2249,10 +2353,23 @@ func buildChannelHealthSnapshotWithOptionsLocked(state *channelHealthStateData, 
 	warmupPercent := channelWarmupPercentWithOptionsLocked(state, now, setting, includeP95)
 	runtimeAvailable, availabilityReason := channelRuntimeAvailabilityLocked(state, now, warmupPercent)
 	probeAvailable, probeUnavailableReason := channelProbeAvailabilityLocked(state, now, setting)
+
+	stateV2 := translateStateToV2(state.state, state.degraded)
+	trafficPercent := 100
+	if state.degraded && state.state == ChannelHealthStateHealthy {
+		trafficPercent = channelHealthDegradedTrafficPercent
+	} else if state.state == ChannelHealthStateWarming {
+		trafficPercent = warmupPercent
+	} else if state.state == ChannelHealthStateOpen || state.state == ChannelHealthStateProbing {
+		trafficPercent = 0
+	}
+
 	return ChannelHealthSnapshot{
 		ChannelID:              state.channelID,
 		ModelName:              state.modelName,
 		State:                  state.state,
+		StateV2:                stateV2,
+		TrafficPercent:         trafficPercent,
 		Reason:                 state.reason,
 		OpenedAt:               unixOrZero(state.openedAt),
 		NextProbeAt:            unixOrZero(state.nextProbeAt),
@@ -2363,6 +2480,14 @@ func adjustChannelHealthWeight(channelID int, modelName string, weight int, _ in
 	}
 	adjusted := weight
 	setting := defaultChannelHealthSetting()
+	runtimeDegraded := snapshot.State == ChannelHealthStateHealthy && snapshot.StateV2 == ChannelHealthStateV2Degraded
+	if runtimeDegraded {
+		percent := snapshot.TrafficPercent
+		if percent <= 0 || percent > 100 {
+			percent = channelHealthDegradedTrafficPercent
+		}
+		adjusted = adjusted * percent / 100
+	}
 	if snapshot.State == ChannelHealthStateOpen || snapshot.State == ChannelHealthStateProbing {
 		percent := setting.WarmupStartPercent
 		if percent <= 0 {
@@ -2383,7 +2508,7 @@ func adjustChannelHealthWeight(channelID int, modelName string, weight int, _ in
 		}
 		adjusted = adjusted * percent / 100
 	}
-	if snapshot.ErrorRate > 0 {
+	if snapshot.ErrorRate > 0 && !runtimeDegraded {
 		errorPenalty := 1 - snapshot.ErrorRate
 		if errorPenalty < 0.1 {
 			errorPenalty = 0.1
@@ -2628,7 +2753,7 @@ func persistChannelHealthIsolationLocked(state *channelHealthStateData, now time
 	snapshot := buildChannelHealthSnapshotLocked(state, now, setting)
 	scope := channelHealthScope{channelID: snapshot.ChannelID, modelName: snapshot.ModelName}
 	shard := channelHealthShardFor(snapshot.ChannelID)
-	if snapshot.State == ChannelHealthStateHealthy {
+	if snapshot.State == ChannelHealthStateHealthy && snapshot.StateV2 != ChannelHealthStateV2Degraded {
 		shard.queueIsolationDelete(scope)
 		return
 	}
