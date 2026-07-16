@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"hash/fnv"
 	"regexp"
@@ -709,6 +710,18 @@ func recordChannelAffinityReverseIndex(channelID int, cacheKey string, ttl time.
 	if ttl <= 0 {
 		ttl = time.Hour
 	}
+	if common.RedisEnabled && common.RDB != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		setKey := channelAffinityReverseSetKey(channelID)
+		pipe := common.RDB.Pipeline()
+		pipe.SAdd(ctx, setKey, cacheKey)
+		pipe.Expire(ctx, setKey, ttl)
+		if _, err := pipe.Exec(ctx); err != nil {
+			common.SysError(fmt.Sprintf("channel affinity reverse set failed: channel_id=%d, err=%v", channelID, err))
+		}
+		return
+	}
 	reverseKey := fmt.Sprintf("%d:%s", channelID, affinityFingerprint(cacheKey))
 	if err := getChannelAffinityReverseCache().SetWithTTL(reverseKey, cacheKey, ttl); err != nil {
 		common.SysError(fmt.Sprintf("channel affinity reverse cache set failed: channel_id=%d, err=%v", channelID, err))
@@ -722,6 +735,39 @@ func RecordChannelAffinityKeyForChannelForTest(channelID int, cacheKey string, t
 func ClearChannelAffinityByChannelID(channelID int) int {
 	if channelID <= 0 {
 		return 0
+	}
+
+	if common.RedisEnabled && common.RDB != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		setKey := channelAffinityReverseSetKey(channelID)
+		affinityKeys, err := common.RDB.SMembers(ctx, setKey).Result()
+		if err != nil {
+			common.SysError(fmt.Sprintf("channel affinity reverse set read failed: channel_id=%d, err=%v", channelID, err))
+			return 0
+		}
+		if len(affinityKeys) == 0 {
+			return 0
+		}
+		members := make([]interface{}, 0, len(affinityKeys))
+		for _, affinityKey := range affinityKeys {
+			members = append(members, affinityKey)
+		}
+		if err := common.RDB.SRem(ctx, setKey, members...).Err(); err != nil {
+			common.SysError(fmt.Sprintf("channel affinity reverse set remove failed: channel_id=%d, err=%v", channelID, err))
+		}
+		deletedMap, err := getChannelAffinityCache().DeleteMany(affinityKeys)
+		if err != nil {
+			common.SysError(fmt.Sprintf("channel affinity cache delete by channel failed: channel_id=%d, err=%v", channelID, err))
+			return 0
+		}
+		deleted := 0
+		for _, ok := range deletedMap {
+			if ok {
+				deleted++
+			}
+		}
+		return deleted
 	}
 
 	reverseCache := getChannelAffinityReverseCache()
@@ -770,6 +816,10 @@ func ClearChannelAffinityByChannelID(channelID int) int {
 		}
 	}
 	return deleted
+}
+
+func channelAffinityReverseSetKey(channelID int) string {
+	return fmt.Sprintf("%s:%d", channelAffinityReverseCacheNamespace, channelID)
 }
 
 func ShouldKeepChannelAffinityOnChannelDisabled() bool {

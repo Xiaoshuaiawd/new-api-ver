@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -70,7 +71,10 @@ func ClaudeData(c *gin.Context, resp dto.ClaudeResponse) error {
 		c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
 		c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonData)})
 	}
-	_ = FlushWriter(c)
+	if err := FlushWriter(c); err != nil {
+		return err
+	}
+	markDownstreamSemanticStarted(c)
 	return nil
 }
 
@@ -81,7 +85,9 @@ func ClaudeChunkData(c *gin.Context, resp dto.ClaudeResponse, data string) {
 
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s\n", data)})
-	_ = FlushWriter(c)
+	if FlushWriter(c) == nil {
+		markDownstreamSemanticStarted(c)
+	}
 }
 
 func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data string) error {
@@ -91,7 +97,11 @@ func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data st
 
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s", data)})
-	return FlushWriter(c)
+	if err := FlushWriter(c); err != nil {
+		return err
+	}
+	markDownstreamSemanticStarted(c)
+	return nil
 }
 
 func StringData(c *gin.Context, str string) error {
@@ -104,7 +114,11 @@ func StringData(c *gin.Context, str string) error {
 	}
 
 	c.Render(-1, common.CustomEvent{Data: "data: " + str})
-	return FlushWriter(c)
+	if err := FlushWriter(c); err != nil {
+		return err
+	}
+	markDownstreamSemanticStarted(c)
+	return nil
 }
 
 func PingData(c *gin.Context) error {
@@ -119,7 +133,13 @@ func PingData(c *gin.Context) error {
 	if _, err := c.Writer.Write([]byte(": PING\n\n")); err != nil {
 		return fmt.Errorf("write ping data failed: %w", err)
 	}
-	return FlushWriter(c)
+	if err := FlushWriter(c); err != nil {
+		return err
+	}
+	if info := relayInfoFromContext(c); info != nil {
+		info.MarkDownstreamAckSent()
+	}
+	return nil
 }
 
 func ObjectData(c *gin.Context, object interface{}) error {
@@ -135,6 +155,30 @@ func ObjectData(c *gin.Context, object interface{}) error {
 
 func Done(c *gin.Context) {
 	_ = StringData(c, "[DONE]")
+}
+
+func relayInfoFromContext(c *gin.Context) *relaycommon.RelayInfo {
+	if c == nil {
+		return nil
+	}
+	v, ok := c.Get("relay_info")
+	if !ok {
+		return nil
+	}
+	info, _ := v.(*relaycommon.RelayInfo)
+	return info
+}
+
+func markDownstreamSemanticStarted(c *gin.Context) {
+	if info := relayInfoFromContext(c); info != nil {
+		info.MarkDownstreamSemanticStarted()
+	}
+}
+
+// MarkDownstreamSemanticStarted records a successful direct SSE render from
+// adapters that cannot use the shared ObjectData/StringData helpers.
+func MarkDownstreamSemanticStarted(c *gin.Context) {
+	markDownstreamSemanticStarted(c)
 }
 
 func WssString(c *gin.Context, ws *websocket.Conn, str string) error {

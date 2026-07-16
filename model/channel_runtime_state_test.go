@@ -46,6 +46,33 @@ func TestGetChannelRetainsDueProbeTrafficBeforeLowerPriorityNormalChannel(t *tes
 	require.Equal(t, hits[9601], claimed)
 }
 
+func TestMultiKeySelectionSkipsRuntimeUnavailableKeys(t *testing.T) {
+	SetChannelRuntimeKeyAvailableFunc(func(channelID int, modelName string, key string) bool {
+		return channelID == 9901 && modelName == "gpt-key-health" && key == "healthy-key"
+	})
+	t.Cleanup(func() { SetChannelRuntimeKeyAvailableFunc(nil) })
+
+	channel := &Channel{
+		Id:  9901,
+		Key: "unhealthy-key\nhealthy-key",
+		ChannelInfo: ChannelInfo{
+			IsMultiKey:   true,
+			MultiKeyMode: constant.MultiKeyModeRandom,
+		},
+	}
+
+	key, index, err := channel.GetNextEnabledKeyForModel("gpt-key-health")
+	require.Nil(t, err)
+	require.Equal(t, "healthy-key", key)
+	require.Equal(t, 1, index)
+	require.True(t, channel.hasRuntimeAvailableKey("gpt-key-health"))
+
+	SetChannelRuntimeKeyAvailableFunc(func(int, string, string) bool { return false })
+	_, _, err = channel.GetNextEnabledKeyForModel("gpt-key-health")
+	require.NotNil(t, err)
+	require.False(t, channel.hasRuntimeAvailableKey("gpt-key-health"))
+}
+
 func TestRuntimeProbeCandidatesExcludeNormalAvailableChannels(t *testing.T) {
 	withRuntimeStateSelectionDB(t, true)
 	insertRuntimeStateCandidate(t, 9651, "gpt-runtime-probe-dedupe", 10)

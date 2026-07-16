@@ -27,6 +27,19 @@ type HybridCacheConfig[V any] struct {
 
 	// Memory builds a hot cache used when Redis is disabled. Keys stored in memory are fully namespaced.
 	Memory func() *hot.HotCache[string, V]
+
+	// L1TTL and L1MissTTL enable a bounded-lifetime local cache while Redis is
+	// active. They are opt-in so callers that require every read to observe
+	// Redis retain their current behavior.
+	L1TTL      time.Duration
+	L1MissTTL  time.Duration
+	L1Capacity int
+}
+
+type l1Entry[V any] struct {
+	value     V
+	found     bool
+	expiresAt time.Time
 }
 
 // HybridCache is a small helper that uses Redis when enabled, otherwise falls back to in-memory hot cache.
@@ -40,6 +53,12 @@ type HybridCache[V any] struct {
 	memOnce sync.Once
 	memInit func() *hot.HotCache[string, V]
 	mem     *hot.HotCache[string, V]
+
+	l1Mu       sync.Mutex
+	l1         map[string]l1Entry[V]
+	l1TTL      time.Duration
+	l1MissTTL  time.Duration
+	l1Capacity int
 }
 
 func NewHybridCache[V any](cfg HybridCacheConfig[V]) *HybridCache[V] {
@@ -49,6 +68,10 @@ func NewHybridCache[V any](cfg HybridCacheConfig[V]) *HybridCache[V] {
 		redisCodec:   cfg.RedisCodec,
 		redisEnabled: cfg.RedisEnabled,
 		memInit:      cfg.Memory,
+		l1:           make(map[string]l1Entry[V]),
+		l1TTL:        cfg.L1TTL,
+		l1MissTTL:    cfg.L1MissTTL,
+		l1Capacity:   cfg.L1Capacity,
 	}
 }
 
@@ -85,6 +108,9 @@ func (c *HybridCache[V]) Get(key string) (value V, found bool, err error) {
 	}
 
 	if c.redisOn() {
+		if value, found, ok := c.getL1(full); ok {
+			return value, found, nil
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), defaultRedisOpTimeout)
 		defer cancel()
 
@@ -95,10 +121,12 @@ func (c *HybridCache[V]) Get(key string) (value V, found bool, err error) {
 				var zero V
 				return zero, false, decErr
 			}
+			c.setL1(full, v, true, c.l1TTL)
 			return v, true, nil
 		}
 		if errors.Is(e, redis.Nil) {
 			var zero V
+			c.setL1(full, zero, false, c.l1MissTTL)
 			return zero, false, nil
 		}
 		var zero V
@@ -121,7 +149,15 @@ func (c *HybridCache[V]) SetWithTTL(key string, v V, ttl time.Duration) error {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), defaultRedisOpTimeout)
 		defer cancel()
-		return c.redis.Set(ctx, full, raw, ttl).Err()
+		if err := c.redis.Set(ctx, full, raw, ttl).Err(); err != nil {
+			return err
+		}
+		localTTL := c.l1TTL
+		if localTTL > ttl && ttl > 0 {
+			localTTL = ttl
+		}
+		c.setL1(full, v, true, localTTL)
+		return nil
 	}
 
 	c.memCache().SetWithTTL(full, v, ttl)
@@ -157,6 +193,7 @@ func (c *HybridCache[V]) scanKeys(match string) ([]string, error) {
 }
 
 func (c *HybridCache[V]) Purge() error {
+	c.clearL1()
 	if c.redisOn() {
 		keys, err := c.scanKeys(c.ns.MatchPattern())
 		if err != nil {
@@ -245,6 +282,7 @@ func (c *HybridCache[V]) DeleteMany(keys []string) (map[string]bool, error) {
 	if len(fullKeys) == 0 {
 		return res, nil
 	}
+	c.deleteL1(fullKeys)
 
 	if c.redisOn() {
 		ctx, cancel := context.WithTimeout(context.Background(), defaultRedisDelTimeout)
@@ -268,6 +306,76 @@ func (c *HybridCache[V]) DeleteMany(keys []string) (map[string]bool, error) {
 	}
 
 	return c.memCache().DeleteMany(fullKeys), nil
+}
+
+// InvalidateLocal clears only this process's L1 entry. It is used by callers
+// that distribute cache invalidations through their own pub/sub channel.
+func (c *HybridCache[V]) InvalidateLocal(key string) {
+	full := c.ns.FullKey(key)
+	if full == "" {
+		return
+	}
+	c.deleteL1([]string{full})
+}
+
+func (c *HybridCache[V]) getL1(full string) (value V, found bool, ok bool) {
+	if c.l1TTL <= 0 && c.l1MissTTL <= 0 {
+		return value, false, false
+	}
+	now := time.Now()
+	c.l1Mu.Lock()
+	defer c.l1Mu.Unlock()
+	entry, ok := c.l1[full]
+	if !ok || !now.Before(entry.expiresAt) {
+		if ok {
+			delete(c.l1, full)
+		}
+		return value, false, false
+	}
+	return entry.value, entry.found, true
+}
+
+func (c *HybridCache[V]) setL1(full string, value V, found bool, ttl time.Duration) {
+	if ttl <= 0 {
+		return
+	}
+	c.l1Mu.Lock()
+	if c.l1Capacity > 0 && len(c.l1) >= c.l1Capacity {
+		now := time.Now()
+		for key, entry := range c.l1 {
+			if !now.Before(entry.expiresAt) {
+				delete(c.l1, key)
+			}
+		}
+		if len(c.l1) >= c.l1Capacity {
+			for key := range c.l1 {
+				delete(c.l1, key)
+				break
+			}
+		}
+	}
+	c.l1[full] = l1Entry[V]{value: value, found: found, expiresAt: time.Now().Add(ttl)}
+	c.l1Mu.Unlock()
+}
+
+func (c *HybridCache[V]) clearL1() {
+	if c.l1TTL <= 0 && c.l1MissTTL <= 0 {
+		return
+	}
+	c.l1Mu.Lock()
+	clear(c.l1)
+	c.l1Mu.Unlock()
+}
+
+func (c *HybridCache[V]) deleteL1(fullKeys []string) {
+	if c.l1TTL <= 0 && c.l1MissTTL <= 0 {
+		return
+	}
+	c.l1Mu.Lock()
+	for _, key := range fullKeys {
+		delete(c.l1, key)
+	}
+	c.l1Mu.Unlock()
 }
 
 func (c *HybridCache[V]) Capacity() (mainCacheCapacity int, missingCacheCapacity int) {

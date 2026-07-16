@@ -486,24 +486,8 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		client = service.GetHttpClient()
 	}
 
-	var stopPinger context.CancelFunc
-	var pingerDone <-chan struct{}
 	if info.IsStream {
 		helper.SetEventStreamHeaders(c)
-		// 处理流式请求的 ping 保活
-		generalSettings := operation_setting.GetGeneralSetting()
-		if generalSettings.PingIntervalEnabled && !info.DisablePing {
-			pingInterval := time.Duration(generalSettings.PingIntervalSeconds) * time.Second
-			stopPinger, pingerDone = startPingKeepAlive(c, pingInterval)
-			// 使用defer确保在任何情况下都能停止ping goroutine
-			defer func() {
-				if stopPinger != nil {
-					stopPinger()
-					<-pingerDone
-					logger.LogDebug(c, "SSE ping goroutine stopped by defer")
-				}
-			}()
-		}
 	}
 
 	startedAt := time.Now()
@@ -515,6 +499,20 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	}
 	if resp == nil {
 		return nil, errors.New("resp is nil")
+	}
+	info.MarkUpstreamHeadersReceived()
+	if info.IsStream && resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+		generalSettings := operation_setting.GetGeneralSetting()
+		if !info.DisablePing {
+			if err := helper.PingData(c); err != nil {
+				logger.LogDebug(c, "initial SSE ack failed: %s", err.Error())
+			}
+		}
+		if generalSettings.PingIntervalEnabled && !info.DisablePing {
+			pingInterval := time.Duration(generalSettings.PingIntervalSeconds) * time.Second
+			stopPinger, pingerDone := startPingKeepAlive(c, pingInterval)
+			info.SetAttemptKeepAlive(stopPinger, pingerDone)
+		}
 	}
 	if !info.IsStream {
 		info.SetFirstResponseTime()

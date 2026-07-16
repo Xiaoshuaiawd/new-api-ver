@@ -59,6 +59,9 @@ func seedUserSubscriptionForBillingGroupTest(t *testing.T, id int, userId int, p
 		StartTime:    time.Now().Unix(),
 		EndTime:      time.Now().Add(30 * 24 * time.Hour).Unix(),
 		UpgradeGroup: allowedGroup,
+		// This is the snapshot written by the production subscription creation
+		// path when the plan uses its default wallet-overflow policy.
+		AllowWalletOverflow: true,
 	}
 	require.NoError(t, model.DB.Create(sub).Error)
 }
@@ -66,15 +69,16 @@ func seedUserSubscriptionForBillingGroupTest(t *testing.T, id int, userId int, p
 func seedUserSubscriptionWithAvailableGroupsForBillingGroupTest(t *testing.T, id int, userId int, planId int, availableGroups []string) {
 	t.Helper()
 	sub := &model.UserSubscription{
-		Id:              id,
-		UserId:          userId,
-		PlanId:          planId,
-		AmountTotal:     1000,
-		AmountUsed:      0,
-		Status:          "active",
-		StartTime:       time.Now().Unix(),
-		EndTime:         time.Now().Add(30 * 24 * time.Hour).Unix(),
-		AvailableGroups: availableGroups,
+		Id:                  id,
+		UserId:              userId,
+		PlanId:              planId,
+		AmountTotal:         1000,
+		AmountUsed:          0,
+		Status:              "active",
+		StartTime:           time.Now().Unix(),
+		EndTime:             time.Now().Add(30 * 24 * time.Hour).Unix(),
+		AvailableGroups:     availableGroups,
+		AllowWalletOverflow: true,
 	}
 	require.NoError(t, model.DB.Create(sub).Error)
 }

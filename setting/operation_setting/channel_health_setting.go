@@ -13,6 +13,7 @@ type ChannelHealthSetting struct {
 	Enabled                 bool   `json:"enabled"`
 	Preset                  string `json:"preset"`
 	ModelLevelEnabled       bool   `json:"model_level_enabled"`
+	KeyLevelEnabled         bool   `json:"key_level_enabled"`
 	EventsEnabled           bool   `json:"events_enabled"`
 	AlertMinIntervalSeconds int    `json:"alert_min_interval_seconds"`
 	WindowSeconds           int    `json:"window_seconds"`
@@ -49,6 +50,7 @@ var channelHealthSetting = ChannelHealthSetting{
 	Enabled:                     true,
 	Preset:                      ChannelHealthPresetBalanced,
 	ModelLevelEnabled:           false,
+	KeyLevelEnabled:             true,
 	EventsEnabled:               true,
 	AlertMinIntervalSeconds:     60,
 	WindowSeconds:               180,

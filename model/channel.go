@@ -197,6 +197,10 @@ func (channel *Channel) GetKeys() []string {
 }
 
 func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
+	return channel.GetNextEnabledKeyForModel("")
+}
+
+func (channel *Channel) GetNextEnabledKeyForModel(modelName string) (string, int, *types.NewAPIError) {
 	// If not in multi-key mode, return the original key string directly.
 	if !channel.ChannelInfo.IsMultiKey {
 		return channel.Key, 0, nil
@@ -228,7 +232,7 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 	// Collect indexes of enabled keys
 	enabledIdx := make([]int, 0, len(keys))
 	for i := range keys {
-		if getStatus(i) == common.ChannelStatusEnabled {
+		if getStatus(i) == common.ChannelStatusEnabled && isChannelRuntimeKeyAvailable(channel.Id, modelName, keys[i]) {
 			enabledIdx = append(enabledIdx, i)
 		}
 	}
@@ -268,7 +272,7 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 		}
 		for i := 0; i < len(keys); i++ {
 			idx := (start + i) % len(keys)
-			if getStatus(idx) == common.ChannelStatusEnabled {
+			if getStatus(idx) == common.ChannelStatusEnabled && isChannelRuntimeKeyAvailable(channel.Id, modelName, keys[idx]) {
 				// update polling index for next call (point to the next position)
 				channel.ChannelInfo.MultiKeyPollingIndex = (idx + 1) % len(keys)
 				return keys[idx], idx, nil
@@ -280,6 +284,28 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 		// Unknown mode, default to first enabled key (or original key string)
 		return keys[enabledIdx[0]], enabledIdx[0], nil
 	}
+}
+
+func (channel *Channel) hasRuntimeAvailableKey(modelName string) bool {
+	if channel == nil || !channel.ChannelInfo.IsMultiKey {
+		return true
+	}
+	lock := GetChannelPollingLock(channel.Id)
+	lock.Lock()
+	defer lock.Unlock()
+	keys := channel.GetKeys()
+	for index, key := range keys {
+		status := common.ChannelStatusEnabled
+		if channel.ChannelInfo.MultiKeyStatusList != nil {
+			if configuredStatus, ok := channel.ChannelInfo.MultiKeyStatusList[index]; ok {
+				status = configuredStatus
+			}
+		}
+		if status == common.ChannelStatusEnabled && isChannelRuntimeKeyAvailable(channel.Id, modelName, key) {
+			return true
+		}
+	}
+	return false
 }
 
 func (channel *Channel) SaveChannelInfo() error {

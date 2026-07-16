@@ -1,6 +1,7 @@
 package service
 
 import (
+	"hash/fnv"
 	"sort"
 	"strconv"
 	"strings"
@@ -12,6 +13,8 @@ import (
 
 const ginKeyChannelSelectionTrace = "channel_selection_trace"
 const channelSelectionTraceSummaryMaxItems = 2000
+const channelSelectionTraceSummaryShardCount = 32
+const channelSelectionTraceSummaryShardCapacity = channelSelectionTraceSummaryMaxItems / channelSelectionTraceSummaryShardCount
 
 type ChannelSelectionTraceStage string
 
@@ -62,12 +65,12 @@ type ChannelSelectionTraceSummary struct {
 	LastSeenAt         int64  `json:"last_seen_at"`
 }
 
-var channelSelectionTraceSummary = struct {
+type channelSelectionTraceSummaryShard struct {
 	sync.Mutex
 	items map[string]ChannelSelectionTraceSummary
-}{
-	items: make(map[string]ChannelSelectionTraceSummary),
 }
+
+var channelSelectionTraceSummary [channelSelectionTraceSummaryShardCount]channelSelectionTraceSummaryShard
 
 func RecordChannelSelectionTrace(c *gin.Context, event ChannelSelectionTraceEvent) {
 	if c == nil {
@@ -143,19 +146,23 @@ func channelSelectionTraceEventsForLog(events []ChannelSelectionTraceEvent) []ma
 }
 
 func ResetChannelSelectionTraceSummaryForTest() {
-	channelSelectionTraceSummary.Lock()
-	defer channelSelectionTraceSummary.Unlock()
-	channelSelectionTraceSummary.items = make(map[string]ChannelSelectionTraceSummary)
+	for i := range channelSelectionTraceSummary {
+		shard := &channelSelectionTraceSummary[i]
+		shard.Lock()
+		shard.items = make(map[string]ChannelSelectionTraceSummary)
+		shard.Unlock()
+	}
 }
 
 func recordChannelSelectionTraceSummary(event ChannelSelectionTraceEvent, now time.Time) {
 	key := channelSelectionSummaryKey(event)
-	channelSelectionTraceSummary.Lock()
-	defer channelSelectionTraceSummary.Unlock()
-	if channelSelectionTraceSummary.items == nil {
-		channelSelectionTraceSummary.items = make(map[string]ChannelSelectionTraceSummary)
+	shard := channelSelectionTraceSummaryShardFor(key)
+	shard.Lock()
+	defer shard.Unlock()
+	if shard.items == nil {
+		shard.items = make(map[string]ChannelSelectionTraceSummary)
 	}
-	item := channelSelectionTraceSummary.items[key]
+	item := shard.items[key]
 	item.ChannelID = event.ChannelID
 	item.Group = strings.TrimSpace(event.Group)
 	item.Model = strings.TrimSpace(event.Model)
@@ -188,8 +195,8 @@ func recordChannelSelectionTraceSummary(event ChannelSelectionTraceEvent, now ti
 	if event.Stage == ChannelSelectionTraceStageProbe && event.Action == ChannelSelectionTraceActionFallback {
 		item.ProbeFallbacks++
 	}
-	channelSelectionTraceSummary.items[key] = item
-	pruneChannelSelectionTraceSummaryLocked()
+	shard.items[key] = item
+	pruneChannelSelectionTraceSummaryShardLocked(shard)
 }
 
 func channelSelectionSummaryKey(event ChannelSelectionTraceEvent) string {
@@ -201,24 +208,26 @@ func channelSelectionSummaryKey(event ChannelSelectionTraceEvent) string {
 	}, "\x00")
 }
 
-func pruneChannelSelectionTraceSummaryLocked() {
-	if len(channelSelectionTraceSummary.items) <= channelSelectionTraceSummaryMaxItems {
+func channelSelectionTraceSummaryShardFor(key string) *channelSelectionTraceSummaryShard {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(key))
+	return &channelSelectionTraceSummary[int(h.Sum32())&(channelSelectionTraceSummaryShardCount-1)]
+}
+
+func pruneChannelSelectionTraceSummaryShardLocked(shard *channelSelectionTraceSummaryShard) {
+	if len(shard.items) <= channelSelectionTraceSummaryShardCapacity {
 		return
 	}
-	type keyedSummary struct {
-		key  string
-		item ChannelSelectionTraceSummary
+	oldestKey := ""
+	var oldest int64
+	for key, item := range shard.items {
+		if oldestKey == "" || item.LastSeenAt < oldest {
+			oldestKey = key
+			oldest = item.LastSeenAt
+		}
 	}
-	items := make([]keyedSummary, 0, len(channelSelectionTraceSummary.items))
-	for key, item := range channelSelectionTraceSummary.items {
-		items = append(items, keyedSummary{key: key, item: item})
-	}
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].item.LastSeenAt < items[j].item.LastSeenAt
-	})
-	for len(channelSelectionTraceSummary.items) > channelSelectionTraceSummaryMaxItems && len(items) > 0 {
-		delete(channelSelectionTraceSummary.items, items[0].key)
-		items = items[1:]
+	if oldestKey != "" {
+		delete(shard.items, oldestKey)
 	}
 }
 
@@ -237,20 +246,23 @@ func formatSelectionSummaryInt64(value int64) string {
 }
 
 func GetChannelSelectionTraceSummary(filter ChannelHealthEventFilter) []ChannelSelectionTraceSummary {
-	channelSelectionTraceSummary.Lock()
-	defer channelSelectionTraceSummary.Unlock()
-	summary := make([]ChannelSelectionTraceSummary, 0, len(channelSelectionTraceSummary.items))
-	for _, item := range channelSelectionTraceSummary.items {
-		if filter.ChannelID > 0 && item.ChannelID != filter.ChannelID {
-			continue
+	summary := make([]ChannelSelectionTraceSummary, 0, channelSelectionTraceSummaryMaxItems)
+	for i := range channelSelectionTraceSummary {
+		shard := &channelSelectionTraceSummary[i]
+		shard.Lock()
+		for _, item := range shard.items {
+			if filter.ChannelID > 0 && item.ChannelID != filter.ChannelID {
+				continue
+			}
+			if filter.ModelName != "" && item.Model != filter.ModelName {
+				continue
+			}
+			if filter.Group != "" && item.Group != filter.Group {
+				continue
+			}
+			summary = append(summary, item)
 		}
-		if filter.ModelName != "" && item.Model != filter.ModelName {
-			continue
-		}
-		if filter.Group != "" && item.Group != filter.Group {
-			continue
-		}
-		summary = append(summary, item)
+		shard.Unlock()
 	}
 	sort.Slice(summary, func(i, j int) bool {
 		if summary[i].LastSeenAt == summary[j].LastSeenAt {

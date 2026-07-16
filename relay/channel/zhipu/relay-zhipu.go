@@ -195,8 +195,7 @@ func zhipuStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 				common.SysLog("error marshalling stream response: " + err.Error())
 				return true
 			}
-			c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonResponse)})
-			return true
+			return helper.StringData(c, string(jsonResponse)) == nil
 		case data := <-metaChan:
 			var zhipuResponse ZhipuStreamMetaResponse
 			err := json.Unmarshal([]byte(data), &zhipuResponse)
@@ -211,8 +210,7 @@ func zhipuStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 				return true
 			}
 			usage = zhipuUsage
-			c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonResponse)})
-			return true
+			return helper.StringData(c, string(jsonResponse)) == nil
 		case <-stopChan:
 			c.Render(-1, common.CustomEvent{Data: "data: [DONE]"})
 			return false

@@ -929,6 +929,60 @@ func TestChannelHealthSlowFirstResponseDegradesWeightWithoutIsolation(t *testing
 	require.Equal(t, 50, adjustChannelHealthWeight(channelID, "", 100, 0))
 }
 
+func TestChannelHealthSlowRatioDegradesWeightWhenAverageIsFast(t *testing.T) {
+	setting := withChannelHealthTestSettings(t)
+	setting.SlowFirstResponseSeconds = 18
+	setting.FirstResponseTimeoutSeconds = 45
+	now := time.Unix(1_700_000_000, 0)
+	SetChannelHealthNowFuncForTest(func() time.Time { return now })
+
+	const channelID = 8834
+	for i := 0; i < 10; i++ {
+		handle := RecordAttemptStart(ChannelAttemptMeta{ChannelID: channelID})
+		if i < 2 {
+			now = now.Add(20 * time.Second)
+		} else {
+			now = now.Add(time.Second)
+		}
+		RecordFirstResponse(handle)
+		RecordAttemptFinish(handle, ChannelAttemptResult{StatusCode: http.StatusOK})
+		now = now.Add(time.Second)
+	}
+
+	snapshot, ok := GetChannelHealthSnapshot(channelID)
+	require.True(t, ok)
+	require.Less(t, snapshot.AverageFirstResponseMs, float64(setting.SlowFirstResponseSeconds*1_000))
+	require.InDelta(t, 0.2, snapshot.SlowFirstResponseRatio, 0.001)
+	require.Equal(t, 50, adjustChannelHealthWeight(channelID, "", 100, 0))
+}
+
+func TestChannelHealthSlowWeightUsesHysteresisOnRecovery(t *testing.T) {
+	setting := withChannelHealthTestSettings(t)
+	setting.WindowSeconds = 1
+	setting.SlowFirstResponseSeconds = 18
+	now := time.Unix(1_700_000_000, 0)
+	SetChannelHealthNowFuncForTest(func() time.Time { return now })
+
+	const channelID = 8835
+	recordSuccess := func(firstResponse time.Duration) {
+		handle := RecordAttemptStart(ChannelAttemptMeta{ChannelID: channelID})
+		now = now.Add(firstResponse)
+		RecordFirstResponse(handle)
+		RecordAttemptFinish(handle, ChannelAttemptResult{StatusCode: http.StatusOK})
+	}
+
+	recordSuccess(20 * time.Second)
+	require.Equal(t, 50, adjustChannelHealthWeight(channelID, "", 100, 0))
+
+	now = now.Add(2 * time.Second)
+	recordSuccess(16 * time.Second)
+	require.Equal(t, 50, adjustChannelHealthWeight(channelID, "", 100, 0))
+
+	now = now.Add(2 * time.Second)
+	recordSuccess(13 * time.Second)
+	require.Equal(t, 80, adjustChannelHealthWeight(channelID, "", 100, 0))
+}
+
 func TestCacheGetRandomSatisfiedChannelSkipsRuntimeOpenChannel(t *testing.T) {
 	withChannelHealthTestSettings(t)
 	withChannelHealthSelectionDB(t)

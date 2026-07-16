@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"net/http"
 	"sort"
@@ -32,6 +33,7 @@ const (
 	ginKeyChannelHealthAttempt = "channel_health_attempt"
 
 	channelHealthIsolationCacheNamespace = "new-api:channel_health:isolation:v1"
+	channelHealthInvalidationTopic       = "new-api:channel_health:invalidation:v1"
 	channelHealthProbeLockNamespace      = "new-api:channel_health:probe_lock:v1"
 	channelHealthDegradedTrafficPercent  = 30
 )
@@ -74,14 +76,15 @@ const (
 )
 
 type ChannelAttemptMeta struct {
-	ChannelID   int
-	ChannelName string
-	ModelName   string
-	Group       string
-	RequestKind string
-	Cancel      func()
-	Release     func()
-	Probe       bool
+	ChannelID      int
+	ChannelName    string
+	ModelName      string
+	KeyFingerprint string
+	Group          string
+	RequestKind    string
+	Cancel         func()
+	Release        func()
+	Probe          bool
 }
 
 type ChannelAttemptResult struct {
@@ -138,6 +141,7 @@ type ChannelHealthEventSnapshot struct {
 	ErrorRate              float64 `json:"error_rate"`
 	AverageFirstResponseMs float64 `json:"average_first_response_ms"`
 	P95FirstResponseMs     float64 `json:"p95_first_response_ms"`
+	SlowFirstResponseRatio float64 `json:"slow_first_response_ratio"`
 	ProbeBackoffSeconds    int     `json:"probe_backoff_seconds"`
 	NextProbeAt            int64   `json:"next_probe_at"`
 	ProbeInProgress        bool    `json:"probe_in_progress"`
@@ -153,14 +157,16 @@ type ChannelHealthChannelCount struct {
 }
 
 type AttemptHandle struct {
-	channelID int
-	modelName string
-	attemptID int64
+	channelID      int
+	modelName      string
+	keyFingerprint string
+	attemptID      int64
 }
 
 type ChannelHealthSnapshot struct {
 	ChannelID              int                  `json:"channel_id"`
 	ModelName              string               `json:"model_name,omitempty"`
+	KeyFingerprint         string               `json:"key_fingerprint,omitempty"`
 	State                  ChannelHealthState   `json:"state"`
 	StateV2                ChannelHealthStateV2 `json:"state_v2"`
 	TrafficPercent         int                  `json:"traffic_percent"`
@@ -177,6 +183,7 @@ type ChannelHealthSnapshot struct {
 	ErrorRate              float64              `json:"error_rate"`
 	AverageFirstResponseMs float64              `json:"average_first_response_ms"`
 	P95FirstResponseMs     float64              `json:"p95_first_response_ms"`
+	SlowFirstResponseRatio float64              `json:"slow_first_response_ratio"`
 	RuntimeAvailable       bool                 `json:"runtime_available"`
 	AvailabilityReason     string               `json:"availability_reason,omitempty"`
 	ProbeAvailable         bool                 `json:"probe_available"`
@@ -185,6 +192,7 @@ type ChannelHealthSnapshot struct {
 	WarmupEndsAt           int64                `json:"warmup_ends_at"`
 	WarmupPercent          int                  `json:"warmup_percent"`
 	WarmupThrottlePercent  int                  `json:"warmup_throttle_percent,omitempty"`
+	slowWeightBand         int
 }
 
 type channelAttemptState struct {
@@ -196,18 +204,25 @@ type channelAttemptState struct {
 	cancelled         bool
 }
 
-type channelHealthSample struct {
-	at            time.Time
-	failed        bool
-	reason        string
-	status        int
-	errCode       string
-	firstResponse time.Duration
+const channelHealthLatencyHistogramBuckets = 121
+const channelHealthExactLatencySamplesPerBucket = 8
+
+type channelHealthTimeBucket struct {
+	second                  int64
+	samples                 int
+	failures                int
+	firstResponseSamples    int
+	firstResponseTotal      time.Duration
+	firstResponseValues     [channelHealthExactLatencySamplesPerBucket]time.Duration
+	firstResponseValueCount int
+	firstResponseOverflow   bool
+	firstResponseHistogram  [channelHealthLatencyHistogramBuckets]int
 }
 
 type channelHealthStateData struct {
 	channelID             int
 	modelName             string
+	keyFingerprint        string
 	group                 string
 	state                 ChannelHealthState
 	reason                string
@@ -222,10 +237,12 @@ type channelHealthStateData struct {
 	warmupEndsAt          time.Time
 	warmupThrottlePercent int
 	degraded              bool
+	slowWeightBand        int
 	firstResponseTotal    time.Duration
 	firstResponseCount    int
+	lastActivityAt        time.Time
 	inflight              map[int64]*channelAttemptState
-	samples               []channelHealthSample
+	buckets               []channelHealthTimeBucket
 }
 
 // channelHealthShardCount must be a power of two so that channelHealthShardFor
@@ -335,14 +352,19 @@ func (s *channelHealthShard) drainFlushQueue() {
 		s.Unlock()
 
 		for _, op := range batch {
+			cacheKey := channelHealthCacheKey(op.scope)
 			if op.isDelete {
-				if _, err := cache.DeleteMany([]string{channelHealthCacheKey(op.scope)}); err != nil {
+				if _, err := cache.DeleteMany([]string{cacheKey}); err != nil {
 					common.SysError(fmt.Sprintf("channel health isolation cache delete failed: channel_id=%d, model=%s, err=%v", op.scope.channelID, op.scope.modelName, err))
+				} else {
+					publishChannelHealthInvalidation(cacheKey)
 				}
 				continue
 			}
-			if err := cache.SetWithTTL(channelHealthCacheKey(op.scope), op.snapshot, op.ttl); err != nil {
+			if err := cache.SetWithTTL(cacheKey, op.snapshot, op.ttl); err != nil {
 				common.SysError(fmt.Sprintf("channel health isolation cache set failed: channel_id=%d, model=%s, err=%v", op.scope.channelID, op.scope.modelName, err))
+			} else {
+				publishChannelHealthInvalidation(cacheKey)
 			}
 		}
 	}
@@ -390,6 +412,8 @@ var channelHealthCache = struct {
 	cache *cachex.HybridCache[ChannelHealthSnapshot]
 }{}
 
+var channelHealthInvalidationOnce sync.Once
+
 var channelHealthProbeWorkerOnce sync.Once
 var channelHealthProbeWaitGroup sync.WaitGroup
 
@@ -434,6 +458,9 @@ func init() {
 	model.SetChannelRuntimeWeightFunc(func(channelID int, modelName string, weight int, inflight int) int {
 		return adjustChannelHealthWeight(channelID, modelName, weight, inflight)
 	})
+	model.SetChannelRuntimeKeyAvailableFunc(func(channelID int, modelName string, key string) bool {
+		return IsChannelKeyAvailableForModel(channelID, modelName, key)
+	})
 	relaycommon.MarkChannelHealthFirstResponseFunc = MarkChannelHealthFirstResponse
 }
 
@@ -452,9 +479,39 @@ func getChannelHealthIsolationCache() *cachex.HybridCache[ChannelHealthSnapshot]
 					WithJanitor().
 					Build()
 			},
+			L1TTL:      2 * time.Second,
+			L1MissTTL:  2 * time.Second,
+			L1Capacity: 10_000,
 		})
 	})
+	startChannelHealthInvalidationListener()
 	return channelHealthCache.cache
+}
+
+func startChannelHealthInvalidationListener() {
+	if !common.RedisEnabled || common.RDB == nil {
+		return
+	}
+	channelHealthInvalidationOnce.Do(func() {
+		pubsub := common.RDB.Subscribe(context.Background(), channelHealthInvalidationTopic)
+		go func() {
+			defer func() { _ = pubsub.Close() }()
+			for message := range pubsub.Channel() {
+				getChannelHealthIsolationCache().InvalidateLocal(message.Payload)
+			}
+		}()
+	})
+}
+
+func publishChannelHealthInvalidation(cacheKey string) {
+	if cacheKey == "" || !common.RedisEnabled || common.RDB == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := common.RDB.Publish(ctx, channelHealthInvalidationTopic, cacheKey).Err(); err != nil {
+		common.SysError(fmt.Sprintf("channel health invalidation publish failed: key=%s, err=%v", cacheKey, err))
+	}
 }
 
 func channelHealthIsolationTTL(setting operation_setting.ChannelHealthSetting) time.Duration {
@@ -547,21 +604,44 @@ func channelHealthNow() time.Time {
 }
 
 type channelHealthScope struct {
-	channelID int
-	modelName string
+	channelID      int
+	modelName      string
+	keyFingerprint string
 }
 
 func channelHealthScopeFor(channelID int, modelName string, setting operation_setting.ChannelHealthSetting) channelHealthScope {
+	return channelHealthScopeForKey(channelID, modelName, "", setting)
+}
+
+func channelHealthScopeForKey(channelID int, modelName string, keyFingerprint string, setting operation_setting.ChannelHealthSetting) channelHealthScope {
 	scope := channelHealthScope{channelID: channelID}
 	if setting.ModelLevelEnabled {
 		scope.modelName = strings.TrimSpace(modelName)
 	}
+	if setting.KeyLevelEnabled {
+		scope.keyFingerprint = strings.TrimSpace(keyFingerprint)
+	}
 	return scope
+}
+
+func channelHealthKeyFingerprint(key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(key))
+	return fmt.Sprintf("%x", sum[:8])
 }
 
 func channelHealthScopeKey(scope channelHealthScope) string {
 	if scope.modelName == "" {
-		return fmt.Sprintf("%d", scope.channelID)
+		if scope.keyFingerprint == "" {
+			return fmt.Sprintf("%d", scope.channelID)
+		}
+		return fmt.Sprintf("%d:key:%s", scope.channelID, scope.keyFingerprint)
+	}
+	if scope.keyFingerprint != "" {
+		return fmt.Sprintf("%d:model:%s:key:%s", scope.channelID, scope.modelName, scope.keyFingerprint)
 	}
 	return fmt.Sprintf("%d:model:%s", scope.channelID, scope.modelName)
 }
@@ -638,13 +718,16 @@ func getOrCreateChannelHealthLocked(shard *channelHealthShard, scope channelHeal
 	key := channelHealthScopeKey(scope)
 	state, ok := shard.channels[key]
 	if ok {
+		state.lastActivityAt = channelHealthNow()
 		return state
 	}
 	state = &channelHealthStateData{
-		channelID: scope.channelID,
-		modelName: scope.modelName,
-		state:     ChannelHealthStateHealthy,
-		inflight:  make(map[int64]*channelAttemptState),
+		channelID:      scope.channelID,
+		modelName:      scope.modelName,
+		keyFingerprint: scope.keyFingerprint,
+		state:          ChannelHealthStateHealthy,
+		lastActivityAt: channelHealthNow(),
+		inflight:       make(map[int64]*channelAttemptState),
 	}
 	shard.channels[key] = state
 	return state
@@ -745,7 +828,23 @@ func IsChannelAvailableForModel(channelID int, modelName string) bool {
 	now := channelHealthNow()
 	setting := defaultChannelHealthSetting()
 	scope := channelHealthScopeFor(channelID, modelName, setting)
-	shard := channelHealthShardFor(channelID)
+	return isChannelHealthScopeAvailable(scope, now, setting)
+}
+
+func IsChannelKeyAvailableForModel(channelID int, modelName string, key string) bool {
+	if channelID <= 0 || strings.TrimSpace(key) == "" || !channelHealthEnabled() {
+		return true
+	}
+	setting := defaultChannelHealthSetting()
+	if !setting.KeyLevelEnabled {
+		return true
+	}
+	scope := channelHealthScopeForKey(channelID, modelName, channelHealthKeyFingerprint(key), setting)
+	return isChannelHealthScopeAvailable(scope, channelHealthNow(), setting)
+}
+
+func isChannelHealthScopeAvailable(scope channelHealthScope, now time.Time, setting operation_setting.ChannelHealthSetting) bool {
+	shard := channelHealthShardFor(scope.channelID)
 	if snapshot, found := getChannelHealthIsolationSnapshot(scope, now); found {
 		if snapshot.State == ChannelHealthStateHealthy {
 			shard.Lock()
@@ -985,13 +1084,15 @@ func RecordAttemptStart(meta ChannelAttemptMeta) AttemptHandle {
 	}
 
 	handle := AttemptHandle{
-		channelID: meta.ChannelID,
-		modelName: strings.TrimSpace(meta.ModelName),
-		attemptID: atomic.AddInt64(&nextChannelHealthAttemptID, 1),
+		channelID:      meta.ChannelID,
+		modelName:      strings.TrimSpace(meta.ModelName),
+		keyFingerprint: strings.TrimSpace(meta.KeyFingerprint),
+		attemptID:      atomic.AddInt64(&nextChannelHealthAttemptID, 1),
 	}
 	setting := defaultChannelHealthSetting()
-	scope := channelHealthScopeFor(meta.ChannelID, meta.ModelName, setting)
+	scope := channelHealthScopeForKey(meta.ChannelID, meta.ModelName, meta.KeyFingerprint, setting)
 	handle.modelName = scope.modelName
+	handle.keyFingerprint = scope.keyFingerprint
 	shard := channelHealthShardFor(meta.ChannelID)
 	shard.Lock()
 	defer shard.unlockAndFlush()
@@ -1026,6 +1127,10 @@ func StartChannelHealthAttemptForContext(c *gin.Context) AttemptHandle {
 	if channelID <= 0 {
 		return AttemptHandle{}
 	}
+	keyFingerprint := ""
+	if common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey) {
+		keyFingerprint = channelHealthKeyFingerprint(common.GetContextKeyString(c, constant.ContextKeyChannelKey))
+	}
 	var cancel context.CancelFunc
 	var release func()
 	requestPath := ""
@@ -1045,14 +1150,15 @@ func StartChannelHealthAttemptForContext(c *gin.Context) AttemptHandle {
 		}
 	}
 	handle := RecordAttemptStart(ChannelAttemptMeta{
-		ChannelID:   channelID,
-		ChannelName: common.GetContextKeyString(c, constant.ContextKeyChannelName),
-		ModelName:   c.GetString("original_model"),
-		Group:       common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
-		RequestKind: common.MetricsRequestKindFromPath(requestPath),
-		Cancel:      cancel,
-		Release:     release,
-		Probe:       IsChannelProbeAvailable(channelID) && !IsChannelAvailable(channelID),
+		ChannelID:      channelID,
+		ChannelName:    common.GetContextKeyString(c, constant.ContextKeyChannelName),
+		ModelName:      c.GetString("original_model"),
+		KeyFingerprint: keyFingerprint,
+		Group:          common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
+		RequestKind:    common.MetricsRequestKindFromPath(requestPath),
+		Cancel:         cancel,
+		Release:        release,
+		Probe:          IsChannelProbeAvailable(channelID) && !IsChannelAvailable(channelID),
 	})
 	if handle.channelID > 0 {
 		c.Set(ginKeyChannelHealthAttempt, handle)
@@ -1101,7 +1207,7 @@ func RecordFirstResponse(handle AttemptHandle) {
 	shard.Lock()
 	defer shard.Unlock()
 
-	scope := channelHealthScopeFor(handle.channelID, handle.modelName, defaultChannelHealthSetting())
+	scope := channelHealthScopeForKey(handle.channelID, handle.modelName, handle.keyFingerprint, defaultChannelHealthSetting())
 	state, ok := shard.channels[channelHealthScopeKey(scope)]
 	if !ok {
 		return
@@ -1122,6 +1228,7 @@ func RecordFirstResponse(handle AttemptHandle) {
 	attempt.firstResponse = latency
 	state.firstResponseTotal += latency
 	state.firstResponseCount++
+	state.lastActivityAt = now
 }
 
 func RecordAttemptFinish(handle AttemptHandle, result ChannelAttemptResult) {
@@ -1137,7 +1244,7 @@ func RecordAttemptFinish(handle AttemptHandle, result ChannelAttemptResult) {
 
 	now := channelHealthNow()
 	setting := defaultChannelHealthSetting()
-	scope := channelHealthScopeFor(handle.channelID, handle.modelName, setting)
+	scope := channelHealthScopeForKey(handle.channelID, handle.modelName, handle.keyFingerprint, setting)
 	state, ok := shard.channels[channelHealthScopeKey(scope)]
 	if !ok {
 		shard.unlockAndFlush()
@@ -1149,6 +1256,7 @@ func RecordAttemptFinish(handle AttemptHandle, result ChannelAttemptResult) {
 		return
 	}
 	delete(state.inflight, handle.attemptID)
+	state.lastActivityAt = now
 	release := attempt.meta.Release
 
 	reason := ""
@@ -1306,22 +1414,45 @@ func shouldSampleChannelHealthAttempt(err *types.NewAPIError) bool {
 }
 
 func recordChannelHealthSampleLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting, failed bool, reason string, status int, errCode string, firstResponse time.Duration) {
-	cutoff := now.Add(-time.Duration(setting.WindowSeconds) * time.Second)
-	samples := state.samples[:0]
-	for _, sample := range state.samples {
-		if sample.at.After(cutoff) || sample.at.Equal(cutoff) {
-			samples = append(samples, sample)
-		}
+	state.lastActivityAt = now
+	windowSeconds := setting.WindowSeconds
+	if windowSeconds <= 0 {
+		windowSeconds = 1
 	}
-	samples = append(samples, channelHealthSample{
-		at:            now,
-		failed:        failed,
-		reason:        reason,
-		status:        status,
-		errCode:       errCode,
-		firstResponse: firstResponse,
-	})
-	state.samples = samples
+	if len(state.buckets) != windowSeconds {
+		state.buckets = make([]channelHealthTimeBucket, windowSeconds)
+	}
+	second := now.Unix()
+	index := int(second % int64(windowSeconds))
+	if index < 0 {
+		index += windowSeconds
+	}
+	bucket := &state.buckets[index]
+	if bucket.second != second {
+		*bucket = channelHealthTimeBucket{second: second}
+	}
+	bucket.samples++
+	if failed {
+		bucket.failures++
+	}
+	if firstResponse > 0 {
+		bucket.firstResponseSamples++
+		bucket.firstResponseTotal += firstResponse
+		if bucket.firstResponseValueCount < len(bucket.firstResponseValues) {
+			bucket.firstResponseValues[bucket.firstResponseValueCount] = firstResponse
+			bucket.firstResponseValueCount++
+		} else {
+			bucket.firstResponseOverflow = true
+		}
+		latencySeconds := int(firstResponse / time.Second)
+		if latencySeconds < 0 {
+			latencySeconds = 0
+		}
+		if latencySeconds >= channelHealthLatencyHistogramBuckets {
+			latencySeconds = channelHealthLatencyHistogramBuckets - 1
+		}
+		bucket.firstResponseHistogram[latencySeconds]++
+	}
 	if failed {
 		state.consecutiveFailure++
 	} else {
@@ -1412,44 +1543,73 @@ func channelHealthWindowStatsLocked(state *channelHealthStateData, now time.Time
 }
 
 func channelHealthWindowStatsWithOptionsLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting, includeP95 bool) channelHealthWindowStats {
-	cutoff := now.Add(-time.Duration(setting.WindowSeconds) * time.Second)
 	stats := channelHealthWindowStats{}
 	var firstResponseTotal time.Duration
-	firstResponses := make([]time.Duration, 0)
-	for _, sample := range state.samples {
-		if sample.at.Before(cutoff) {
+	if state == nil {
+		return stats
+	}
+	windowSeconds := setting.WindowSeconds
+	if windowSeconds <= 0 {
+		return stats
+	}
+	cutoffSecond := now.Add(-time.Duration(windowSeconds) * time.Second).Unix()
+	var histogram [channelHealthLatencyHistogramBuckets]int
+	exactLatencies := make([]time.Duration, 0, len(state.buckets)*channelHealthExactLatencySamplesPerBucket)
+	exactComplete := includeP95
+	for _, bucket := range state.buckets {
+		if bucket.second < cutoffSecond || bucket.second > now.Unix() {
 			continue
 		}
-		stats.samples++
-		if sample.failed {
-			stats.failures++
+		stats.samples += bucket.samples
+		stats.failures += bucket.failures
+		stats.firstResponseSamples += bucket.firstResponseSamples
+		firstResponseTotal += bucket.firstResponseTotal
+		for i, count := range bucket.firstResponseHistogram {
+			histogram[i] += count
 		}
-		if sample.firstResponse > 0 {
-			stats.firstResponseSamples++
-			firstResponseTotal += sample.firstResponse
-			if includeP95 {
-				firstResponses = append(firstResponses, sample.firstResponse)
+		if includeP95 {
+			for i := 0; i < bucket.firstResponseValueCount; i++ {
+				exactLatencies = append(exactLatencies, bucket.firstResponseValues[i])
 			}
-			if setting.FirstResponseTimeoutSeconds > 0 && sample.firstResponse >= time.Duration(setting.FirstResponseTimeoutSeconds)*time.Second {
-				stats.slowFirstResponses++
+			if bucket.firstResponseOverflow {
+				exactComplete = false
 			}
 		}
 	}
 	if stats.firstResponseSamples > 0 {
 		stats.averageFirstResponseMs = float64(firstResponseTotal.Microseconds()) / 1000.0 / float64(stats.firstResponseSamples)
 	}
-	if includeP95 && len(firstResponses) > 0 {
-		sort.Slice(firstResponses, func(i, j int) bool {
-			return firstResponses[i] < firstResponses[j]
-		})
-		index := int(float64(len(firstResponses))*0.95 + 0.5)
-		if index <= 0 {
-			index = 1
+	if stats.firstResponseSamples > 0 {
+		slowSeconds := setting.SlowFirstResponseSeconds
+		if slowSeconds <= 0 {
+			slowSeconds = setting.FirstResponseTimeoutSeconds
 		}
-		if index > len(firstResponses) {
-			index = len(firstResponses)
+		for seconds, count := range histogram {
+			if slowSeconds > 0 && seconds >= slowSeconds {
+				stats.slowFirstResponses += count
+			}
 		}
-		stats.p95FirstResponseMs = float64(firstResponses[index-1].Microseconds()) / 1000.0
+	}
+	if includeP95 && stats.firstResponseSamples > 0 {
+		if exactComplete && len(exactLatencies) == stats.firstResponseSamples {
+			sort.Slice(exactLatencies, func(i, j int) bool { return exactLatencies[i] < exactLatencies[j] })
+			index := (len(exactLatencies)*95 + 99) / 100
+			stats.p95FirstResponseMs = float64(exactLatencies[index-1].Microseconds()) / 1000.0
+			return stats
+		}
+		if stats.firstResponseSamples == 1 {
+			stats.p95FirstResponseMs = stats.averageFirstResponseMs
+			return stats
+		}
+		target := (stats.firstResponseSamples*95 + 99) / 100
+		seen := 0
+		for seconds, count := range histogram {
+			seen += count
+			if seen >= target {
+				stats.p95FirstResponseMs = float64(seconds * 1000)
+				break
+			}
+		}
 	}
 	return stats
 }
@@ -1800,7 +1960,7 @@ func recordProbeAttemptResultLocked(state *channelHealthStateData, now time.Time
 				state.consecutiveFailure = 0
 				state.probeSuccesses = 0
 				state.probeBackoff = 0
-				state.samples = nil
+				state.buckets = nil
 				state.warmupThrottlePercent = 0
 				state.warmupStartedAt = now
 				state.warmupEndsAt = now.Add(time.Duration(setting.WarmupDurationSeconds) * time.Second)
@@ -1808,7 +1968,7 @@ func recordProbeAttemptResultLocked(state *channelHealthStateData, now time.Time
 				recordChannelHealthEventLocked(setting, ChannelHealthEventTypeWarming, state, "probe recovered into warming", now)
 			} else {
 				markChannelHealthyLocked(state)
-				deleteChannelHealthIsolationLocked(channelHealthScope{channelID: state.channelID, modelName: state.modelName})
+				deleteChannelHealthIsolationLocked(channelHealthScope{channelID: state.channelID, modelName: state.modelName, keyFingerprint: state.keyFingerprint})
 				recordChannelHealthEventLocked(setting, ChannelHealthEventTypeRecovered, state, "probe recovered", now)
 			}
 		} else {
@@ -1846,7 +2006,7 @@ func markChannelHealthyLocked(state *channelHealthStateData) {
 	state.warmupEndsAt = time.Time{}
 	state.warmupThrottlePercent = 0
 	state.degraded = false
-	state.samples = nil
+	state.buckets = nil
 }
 
 func completeChannelWarmupLocked(state *channelHealthStateData, now time.Time, setting operation_setting.ChannelHealthSetting, reason string) {
@@ -1854,7 +2014,7 @@ func completeChannelWarmupLocked(state *channelHealthStateData, now time.Time, s
 		return
 	}
 	markChannelHealthyLocked(state)
-	deleteChannelHealthIsolationLocked(channelHealthScope{channelID: state.channelID, modelName: state.modelName})
+	deleteChannelHealthIsolationLocked(channelHealthScope{channelID: state.channelID, modelName: state.modelName, keyFingerprint: state.keyFingerprint})
 	recordChannelHealthEventLocked(setting, ChannelHealthEventTypeRecovered, state, reason, now)
 }
 
@@ -1878,7 +2038,7 @@ func recordChannelHealthEventLocked(setting operation_setting.ChannelHealthSetti
 		OccurredAt: now.Unix(),
 		Snapshot:   buildChannelHealthEventSnapshotLocked(state, now, setting),
 	}
-	alertKey := fmt.Sprintf("%s:%s", eventType, channelHealthScopeKey(channelHealthScope{channelID: state.channelID, modelName: state.modelName}))
+	alertKey := fmt.Sprintf("%s:%s", eventType, channelHealthScopeKey(channelHealthScope{channelID: state.channelID, modelName: state.modelName, keyFingerprint: state.keyFingerprint}))
 	minInterval := time.Duration(setting.AlertMinIntervalSeconds) * time.Second
 	if minInterval <= 0 {
 		minInterval = 60 * time.Second
@@ -1924,6 +2084,10 @@ func buildChannelHealthEventSnapshotLocked(state *channelHealthStateData, now ti
 	if stats.samples > 0 {
 		errorRate = float64(stats.failures) / float64(stats.samples)
 	}
+	slowFirstResponseRatio := 0.0
+	if stats.firstResponseSamples > 0 {
+		slowFirstResponseRatio = float64(stats.slowFirstResponses) / float64(stats.firstResponseSamples)
+	}
 	return ChannelHealthEventSnapshot{
 		ActiveInflight:         channelActiveInflightCountLocked(state),
 		StuckInflight:          channelStuckInflightCountLocked(state),
@@ -1932,6 +2096,7 @@ func buildChannelHealthEventSnapshotLocked(state *channelHealthStateData, now ti
 		ErrorRate:              errorRate,
 		AverageFirstResponseMs: stats.averageFirstResponseMs,
 		P95FirstResponseMs:     stats.p95FirstResponseMs,
+		SlowFirstResponseRatio: slowFirstResponseRatio,
 		ProbeBackoffSeconds:    int(state.probeBackoff.Seconds()),
 		NextProbeAt:            unixOrZero(state.nextProbeAt),
 		ProbeInProgress:        state.probeInProgress,
@@ -2120,8 +2285,13 @@ func CheckChannelHealthStuckRequests() {
 	for i := range channelHealthShards {
 		shard := &channelHealthShards[i]
 		shard.Lock()
-		for _, state := range shard.channels {
+		for key, state := range shard.channels {
 			pruneChannelInflightLocked(state, now, setting)
+			if state.keyFingerprint != "" && len(state.inflight) == 0 && !state.lastActivityAt.IsZero() && now.Sub(state.lastActivityAt) > channelHealthKeyStateRetention(setting) {
+				deleteChannelHealthIsolationLocked(channelHealthScope{channelID: state.channelID, modelName: state.modelName, keyFingerprint: state.keyFingerprint})
+				delete(shard.channels, key)
+				continue
+			}
 			stuckCount := 0
 			var maxAge time.Duration
 			for _, attempt := range state.inflight {
@@ -2168,6 +2338,17 @@ func CheckChannelHealthStuckRequests() {
 	for _, channelID := range clearChannelIDs {
 		ClearChannelAffinityByChannelID(channelID)
 	}
+}
+
+func channelHealthKeyStateRetention(setting operation_setting.ChannelHealthSetting) time.Duration {
+	seconds := setting.WindowSeconds
+	if setting.MaxIsolationSeconds > seconds {
+		seconds = setting.MaxIsolationSeconds
+	}
+	if seconds <= 0 {
+		seconds = 600
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func RunChannelHealthProbeWorker() {
@@ -2419,6 +2600,10 @@ func buildChannelHealthSnapshotWithOptionsLocked(state *channelHealthStateData, 
 	if stats.samples > 0 {
 		errorRate = float64(stats.failures) / float64(stats.samples)
 	}
+	slowFirstResponseRatio := 0.0
+	if stats.firstResponseSamples > 0 {
+		slowFirstResponseRatio = float64(stats.slowFirstResponses) / float64(stats.firstResponseSamples)
+	}
 	warmupPercent := channelWarmupPercentWithOptionsLocked(state, now, setting, includeP95)
 	runtimeAvailable, availabilityReason := channelRuntimeAvailabilityLocked(state, now, warmupPercent)
 	probeAvailable, probeUnavailableReason := channelProbeAvailabilityLocked(state, now, setting)
@@ -2436,6 +2621,7 @@ func buildChannelHealthSnapshotWithOptionsLocked(state *channelHealthStateData, 
 	return ChannelHealthSnapshot{
 		ChannelID:              state.channelID,
 		ModelName:              state.modelName,
+		KeyFingerprint:         state.keyFingerprint,
 		State:                  state.state,
 		StateV2:                stateV2,
 		TrafficPercent:         trafficPercent,
@@ -2452,6 +2638,7 @@ func buildChannelHealthSnapshotWithOptionsLocked(state *channelHealthStateData, 
 		ErrorRate:              errorRate,
 		AverageFirstResponseMs: stats.averageFirstResponseMs,
 		P95FirstResponseMs:     stats.p95FirstResponseMs,
+		SlowFirstResponseRatio: slowFirstResponseRatio,
 		RuntimeAvailable:       runtimeAvailable,
 		AvailabilityReason:     availabilityReason,
 		ProbeAvailable:         probeAvailable,
@@ -2584,22 +2771,93 @@ func adjustChannelHealthWeight(channelID int, modelName string, weight int, _ in
 		}
 		adjusted = int(float64(adjusted) * errorPenalty)
 	}
-	// Slow first response degrades the channel's selection weight rather than
-	// isolating it: a channel that still answers, just slowly, stays usable but
-	// loses share to faster peers. The bar is SlowFirstResponseSeconds (default
-	// 18s), independent of the 45s FirstResponseTimeoutSeconds that governs
-	// stuck-request isolation and probe recovery.
-	slowSeconds := setting.SlowFirstResponseSeconds
-	if slowSeconds <= 0 {
-		slowSeconds = setting.FirstResponseTimeoutSeconds
-	}
-	if slowSeconds > 0 && snapshot.AverageFirstResponseMs >= float64(slowSeconds*1000) {
-		adjusted = adjusted / 2
-	}
+	adjusted = int(float64(adjusted) * slowWeightFactor(snapshot, setting))
 	if weight > 0 && adjusted <= 0 {
 		return 1
 	}
 	return adjusted
+}
+
+func slowWeightFactor(snapshot ChannelHealthSnapshot, setting operation_setting.ChannelHealthSetting) float64 {
+	band := snapshot.slowWeightBand
+	if band == 0 {
+		band = slowWeightBandForSnapshot(snapshot, setting)
+	}
+	switch band {
+	case 3:
+		return 0.20
+	case 2:
+		return 0.50
+	case 1:
+		return 0.80
+	default:
+		return 1.0
+	}
+}
+
+func slowWeightBandForSnapshot(snapshot ChannelHealthSnapshot, setting operation_setting.ChannelHealthSetting) int {
+	slowSeconds := setting.SlowFirstResponseSeconds
+	if slowSeconds <= 0 {
+		slowSeconds = setting.FirstResponseTimeoutSeconds
+	}
+	if slowSeconds <= 0 {
+		return 0
+	}
+	fastBoundary := float64(slowSeconds*2*1000) / 3
+	slowBoundary := float64(slowSeconds * 1000)
+	verySlowBoundary := float64(slowSeconds*5*1000) / 3
+	latency := snapshot.AverageFirstResponseMs
+	if snapshot.P95FirstResponseMs >= verySlowBoundary && latency < verySlowBoundary {
+		latency = verySlowBoundary
+	} else if snapshot.SlowFirstResponseRatio >= 0.20 && latency < slowBoundary {
+		latency = slowBoundary
+	}
+	switch {
+	case latency >= verySlowBoundary:
+		return 3
+	case latency >= slowBoundary:
+		return 2
+	case latency >= fastBoundary:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func updateSlowWeightBandLocked(state *channelHealthStateData, snapshot ChannelHealthSnapshot, setting operation_setting.ChannelHealthSetting) int {
+	target := slowWeightBandForSnapshot(snapshot, setting)
+	if state == nil {
+		return target
+	}
+	current := state.slowWeightBand
+	if target > current {
+		state.slowWeightBand = target
+		return target
+	}
+
+	slowSeconds := setting.SlowFirstResponseSeconds
+	if slowSeconds <= 0 {
+		slowSeconds = setting.FirstResponseTimeoutSeconds
+	}
+	if slowSeconds <= 0 || current == 0 {
+		state.slowWeightBand = target
+		return target
+	}
+	latency := snapshot.AverageFirstResponseMs
+	verySlowBoundary := float64(slowSeconds*5*1000) / 3
+	slowRecoveryBoundary := float64(slowSeconds*7*1000) / 9
+	if current >= 3 && latency >= verySlowBoundary*0.8 {
+		return current
+	}
+	if current >= 3 {
+		state.slowWeightBand = target
+		return target
+	}
+	if current >= 2 && latency >= slowRecoveryBoundary {
+		return current
+	}
+	state.slowWeightBand = target
+	return target
 }
 
 func getChannelHealthSnapshotForWeight(channelID int, modelName string) (ChannelHealthSnapshot, bool) {
@@ -2618,7 +2876,9 @@ func getChannelHealthSnapshotForWeight(channelID int, modelName string) (Channel
 	if !ok {
 		return ChannelHealthSnapshot{}, false
 	}
-	return buildChannelHealthSnapshotWithOptionsLocked(state, now, setting, false), true
+	snapshot := buildChannelHealthSnapshotWithOptionsLocked(state, now, setting, true)
+	snapshot.slowWeightBand = updateSlowWeightBandLocked(state, snapshot, setting)
+	return snapshot, true
 }
 
 func resetChannelRuntimeStateLocked(state *channelHealthStateData) {
@@ -2820,7 +3080,7 @@ func persistChannelHealthIsolationLocked(state *channelHealthStateData, now time
 		return
 	}
 	snapshot := buildChannelHealthSnapshotLocked(state, now, setting)
-	scope := channelHealthScope{channelID: snapshot.ChannelID, modelName: snapshot.ModelName}
+	scope := channelHealthScope{channelID: snapshot.ChannelID, modelName: snapshot.ModelName, keyFingerprint: snapshot.KeyFingerprint}
 	shard := channelHealthShardFor(snapshot.ChannelID)
 	if snapshot.State == ChannelHealthStateHealthy && snapshot.StateV2 != ChannelHealthStateV2Degraded {
 		shard.queueIsolationDelete(scope)

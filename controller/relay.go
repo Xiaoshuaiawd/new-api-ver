@@ -93,6 +93,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			if responseBody, marshalErr := common.Marshal(gin.H{"error": newAPIError.ToOpenAIError()}); marshalErr == nil {
 				service.SetLogResponseBody(c, responseBody)
 			}
+			if relayInfo, ok := c.Get("relay_info"); ok {
+				if info, ok := relayInfo.(*relaycommon.RelayInfo); ok && info.HasDownstreamResponseCommitted() {
+					if responseBody, marshalErr := common.Marshal(gin.H{"error": newAPIError.ToOpenAIError()}); marshalErr == nil {
+						_ = helper.StringData(c, string(responseBody))
+						return
+					}
+				}
+			}
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				helper.WssError(c, ws, newAPIError.ToOpenAIError())
@@ -204,6 +212,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		addUsedChannel(c, channel.Id)
+		relayInfo.BeginRelayAttempt(time.Now())
 		service.StartChannelHealthAttemptForContext(c)
 		bodyStorage, bodyErr := common.GetBodyStorage(c)
 		if bodyErr != nil {
@@ -230,25 +239,27 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		default:
 			newAPIError = relayHandler(c, relayInfo)
 		}
+		relayInfo.StopAttemptKeepAlive()
 
 		if newAPIError == nil {
 			statusCode := c.Writer.Status()
 			if statusCode <= 0 {
 				statusCode = http.StatusOK
 			}
-			if relayInfo.HasSendResponse() {
-				common.ObserveChannelFirstResponseDuration(c, requestKind, relayInfo.FirstResponseTime.Sub(relayInfo.StartTime))
+			if firstResponse, ok := relayInfo.FirstResponseDuration(); ok {
+				common.ObserveChannelFirstResponseDuration(c, requestKind, firstResponse)
 			}
 			attemptObserver.Done(common.ChannelAttemptResult{
 				Result:     common.ChannelRequestResultSuccess,
 				StatusCode: statusCode,
 			})
 			service.FinishChannelHealthAttemptForContext(c, service.ChannelAttemptResult{StatusCode: statusCode})
+			relayInfo.MarkAttemptSucceeded()
 			relayInfo.LastError = nil
 			return
 		}
-		if relayInfo.HasSendResponse() {
-			common.ObserveChannelFirstResponseDuration(c, requestKind, relayInfo.FirstResponseTime.Sub(relayInfo.StartTime))
+		if firstResponse, ok := relayInfo.FirstResponseDuration(); ok {
+			common.ObserveChannelFirstResponseDuration(c, requestKind, firstResponse)
 		}
 		attemptObserver.Done(common.ChannelAttemptResult{
 			Result:     common.ChannelRequestResultError,
@@ -380,6 +391,11 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
 	if openaiErr == nil {
 		return false
+	}
+	if relayInfo, ok := c.Get("relay_info"); ok {
+		if info, ok := relayInfo.(*relaycommon.RelayInfo); ok && info.HasDownstreamSemanticStarted() {
+			return false
+		}
 	}
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
 		return false
@@ -609,6 +625,7 @@ func RelayTask(c *gin.Context) {
 		}
 
 		addUsedChannel(c, channel.Id)
+		relayInfo.BeginRelayAttempt(time.Now())
 		service.StartChannelHealthAttemptForContext(c)
 		bodyStorage, bodyErr := common.GetBodyStorage(c)
 		if bodyErr != nil {
@@ -627,23 +644,25 @@ func RelayTask(c *gin.Context) {
 		attemptObserver := common.BeginChannelAttempt(c, requestKind)
 
 		result, taskErr = relay.RelayTaskSubmit(c, relayInfo)
+		relayInfo.StopAttemptKeepAlive()
 		if taskErr == nil {
 			statusCode := c.Writer.Status()
 			if statusCode <= 0 {
 				statusCode = http.StatusOK
 			}
-			if relayInfo.HasSendResponse() {
-				common.ObserveChannelFirstResponseDuration(c, requestKind, relayInfo.FirstResponseTime.Sub(relayInfo.StartTime))
+			if firstResponse, ok := relayInfo.FirstResponseDuration(); ok {
+				common.ObserveChannelFirstResponseDuration(c, requestKind, firstResponse)
 			}
 			attemptObserver.Done(common.ChannelAttemptResult{
 				Result:     common.ChannelRequestResultSuccess,
 				StatusCode: statusCode,
 			})
 			service.FinishChannelHealthAttemptForContext(c, service.ChannelAttemptResult{StatusCode: statusCode})
+			relayInfo.MarkAttemptSucceeded()
 			break
 		}
-		if relayInfo.HasSendResponse() {
-			common.ObserveChannelFirstResponseDuration(c, requestKind, relayInfo.FirstResponseTime.Sub(relayInfo.StartTime))
+		if firstResponse, ok := relayInfo.FirstResponseDuration(); ok {
+			common.ObserveChannelFirstResponseDuration(c, requestKind, firstResponse)
 		}
 		attemptObserver.Done(common.ChannelAttemptResult{
 			Result:     common.ChannelRequestResultError,

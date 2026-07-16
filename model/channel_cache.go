@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"sort"
 	"strings"
 	"sync"
@@ -37,17 +38,37 @@ type runtimeSelectionCandidate struct {
 	Channel         *Channel
 }
 
-var runtimeSmoothSelection = struct {
-	sync.Mutex
-	current map[string]int
-}{
-	current: make(map[string]int),
+type runtimeSelectionSnapshot struct {
+	normalAvailable bool
+	normalInflight  int
+	probeAvailable  bool
+	probeInflight   int
+	healthState     string
+	weights         map[int]int
 }
 
+const runtimeSmoothSelectionShardCount = 32
+const runtimeSmoothSelectionShardCapacity = 512
+
+type runtimeSmoothSelectionState struct {
+	current  int
+	lastUsed time.Time
+}
+
+type runtimeSmoothSelectionShard struct {
+	sync.Mutex
+	current map[string]runtimeSmoothSelectionState
+}
+
+var runtimeSmoothSelection [runtimeSmoothSelectionShardCount]runtimeSmoothSelectionShard
+
 func ResetChannelRuntimeSelectionStateForTest() {
-	runtimeSmoothSelection.Lock()
-	defer runtimeSmoothSelection.Unlock()
-	runtimeSmoothSelection.current = make(map[string]int)
+	for i := range runtimeSmoothSelection {
+		shard := &runtimeSmoothSelection[i]
+		shard.Lock()
+		shard.current = make(map[string]runtimeSmoothSelectionState)
+		shard.Unlock()
+	}
 }
 
 func InitChannelCache() {
@@ -187,14 +208,15 @@ func GetRandomSatisfiedChannelWithTrace(group string, model string, retry int, r
 		retry = len(sortedUniquePriorities) - 1
 	}
 
+	runtimeSnapshots := make(map[int]*runtimeSelectionSnapshot, len(channels))
 	var retainedProbeCandidates []runtimeSelectionCandidate
 	for priorityIndex := retry; priorityIndex < len(sortedUniquePriorities); priorityIndex++ {
 		priority := int64(sortedUniquePriorities[priorityIndex])
-		normalCandidates, err := collectRuntimeCandidates(group, model, channels, priority, false, traceFn)
+		normalCandidates, err := collectRuntimeCandidates(group, model, channels, priority, false, traceFn, runtimeSnapshots)
 		if err != nil {
 			return nil, err
 		}
-		probeCandidates, err := collectRuntimeCandidates(group, model, channels, priority, true, traceFn)
+		probeCandidates, err := collectRuntimeCandidates(group, model, channels, priority, true, traceFn, runtimeSnapshots)
 		if err != nil {
 			return nil, err
 		}
@@ -246,7 +268,14 @@ func GetRandomSatisfiedChannelWithTrace(group string, model string, retry int, r
 	return selected.Channel, nil
 }
 
-func collectRuntimeCandidates(group string, modelName string, channels []int, targetPriority int64, probe bool, traceFn ChannelSelectionTraceFunc) ([]runtimeSelectionCandidate, error) {
+func collectRuntimeCandidates(group string, modelName string, channels []int, targetPriority int64, probe bool, traceFn ChannelSelectionTraceFunc, snapshotArgs ...map[int]*runtimeSelectionSnapshot) ([]runtimeSelectionCandidate, error) {
+	snapshots := map[int]*runtimeSelectionSnapshot(nil)
+	if len(snapshotArgs) > 0 {
+		snapshots = snapshotArgs[0]
+	}
+	if snapshots == nil {
+		snapshots = make(map[int]*runtimeSelectionSnapshot, len(channels))
+	}
 	candidates := make([]runtimeSelectionCandidate, 0)
 	for _, channelId := range channels {
 		channel, ok := channelsIDM[channelId]
@@ -256,12 +285,36 @@ func collectRuntimeCandidates(group string, modelName string, channels []int, ta
 		if channel.GetPriority() != targetPriority {
 			continue
 		}
-		var available bool
-		var inflight int
+		if !channel.hasRuntimeAvailableKey(modelName) {
+			recordChannelSelectionTrace(traceFn, ChannelSelectionTraceEvent{
+				Stage:     "runtime",
+				Action:    "skip",
+				Group:     group,
+				Model:     modelName,
+				ChannelID: channel.Id,
+				Priority:  channel.GetPriority(),
+				Reason:    "no runtime available channel key",
+				Probe:     probe,
+			})
+			continue
+		}
+		snapshot := snapshots[channel.Id]
+		if snapshot == nil {
+			normalAvailable, normalInflight := getChannelRuntimeState(channel.Id, modelName)
+			probeAvailable, probeInflight := getChannelProbeRuntimeState(channel.Id, modelName)
+			snapshot = &runtimeSelectionSnapshot{
+				normalAvailable: normalAvailable,
+				normalInflight:  normalInflight,
+				probeAvailable:  probeAvailable,
+				probeInflight:   probeInflight,
+				healthState:     runtimeTraceHealthState(channel.Id),
+				weights:         make(map[int]int),
+			}
+			snapshots[channel.Id] = snapshot
+		}
+		available, inflight := snapshot.normalAvailable, snapshot.normalInflight
 		if probe {
-			available, inflight = getChannelProbeRuntimeState(channel.Id, modelName)
-		} else {
-			available, inflight = getChannelRuntimeState(channel.Id, modelName)
+			available, inflight = snapshot.probeAvailable, snapshot.probeInflight
 		}
 		if !available {
 			recordChannelSelectionTrace(traceFn, ChannelSelectionTraceEvent{
@@ -271,13 +324,21 @@ func collectRuntimeCandidates(group string, modelName string, channels []int, ta
 				Model:       modelName,
 				ChannelID:   channel.Id,
 				Priority:    channel.GetPriority(),
-				HealthState: runtimeTraceHealthState(channel.Id),
+				HealthState: snapshot.healthState,
 				Reason:      "runtime unavailable",
 				Probe:       probe,
 			})
 			continue
 		}
-		effectiveWeight := runtimeCandidateEffectiveWeight(channel.Id, modelName, channel.GetWeight(), inflight, probe)
+		weightKey := channel.GetWeight() * 2
+		if probe {
+			weightKey++
+		}
+		effectiveWeight, ok := snapshot.weights[weightKey]
+		if !ok {
+			effectiveWeight = runtimeCandidateEffectiveWeight(channel.Id, modelName, channel.GetWeight(), inflight, probe)
+			snapshot.weights[weightKey] = effectiveWeight
+		}
 		candidates = append(candidates, runtimeSelectionCandidate{
 			ChannelID:       channel.Id,
 			Priority:        channel.GetPriority(),
@@ -341,18 +402,23 @@ func smoothWeightedRuntimeCandidateIndex(group string, modelName string, candida
 		return -1, errors.New("channel not found")
 	}
 
-	runtimeSmoothSelection.Lock()
-	defer runtimeSmoothSelection.Unlock()
-	if runtimeSmoothSelection.current == nil {
-		runtimeSmoothSelection.current = make(map[string]int)
+	shard := runtimeSmoothSelectionShardFor(group, modelName)
+	shard.Lock()
+	defer shard.Unlock()
+	if shard.current == nil {
+		shard.current = make(map[string]runtimeSmoothSelectionState)
 	}
 
+	now := time.Now()
 	bestIndex := -1
 	bestCurrent := 0
 	for i, candidate := range candidates {
 		key := runtimeSmoothSelectionKey(group, modelName, candidate)
-		current := runtimeSmoothSelection.current[key] + candidate.EffectiveWeight
-		runtimeSmoothSelection.current[key] = current
+		state := shard.current[key]
+		current := state.current + candidate.EffectiveWeight
+		state.current = current
+		state.lastUsed = now
+		shard.current[key] = state
 		if bestIndex < 0 ||
 			current > bestCurrent ||
 			(current == bestCurrent && candidate.ChannelID < candidates[bestIndex].ChannelID) {
@@ -364,11 +430,32 @@ func smoothWeightedRuntimeCandidateIndex(group string, modelName string, candida
 		return -1, errors.New("channel not found")
 	}
 	key := runtimeSmoothSelectionKey(group, modelName, candidates[bestIndex])
-	runtimeSmoothSelection.current[key] -= totalWeight
-	if len(runtimeSmoothSelection.current) > 10000 {
-		runtimeSmoothSelection.current = make(map[string]int)
+	state := shard.current[key]
+	state.current -= totalWeight
+	state.lastUsed = now
+	shard.current[key] = state
+	if len(shard.current) > runtimeSmoothSelectionShardCapacity {
+		oldestKey := ""
+		var oldest time.Time
+		for currentKey, currentState := range shard.current {
+			if oldestKey == "" || currentState.lastUsed.Before(oldest) {
+				oldestKey = currentKey
+				oldest = currentState.lastUsed
+			}
+		}
+		if oldestKey != "" {
+			delete(shard.current, oldestKey)
+		}
 	}
 	return bestIndex, nil
+}
+
+func runtimeSmoothSelectionShardFor(group string, modelName string) *runtimeSmoothSelectionShard {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(group))
+	_, _ = h.Write([]byte{'\x00'})
+	_, _ = h.Write([]byte(modelName))
+	return &runtimeSmoothSelection[int(h.Sum32())&(runtimeSmoothSelectionShardCount-1)]
 }
 
 func runtimeSmoothSelectionKey(group string, modelName string, candidate runtimeSelectionCandidate) string {

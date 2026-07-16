@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -246,8 +247,14 @@ func Distribute() func(c *gin.Context) {
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
 		SetupContextForSelectedChannel(c, channel, modelRequest.Model)
 		c.Next()
-		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
-			service.RecordChannelAffinity(c, channel.Id)
+		if channel != nil {
+			if relayInfo, ok := c.Get("relay_info"); ok {
+				if info, ok := relayInfo.(*relaycommon.RelayInfo); ok && info.IsAttemptSuccessful() {
+					service.RecordChannelAffinity(c, channel.Id)
+				}
+			} else if c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
+				service.RecordChannelAffinity(c, channel.Id)
+			}
 		}
 	}
 }
@@ -548,7 +555,7 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	common.SetContextKey(c, constant.ContextKeyChannelModelMapping, channel.GetModelMapping())
 	common.SetContextKey(c, constant.ContextKeyChannelStatusCodeMapping, channel.GetStatusCodeMapping())
 
-	key, index, newAPIError := channel.GetNextEnabledKey()
+	key, index, newAPIError := channel.GetNextEnabledKeyForModel(modelName)
 	if newAPIError != nil {
 		return newAPIError
 	}

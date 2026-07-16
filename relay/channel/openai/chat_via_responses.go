@@ -218,7 +218,9 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			return false
 		}
 		c.Render(-1, common.CustomEvent{Data: "data: " + string(geminiResponseStr)})
-		_ = helper.FlushWriter(c)
+		if helper.FlushWriter(c) == nil {
+			helper.MarkDownstreamSemanticStarted(c)
+		}
 		return true
 	}
 
