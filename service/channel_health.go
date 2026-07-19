@@ -90,6 +90,7 @@ type ChannelAttemptMeta struct {
 type ChannelAttemptResult struct {
 	Error      *types.NewAPIError
 	StatusCode int
+	LocalError bool
 }
 
 type ChannelHealthProbeFunc func(ctx context.Context, channel *model.Channel, modelName string) error
@@ -1306,9 +1307,14 @@ func isChannelGatewayErrorStatusCode(code int) bool {
 }
 
 // channelHealthImmediateIsolationReason identifies terminal upstream account
-// failures that cannot recover by retrying the same channel. Local user quota
-// errors are explicitly excluded because they say nothing about channel health.
+// failures that cannot recover by retrying the same channel. Local failures are
+// explicitly excluded because they say nothing about channel health; error codes
+// alone cannot distinguish them because an upstream new-api instance may return
+// the same insufficient_user_quota code used by this gateway's local billing.
 func channelHealthImmediateIsolationReason(result ChannelAttemptResult) (string, bool) {
+	if result.LocalError {
+		return "", false
+	}
 	status := result.StatusCode
 	errCode := ""
 	errMessage := ""
@@ -1317,11 +1323,6 @@ func channelHealthImmediateIsolationReason(result ChannelAttemptResult) (string,
 		errCode = strings.ToLower(strings.TrimSpace(string(result.Error.GetErrorCode())))
 		errMessage = strings.ToLower(strings.TrimSpace(result.Error.Error()))
 	}
-	if errCode == string(types.ErrorCodeInsufficientUserQuota) ||
-		errCode == string(types.ErrorCodePreConsumeTokenQuotaFailed) {
-		return "", false
-	}
-
 	terminal := status == http.StatusUnauthorized || status == http.StatusPaymentRequired
 	if !terminal {
 		detail := errCode + " " + errMessage
@@ -1329,6 +1330,8 @@ func channelHealthImmediateIsolationReason(result ChannelAttemptResult) (string,
 			"unauthorized",
 			"invalid_api_key",
 			"invalid api key",
+			"insufficient_user_quota",
+			"pre_consume_token_quota_failed",
 			"insufficient_quota",
 			"insufficient quota",
 			"quota insufficient",

@@ -783,6 +783,8 @@ func TestChannelHealthImmediatelyIsolatesExhaustedBalance(t *testing.T) {
 		{name: "insufficient quota code", channelID: 8836, statusCode: http.StatusTooManyRequests, errorCode: "insufficient_quota", message: "quota exhausted"},
 		{name: "english balance message", channelID: 8837, statusCode: http.StatusForbidden, errorCode: types.ErrorCodeDoRequestFailed, message: "credit balance is too low"},
 		{name: "chinese balance message", channelID: 8838, statusCode: http.StatusBadRequest, errorCode: types.ErrorCodeDoRequestFailed, message: "账户余额不足"},
+		{name: "upstream new-api user quota", channelID: 8842, statusCode: http.StatusForbidden, errorCode: types.ErrorCodeInsufficientUserQuota, message: "用户额度不足, 剩余额度: ¥-0.114046"},
+		{name: "upstream new-api quota code", channelID: 8843, statusCode: http.StatusForbidden, errorCode: types.ErrorCodeInsufficientUserQuota, message: "quota exhausted"},
 	}
 
 	for _, tt := range tests {
@@ -831,7 +833,7 @@ func TestChannelHealthDoesNotMisclassifyBalanceOrLocalQuotaErrors(t *testing.T) 
 			withChannelHealthTestSettings(t)
 			handle := RecordAttemptStart(ChannelAttemptMeta{ChannelID: tt.channelID})
 
-			RecordAttemptFinish(handle, ChannelAttemptResult{Error: tt.err})
+			RecordAttemptFinish(handle, ChannelAttemptResult{Error: tt.err, LocalError: true})
 
 			require.True(t, IsChannelAvailable(tt.channelID))
 			snapshot, ok := GetChannelHealthSnapshot(tt.channelID)

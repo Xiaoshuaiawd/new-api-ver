@@ -222,7 +222,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			} else {
 				newAPIError = types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 			}
-			service.FinishChannelHealthAttemptForContext(c, service.ChannelAttemptResult{Error: newAPIError})
+			service.FinishChannelHealthAttemptForContext(c, service.ChannelAttemptResult{Error: newAPIError, LocalError: true})
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
@@ -635,7 +635,8 @@ func RelayTask(c *gin.Context) {
 				taskErr = service.TaskErrorWrapperLocal(bodyErr, "read_request_body_failed", http.StatusBadRequest)
 			}
 			service.FinishChannelHealthAttemptForContext(c, service.ChannelAttemptResult{
-				Error: types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, taskErr.StatusCode, types.ErrOptionWithSkipRetry()),
+				Error:      types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, taskErr.StatusCode, types.ErrOptionWithSkipRetry()),
+				LocalError: true,
 			})
 			break
 		}
@@ -673,7 +674,7 @@ func RelayTask(c *gin.Context) {
 		if taskErr.LocalError {
 			channelHealthErr = types.NewErrorWithStatusCode(taskErr.Error, types.ErrorCodeBadRequestBody, taskErr.StatusCode, types.ErrOptionWithSkipRetry())
 		}
-		service.FinishChannelHealthAttemptForContext(c, service.ChannelAttemptResult{Error: channelHealthErr})
+		service.FinishChannelHealthAttemptForContext(c, service.ChannelAttemptResult{Error: channelHealthErr, LocalError: taskErr.LocalError})
 
 		if !taskErr.LocalError {
 			setRelayErrorLogResponseBody(c, channelHealthErr)
