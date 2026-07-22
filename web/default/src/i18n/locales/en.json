@@ -5610,6 +5610,9 @@
     "Search user group": "Search user group",
     "Settle at": "Settle at",
     "e.g. alipay, stripe": "e.g. alipay, stripe",
-    "When your friend completes their first wallet top-up ≥ 30, both of you receive 10% of the base top-up amount as a reward. Your reward settles after 7 days.": "When your friend completes their first wallet top-up ≥ 30, both of you receive 10% of the base top-up amount as a reward. Your reward settles after 7 days."
+    "When your friend completes their first wallet top-up ≥ 30, both of you receive 10% of the base top-up amount as a reward. Your reward settles after 7 days.": "When your friend completes their first wallet top-up ≥ 30, both of you receive 10% of the base top-up amount as a reward. Your reward settles after 7 days.",
+    "Time range": "Time range",
+    "Payment provider": "Payment provider",
+    "Reward status": "Reward status"
   }
 }

@@ -5610,6 +5610,9 @@
     "Search user group": "搜索用户组",
     "Settle at": "结算时间",
     "e.g. alipay, stripe": "例如 alipay、stripe",
-    "When your friend completes their first wallet top-up ≥ 30, both of you receive 10% of the base top-up amount as a reward. Your reward settles after 7 days.": "当您的好友完成首次充值 ≥ 30 元时，您和好友各自获得充值基础金额 10% 的奖励。您的奖励将在 7 天后结算。"
+    "When your friend completes their first wallet top-up ≥ 30, both of you receive 10% of the base top-up amount as a reward. Your reward settles after 7 days.": "当您的好友完成首次充值 ≥ 30 元时，您和好友各自获得充值基础金额 10% 的奖励。您的奖励将在 7 天后结算。",
+    "Time range": "时间范围",
+    "Payment provider": "支付渠道",
+    "Reward status": "奖励状态"
   }
 }
