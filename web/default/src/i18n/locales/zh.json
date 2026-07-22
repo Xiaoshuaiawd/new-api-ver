@@ -2488,6 +2488,8 @@
     "Inviter settle delay days": "邀请者结算延迟天数",
     "inviter_settled": "邀请者已结算",
     "Invites": "邀请",
+    "Invite friends to get first top-up rewards for both parties.": "邀请好友注册，双方均可获得首充奖励。",
+    "Invite friends to register and complete their first wallet top-up ≥ 30. Both you and your friend each receive 10% of the base top-up amount as a reward.": "邀请好友注册并完成首次充值 ≥ 30 元，您和好友各自获得充值基础金额 10% 的奖励。",
     "Invoke developer-defined functions with structured arguments": "使用结构化参数调用开发者定义的函数",
     "io.net API Key": "io.net API 密钥",
     "io.net Deployments": "io.net 部署",
