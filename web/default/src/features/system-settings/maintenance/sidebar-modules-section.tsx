@@ -142,6 +142,12 @@ export function SidebarModulesSection({
         title: t('Models'),
         description: t('Manage catalog visibility and pricing.'),
       },
+      referral: {
+        title: t('Referral Stats'),
+        description: t(
+          'Review invitation conversion, rewards, and risk holds.'
+        ),
+      },
       redemption: {
         title: t('Redeem codes'),
         description: t('Create and review invite or credit codes.'),

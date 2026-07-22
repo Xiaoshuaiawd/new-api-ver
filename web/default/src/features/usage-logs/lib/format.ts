@@ -386,6 +386,22 @@ const AUDIT_TEMPLATES: Record<string, string> = {
   'subscription.bind': 'Bound a subscription',
   // Logs
   'log.clear': 'Cleared historical logs',
+  // Referral first top-up rewards
+  'referral_first_topup_invitee_reward':
+    'Referral first top-up reward credited: +{{quota}}',
+  'referral_first_topup_inviter_reward_pending':
+    'Referral first top-up reward pending settlement: {{quota}}',
+  'referral_first_topup_inviter_reward_settled':
+    'Referral first top-up reward settled: +{{quota}}',
+  'referral_first_topup_reward_reversed':
+    'Referral first top-up reward reversed: -{{quota}}',
+  'referral_first_topup_reward_reverse_owed':
+    'Referral reward reversal debt recorded: {{quota}}',
+  // Referral admin actions
+  'referral.reward_risk_update': 'Updated referral reward risk status (ID: {{reward_id}})',
+  'referral.reward_cancel': 'Cancelled referral reward (ID: {{reward_id}})',
+  'referral.reward_reverse': 'Reversed referral reward (ID: {{reward_id}})',
+  'referral.inviter_pending_block': 'Blocked inviter pending rewards (inviter: {{inviter_id}}, count: {{count}})',
   // Generic middleware fallback
   generic: '{{method}} {{route}}',
 }

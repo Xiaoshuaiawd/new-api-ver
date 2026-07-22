@@ -149,6 +149,8 @@ export interface TopupInfo {
   discount: Record<number, number>
   /** Optional threshold-based recharge bonus activity */
   topup_bonus?: TopUpBonusConfig
+  /** Optional referral first top-up reward activity */
+  referral_first_topup_reward?: ReferralFirstTopUpRewardConfig
   /** Optional topup link for purchasing codes */
   topup_link?: string
   /** Whether Creem topup is enabled */
@@ -185,6 +187,29 @@ export interface TopUpBonusConfig {
   user_bonus_max_amount?: number
   total_bonus_budget_amount?: number
   first_topup_only?: boolean
+  visible?: boolean
+}
+
+export interface ReferralFirstTopUpRewardConfig {
+  enabled?: boolean
+  activity_id?: string
+  activity_name?: string
+  start_time?: number
+  end_time?: number
+  min_paid_money?: number
+  threshold_operator?: 'gte' | 'gt'
+  first_topup_mode?: 'strict_first' | 'first_qualified'
+  invitee_reward_percent?: number
+  inviter_reward_percent?: number
+  inviter_settle_delay_days?: number
+  single_invitee_reward_max_quota?: number
+  single_inviter_reward_max_quota?: number
+  inviter_monthly_max_quota?: number
+  total_budget_quota?: number
+  stack_with_topup_bonus?: boolean
+  excluded_payment_providers?: string[]
+  excluded_user_groups?: string[]
+  auto_block_risky_rewards?: boolean
   visible?: boolean
 }
 

@@ -146,6 +146,8 @@ const BILLING_SECTIONS = [
           AmountOptions: settings['payment_setting.amount_options'],
           AmountDiscount: settings['payment_setting.amount_discount'],
           TopUpBonus: settings['payment_setting.topup_bonus'],
+          ReferralFirstTopUpReward:
+            settings['payment_setting.referral_first_topup_reward'] ?? '',
           StripeApiSecret: settings.StripeApiSecret,
           StripeWebhookSecret: settings.StripeWebhookSecret,
           StripePriceId: settings.StripePriceId,

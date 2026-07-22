@@ -27,6 +27,7 @@ import {
 import type {
   TopupInfo,
   TopUpBonusConfig,
+  ReferralFirstTopUpRewardConfig,
   PresetAmount,
   CreemProduct,
   PaymentMethod,
@@ -205,6 +206,70 @@ function parseTopUpBonus(data: unknown): TopUpBonusConfig | undefined {
   }
 }
 
+function parseReferralFirstTopUpReward(
+  data: unknown
+): ReferralFirstTopUpRewardConfig | undefined {
+  if (!data) {
+    return undefined
+  }
+
+  let parsedData = data
+  if (typeof data === 'string') {
+    try {
+      parsedData = JSON.parse(data)
+    } catch {
+      return undefined
+    }
+  }
+
+  if (
+    !parsedData ||
+    typeof parsedData !== 'object' ||
+    Array.isArray(parsedData)
+  ) {
+    return undefined
+  }
+
+  const source = parsedData as Record<string, unknown>
+  return {
+    enabled: source.enabled === true,
+    activity_id:
+      typeof source.activity_id === 'string' ? source.activity_id : '',
+    activity_name:
+      typeof source.activity_name === 'string' ? source.activity_name : '',
+    start_time: Number(source.start_time) || 0,
+    end_time: Number(source.end_time) || 0,
+    min_paid_money: Number(source.min_paid_money) || 0,
+    threshold_operator: source.threshold_operator === 'gt' ? 'gt' : 'gte',
+    first_topup_mode:
+      source.first_topup_mode === 'first_qualified'
+        ? 'first_qualified'
+        : 'strict_first',
+    invitee_reward_percent: Number(source.invitee_reward_percent) || 0,
+    inviter_reward_percent: Number(source.inviter_reward_percent) || 0,
+    inviter_settle_delay_days: Number(source.inviter_settle_delay_days) || 0,
+    single_invitee_reward_max_quota:
+      Number(source.single_invitee_reward_max_quota) || 0,
+    single_inviter_reward_max_quota:
+      Number(source.single_inviter_reward_max_quota) || 0,
+    inviter_monthly_max_quota: Number(source.inviter_monthly_max_quota) || 0,
+    total_budget_quota: Number(source.total_budget_quota) || 0,
+    stack_with_topup_bonus: source.stack_with_topup_bonus !== false,
+    excluded_payment_providers: Array.isArray(source.excluded_payment_providers)
+      ? source.excluded_payment_providers
+          .map((item) => (typeof item === 'string' ? item : ''))
+          .filter(Boolean)
+      : [],
+    excluded_user_groups: Array.isArray(source.excluded_user_groups)
+      ? source.excluded_user_groups
+          .map((item) => (typeof item === 'string' ? item : ''))
+          .filter(Boolean)
+      : [],
+    auto_block_risky_rewards: source.auto_block_risky_rewards !== false,
+    visible: source.visible !== false,
+  }
+}
+
 export function useTopupInfo() {
   const [topupInfo, setTopupInfo] = useState<TopupInfo | null>(null)
   const [presetAmounts, setPresetAmounts] = useState<PresetAmount[]>([])
@@ -231,6 +296,9 @@ export function useTopupInfo() {
         amount_options: parseAmountOptions(response.data.amount_options),
         discount: parseDiscountMap(response.data.discount),
         topup_bonus: parseTopUpBonus(response.data.topup_bonus),
+        referral_first_topup_reward: parseReferralFirstTopUpReward(
+          response.data.referral_first_topup_reward
+        ),
         creem_products: parseCreemProducts(response.data.creem_products),
         waffo_pay_methods: parseWaffoPayMethods(
           response.data.waffo_pay_methods

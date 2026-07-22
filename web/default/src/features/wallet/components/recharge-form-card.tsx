@@ -16,7 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Gift, ExternalLink, Loader2, Receipt, WalletCards } from 'lucide-react'
+import {
+  ExternalLink,
+  Gift,
+  Handshake,
+  Loader2,
+  Receipt,
+  WalletCards,
+} from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -36,6 +43,7 @@ import {
 } from '@/components/ui/tooltip'
 import { formatNumber } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/auth-store'
 
 import {
   formatCurrency,
@@ -116,6 +124,7 @@ export function RechargeFormCard({
   enableAlipayF2FTopup,
 }: RechargeFormCardProps) {
   const { t } = useTranslation()
+  const user = useAuthStore((s) => s.auth.user)
   const [localAmount, setLocalAmount] = useState(topupAmount.toString())
 
   useEffect(() => {
@@ -150,6 +159,28 @@ export function RechargeFormCard({
     topupAmount,
     topupInfo?.topup_bonus
   )
+  const referralReward = topupInfo?.referral_first_topup_reward
+  const referralThresholdSymbol =
+    referralReward?.threshold_operator === 'gt' ? '>' : '≥'
+
+  // User-aware referral first top-up prompt logic.
+  // Show the prompt only when: the activity is active, the user has an inviter,
+  // and compliance has been confirmed.
+  const userHasInviter = (user?.inviter_id ?? 0) > 0
+  const showReferralReward =
+    referralReward?.enabled === true &&
+    referralReward.visible !== false &&
+    topupInfo?.payment_compliance_confirmed !== false
+  const showUserAwareReferralPrompt =
+    showReferralReward && userHasInviter
+  const showGenericReferralInfo =
+    showReferralReward && !userHasInviter
+
+  const referralMinMoney = referralReward?.min_paid_money ?? 30
+  const referralBelowThreshold =
+    showUserAwareReferralPrompt && topupAmount > 0 && topupAmount < referralMinMoney
+  const referralMeetsThreshold =
+    showUserAwareReferralPrompt && topupAmount >= referralMinMoney
 
   if (loading) {
     return (
@@ -336,18 +367,103 @@ export function RechargeFormCard({
                       </span>
                     ) : (
                       <span>
-                        {t(
-                          'Pay {{remaining}} more to get +{{bonus}}% bonus.',
-                          {
-                            remaining: formatNumber(
-                              bonusPreview.remainingAmount
-                            ),
-                            bonus: bonusPreview.bonusPercent,
-                          }
-                        )}
+                        {t('Pay {{remaining}} more to get +{{bonus}}% bonus.', {
+                          remaining: formatNumber(bonusPreview.remainingAmount),
+                          bonus: bonusPreview.bonusPercent,
+                        })}
                       </span>
                     )}
                   </div>
+                ) : null}
+                {showUserAwareReferralPrompt ? (
+                  <Alert className='border-violet-200 bg-violet-50 text-violet-950 dark:border-violet-900/60 dark:bg-violet-950/30 dark:text-violet-100'>
+                    <Handshake className='h-4 w-4' />
+                    <AlertDescription className='space-y-1'>
+                      <div className='font-medium'>
+                        {t('Referral first top-up rewards')}
+                      </div>
+                      {referralBelowThreshold ? (
+                        <div>
+                          {t(
+                            'Amount below referral reward threshold (need {{symbol}} {{amount}}).',
+                            {
+                              symbol: referralThresholdSymbol,
+                              amount: formatNumber(referralMinMoney),
+                            }
+                          )}
+                        </div>
+                      ) : referralMeetsThreshold ? (
+                        <div>
+                          {t(
+                            'You and your inviter each get a {{invitee}} reward on this top-up.',
+                            {
+                              invitee: `${formatNumber(
+                                referralReward?.invitee_reward_percent ?? 10
+                              )}%`,
+                            }
+                          )}
+                        </div>
+                      ) : (
+                        <div>
+                          {t(
+                            'First wallet top-up {{symbol}} {{amount}} gives {{invitee}} to the invitee and {{inviter}} to the inviter.',
+                            {
+                              symbol: referralThresholdSymbol,
+                              amount: formatNumber(referralMinMoney),
+                              invitee: `${formatNumber(
+                                referralReward?.invitee_reward_percent ?? 10
+                              )}%`,
+                              inviter: `${formatNumber(
+                                referralReward?.inviter_reward_percent ?? 10
+                              )}%`,
+                            }
+                          )}
+                        </div>
+                      )}
+                      <div className='text-xs opacity-90'>
+                        {t(
+                          'The invitee reward is credited immediately, and the inviter reward settles after {{days}} days.',
+                          {
+                            days:
+                              referralReward?.inviter_settle_delay_days ?? 7,
+                          }
+                        )}
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                ) : showGenericReferralInfo ? (
+                  <Alert className='border-violet-200 bg-violet-50 text-violet-950 dark:border-violet-900/60 dark:bg-violet-950/30 dark:text-violet-100'>
+                    <Handshake className='h-4 w-4' />
+                    <AlertDescription className='space-y-1'>
+                      <div className='font-medium'>
+                        {t('Referral first top-up rewards')}
+                      </div>
+                      <div>
+                        {t(
+                          'First wallet top-up {{symbol}} {{amount}} gives {{invitee}} to the invitee and {{inviter}} to the inviter.',
+                          {
+                            symbol: referralThresholdSymbol,
+                            amount: formatNumber(referralMinMoney),
+                            invitee: `${formatNumber(
+                              referralReward?.invitee_reward_percent ?? 10
+                            )}%`,
+                            inviter: `${formatNumber(
+                              referralReward?.inviter_reward_percent ?? 10
+                            )}%`,
+                          }
+                        )}
+                      </div>
+                      <div className='text-xs opacity-90'>
+                        {t(
+                          'The invitee reward is credited immediately, and the inviter reward settles after {{days}} days.',
+                          {
+                            days:
+                              referralReward?.inviter_settle_delay_days ?? 7,
+                          }
+                        )}
+                      </div>
+                    </AlertDescription>
+                  </Alert>
                 ) : null}
               </div>
 

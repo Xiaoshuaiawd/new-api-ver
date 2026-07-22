@@ -24,6 +24,7 @@ import {
   FlaskConical,
   Gauge,
   HeartPulse,
+  Handshake,
   Key,
   LayoutDashboard,
   ListTodo,
@@ -37,6 +38,7 @@ import {
   Wallet,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+
 import type { SidebarData } from '@/components/layout/types'
 import { ROLE } from '@/lib/roles'
 
@@ -144,6 +146,11 @@ export function buildSidebarData(t: Translate): SidebarData {
             title: t('Users'),
             url: '/users',
             icon: Users,
+          },
+          {
+            title: t('Referral Stats'),
+            url: '/referrals',
+            icon: Handshake,
           },
           {
             title: t('Redemption Codes'),

@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Loader2 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -47,6 +47,7 @@ import { useEmailVerification } from '@/features/auth/hooks/use-email-verificati
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
 import {
   getAffiliateCode,
+  clearAffiliateCode,
   saveAffiliateCode,
 } from '@/features/auth/lib/storage'
 import { useStatus } from '@/hooks/use-status'
@@ -63,6 +64,7 @@ export function SignUpForm({
   const [wechatCode, setWeChatCode] = useState('')
   const [isWeChatDialogOpen, setIsWeChatDialogOpen] = useState(false)
   const [isWeChatSubmitting, setIsWeChatSubmitting] = useState(false)
+  const [affiliateCode, setAffiliateCode] = useState(() => getAffiliateCode())
   const legalConsentErrorMessage = t('Please agree to the legal terms first')
 
   const { status } = useStatus()
@@ -132,6 +134,9 @@ export function SignUpForm({
     const aff = new URLSearchParams(window.location.search).get('aff')?.trim()
     if (aff) {
       saveAffiliateCode(aff)
+      setAffiliateCode(aff)
+    } else {
+      setAffiliateCode(getAffiliateCode())
     }
   }, [])
 
@@ -167,12 +172,13 @@ export function SignUpForm({
       })
 
       if (res?.success) {
+        clearAffiliateCode()
         toast.success(t('Account created! Please sign in'))
         redirectToLogin()
       } else {
         toast.error(res?.message || t('Failed to create account'))
       }
-    } catch (_error) {
+    } catch {
       // Errors are handled by global interceptor
     } finally {
       setIsLoading(false)
@@ -216,11 +222,20 @@ export function SignUpForm({
       } else {
         toast.error(res?.message || t('Login failed'))
       }
-    } catch (_error) {
+    } catch {
       toast.error(t('Login failed'))
     } finally {
       setIsWeChatSubmitting(false)
     }
+  }
+
+  let verificationButtonContent: ReactNode = t('Send code')
+  if (isActive) {
+    verificationButtonContent = t('Resend ({{seconds}}s)', {
+      seconds: secondsLeft,
+    })
+  } else if (isSendingCode) {
+    verificationButtonContent = <Loader2 className='h-4 w-4 animate-spin' />
   }
 
   return (
@@ -230,6 +245,14 @@ export function SignUpForm({
         className={cn('grid gap-4', className)}
         {...props}
       >
+        {affiliateCode ? (
+          <div className='bg-muted/50 text-muted-foreground rounded-md px-3 py-2 text-sm'>
+            {t('You are signing up with invite code {{code}}.', {
+              code: affiliateCode,
+            })}
+          </div>
+        ) : null}
+
         {/* Username Field */}
         <FormField
           control={form.control}
@@ -323,13 +346,7 @@ export function SignUpForm({
                 }
                 onClick={handleSendVerificationCode}
               >
-                {isActive ? (
-                  t('Resend ({{seconds}}s)', { seconds: secondsLeft })
-                ) : isSendingCode ? (
-                  <Loader2 className='h-4 w-4 animate-spin' />
-                ) : (
-                  t('Send code')
-                )}
+                {verificationButtonContent}
               </Button>
             </div>
           </>

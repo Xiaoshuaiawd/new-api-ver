@@ -241,7 +241,10 @@ func applyTopUpSettlementTx(tx *gorm.DB, topUp *TopUp, settlement TopUpSettlemen
 	for key, value := range extraUserUpdates {
 		updateFields[key] = value
 	}
-	return tx.Model(&User{}).Where("id = ?", topUp.UserId).Updates(updateFields).Error
+	if err := tx.Model(&User{}).Where("id = ?", topUp.UserId).Updates(updateFields).Error; err != nil {
+		return err
+	}
+	return applyReferralFirstTopUpRewardTx(tx, topUp, settlement)
 }
 
 func topUpLogContent(prefix string, settlement TopUpSettlement, payMoney float64) string {
@@ -397,6 +400,9 @@ func RefundTopUpWithReference(tradeNo string, expectedPaymentProvider string, re
 		}
 		if topUp.RefundAmount >= topUp.Money {
 			topUp.Status = common.TopUpStatusRefunded
+		}
+		if err := reverseReferralRewardsForTopUpTx(tx, topUp, actualRefundMoney); err != nil {
+			return err
 		}
 		if err := tx.Save(topUp).Error; err != nil {
 			return err

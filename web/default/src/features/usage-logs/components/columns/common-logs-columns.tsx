@@ -128,6 +128,14 @@ function buildTypeDetailSegments(
     return text ? [{ text }] : []
   }
 
+  // System logs (type=4) with a known op.action (e.g. referral reward events):
+  // prefer the structured op descriptor over the raw content string.
+  if (log.type === 4) {
+    const text = renderAuditContent(other, t)
+    if (text) return [{ text }]
+    return log.content ? [{ text: log.content }] : []
+  }
+
   if (log.type === 6) {
     return [{ text: t('Async task refund') }]
   }

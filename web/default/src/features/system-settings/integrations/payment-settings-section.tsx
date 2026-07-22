@@ -62,6 +62,7 @@ import { AmountDiscountVisualEditor } from './amount-discount-visual-editor'
 import { AmountOptionsVisualEditor } from './amount-options-visual-editor'
 import { CreemProductsVisualEditor } from './creem-products-visual-editor'
 import { PaymentMethodsVisualEditor } from './payment-methods-visual-editor'
+import { ReferralFirstTopUpRewardVisualEditor } from './referral-first-topup-reward-visual-editor'
 import { TopUpBonusVisualEditor } from './topup-bonus-visual-editor'
 import {
   formatJsonForEditor,
@@ -143,6 +144,19 @@ const paymentSchema = z.object({
     }
   }),
   TopUpBonus: z.string().superRefine((value, ctx) => {
+    const error = getJsonError(
+      value,
+      (parsed) =>
+        !!parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    )
+    if (error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: error,
+      })
+    }
+  }),
+  ReferralFirstTopUpReward: z.string().superRefine((value, ctx) => {
     const error = getJsonError(
       value,
       (parsed) =>
@@ -258,6 +272,8 @@ export function PaymentSettingsSection({
   const [amountDiscountVisualMode, setAmountDiscountVisualMode] =
     React.useState(true)
   const [topUpBonusVisualMode, setTopUpBonusVisualMode] = React.useState(true)
+  const [referralRewardVisualMode, setReferralRewardVisualMode] =
+    React.useState(true)
   const [creemProductsVisualMode, setCreemProductsVisualMode] =
     React.useState(true)
   const [showComplianceDialog, setShowComplianceDialog] = React.useState(false)
@@ -371,6 +387,9 @@ export function PaymentSettingsSection({
       AmountOptions: formatJsonForEditor(initialFormValues.AmountOptions),
       AmountDiscount: formatJsonForEditor(initialFormValues.AmountDiscount),
       TopUpBonus: formatJsonForEditor(initialFormValues.TopUpBonus),
+      ReferralFirstTopUpReward: formatJsonForEditor(
+        initialFormValues.ReferralFirstTopUpReward ?? ''
+      ),
       CreemProducts: formatJsonForEditor(initialFormValues.CreemProducts),
     },
   })
@@ -429,6 +448,9 @@ export function PaymentSettingsSection({
       AmountOptions: formatJsonForEditor(parsedDefaults.AmountOptions),
       AmountDiscount: formatJsonForEditor(parsedDefaults.AmountDiscount),
       TopUpBonus: formatJsonForEditor(parsedDefaults.TopUpBonus),
+      ReferralFirstTopUpReward: formatJsonForEditor(
+        parsedDefaults.ReferralFirstTopUpReward ?? ''
+      ),
       CreemProducts: formatJsonForEditor(parsedDefaults.CreemProducts),
     })
   }, [defaultsSignature, form])
@@ -445,6 +467,9 @@ export function PaymentSettingsSection({
       AmountOptions: values.AmountOptions.trim(),
       AmountDiscount: values.AmountDiscount.trim(),
       TopUpBonus: values.TopUpBonus.trim(),
+      ReferralFirstTopUpReward: String(
+        values.ReferralFirstTopUpReward ?? ''
+      ).trim(),
       StripeApiSecret: values.StripeApiSecret.trim(),
       StripeWebhookSecret: values.StripeWebhookSecret.trim(),
       StripePriceId: values.StripePriceId.trim(),
@@ -490,6 +515,9 @@ export function PaymentSettingsSection({
       AmountOptions: initialRef.current.AmountOptions.trim(),
       AmountDiscount: initialRef.current.AmountDiscount.trim(),
       TopUpBonus: initialRef.current.TopUpBonus.trim(),
+      ReferralFirstTopUpReward: String(
+        initialRef.current.ReferralFirstTopUpReward ?? ''
+      ).trim(),
       StripeApiSecret: initialRef.current.StripeApiSecret.trim(),
       StripeWebhookSecret: initialRef.current.StripeWebhookSecret.trim(),
       StripePriceId: initialRef.current.StripePriceId.trim(),
@@ -588,6 +616,16 @@ export function PaymentSettingsSection({
       updates.push({
         key: 'payment_setting.topup_bonus',
         value: sanitized.TopUpBonus,
+      })
+    }
+
+    if (
+      normalizeJsonForComparison(sanitized.ReferralFirstTopUpReward) !==
+      normalizeJsonForComparison(initial.ReferralFirstTopUpReward)
+    ) {
+      updates.push({
+        key: 'payment_setting.referral_first_topup_reward',
+        value: sanitized.ReferralFirstTopUpReward,
       })
     }
 
@@ -1197,6 +1235,66 @@ export function PaymentSettingsSection({
                         <FormDescription>
                           {t(
                             'Configure threshold-based recharge rewards. Bonus is credited after successful payment.'
+                          )}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='ReferralFirstTopUpReward'
+                    render={({ field }) => (
+                      <FormItem>
+                        <div className='mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
+                          <FormLabel>
+                            {t('Referral first top-up rewards')}
+                          </FormLabel>
+                          <Button
+                            type='button'
+                            variant='outline'
+                            size='sm'
+                            onClick={() =>
+                              setReferralRewardVisualMode(
+                                !referralRewardVisualMode
+                              )
+                            }
+                            className='w-full sm:w-auto'
+                          >
+                            {referralRewardVisualMode ? (
+                              <>
+                                <Code2 className='mr-2 h-3 w-3' />
+                                {t('JSON Editor')}
+                              </>
+                            ) : (
+                              <>
+                                <Eye className='mr-2 h-3 w-3' />
+                                {t('Visual Editor')}
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                        <FormControl>
+                          {referralRewardVisualMode ? (
+                            <ReferralFirstTopUpRewardVisualEditor
+                              value={field.value}
+                              onChange={field.onChange}
+                            />
+                          ) : (
+                            <Textarea
+                              rows={10}
+                              placeholder='{"enabled":false,"activity_id":"referral_first_topup_v1","activity_name":"邀请首充双向奖励","start_time":0,"end_time":0,"min_paid_money":30,"threshold_operator":"gte","first_topup_mode":"strict_first","invitee_reward_percent":10,"inviter_reward_percent":10,"inviter_settle_delay_days":7,"single_invitee_reward_max_quota":0,"single_inviter_reward_max_quota":0,"inviter_monthly_max_quota":0,"total_budget_quota":0,"stack_with_topup_bonus":true,"excluded_payment_providers":[],"excluded_user_groups":[],"auto_block_risky_rewards":true,"visible":true}'
+                              {...field}
+                              onChange={(event) =>
+                                field.onChange(event.target.value)
+                              }
+                            />
+                          )}
+                        </FormControl>
+                        <FormDescription>
+                          {t(
+                            'Configure the first paid wallet top-up reward for invitees and inviters.'
                           )}
                         </FormDescription>
                         <FormMessage />

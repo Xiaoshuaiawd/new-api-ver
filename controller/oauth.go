@@ -28,6 +28,9 @@ func GenerateOAuthCode(c *gin.Context) {
 	if affCode != "" {
 		session.Set("aff", affCode)
 	}
+	if deviceFingerprint := c.Query("device_fingerprint"); deviceFingerprint != "" {
+		session.Set("device_fingerprint", deviceFingerprint)
+	}
 	session.Set("oauth_state", state)
 	err := session.Save()
 	if err != nil {
@@ -276,10 +279,15 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 	user.Status = common.UserStatusEnabled
 
 	// Handle affiliate code
-	affCode := session.Get("aff")
+	affCodeValue := ""
+	if affCode := session.Get("aff"); affCode != nil {
+		if value, ok := affCode.(string); ok {
+			affCodeValue = value
+		}
+	}
 	inviterId := 0
-	if affCode != nil {
-		inviterId, _ = model.GetUserIdByAffCode(affCode.(string))
+	if affCodeValue != "" {
+		inviterId, _ = model.GetUserIdByAffCode(affCodeValue)
 	}
 
 	// Use transaction to ensure user creation and OAuth binding are atomic
@@ -339,6 +347,21 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		// Perform post-transaction tasks
 		user.FinalizeOAuthUserCreation(inviterId)
 	}
+
+	deviceFingerprint := ""
+	if raw := session.Get("device_fingerprint"); raw != nil {
+		if value, ok := raw.(string); ok {
+			deviceFingerprint = value
+		}
+	}
+	if inviterId > 0 {
+		if err := model.CreateReferralInviteIfNeeded(inviterId, user.Id, affCodeValue, model.ReferralInviteSourceOAuth, c.ClientIP(), c.Request.UserAgent(), deviceFingerprint); err != nil {
+			common.SysLog(fmt.Sprintf("failed to create oauth referral invite audit: %v", err))
+		}
+	}
+	session.Delete("aff")
+	session.Delete("device_fingerprint")
+	_ = session.Save()
 
 	return user, nil
 }

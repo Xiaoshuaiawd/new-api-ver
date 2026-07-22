@@ -18,11 +18,15 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { SectionPageLayout } from '@/components/layout'
 import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { getSelf } from '@/lib/api'
+import { formatQuota } from '@/lib/format'
+
+import { getSelfReferralSummary } from '../referrals/api'
 
 import { AffiliateRewardsCard } from './components/affiliate-rewards-card'
 import { AlipayF2FDialog } from './components/dialogs/alipay-f2f-dialog'
@@ -82,6 +86,8 @@ export function Wallet(props: WalletProps) {
   const userFetchStartedRef = useRef(false)
   const initialHistoryHandledRef = useRef(false)
   const initialTopupHandledRef = useRef(false)
+  // Track settled invitee reward quota before payment to detect new rewards
+  const prevInviteeRewardRef = useRef<number | null>(null)
 
   const { status } = useStatus()
   const { currency } = useSystemConfig()
@@ -210,6 +216,14 @@ export function Wallet(props: WalletProps) {
   const handlePaymentConfirm = async () => {
     if (!selectedPaymentMethod) return
 
+    // Snapshot current invitee reward quota before payment to detect new rewards
+    try {
+      const pre = await getSelfReferralSummary()
+      prevInviteeRewardRef.current = pre.data?.settled_reward_quota ?? null
+    } catch {
+      prevInviteeRewardRef.current = null
+    }
+
     const isPancake = isWaffoPancakePayment(selectedPaymentMethod.type)
     const isAlipayF2F = isAlipayF2FPayment(selectedPaymentMethod.type)
     const success = isAlipayF2F
@@ -221,6 +235,21 @@ export function Wallet(props: WalletProps) {
     if (success) {
       setConfirmDialogOpen(false)
       await fetchUser()
+      // Check for new referral invitee reward
+      try {
+        const post = await getSelfReferralSummary()
+        const prev = prevInviteeRewardRef.current
+        const next = post.data?.settled_reward_quota ?? 0
+        if (prev !== null && next > prev) {
+          toast.success(
+            t('Referral first top-up reward credited: +{{quota}}', {
+              quota: formatQuota(next - prev),
+            })
+          )
+        }
+      } catch {
+        // Non-critical, silently ignore
+      }
     }
   }
 

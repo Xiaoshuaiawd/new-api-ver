@@ -112,6 +112,9 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.POST("/waffo-pancake/amount", controller.RequestWaffoPancakeAmount)
 				selfRoute.POST("/waffo-pancake/pay", middleware.CriticalRateLimit(), controller.RequestWaffoPancakePay)
 				selfRoute.POST("/aff_transfer", controller.TransferAffQuota)
+				selfRoute.GET("/referral/summary", controller.GetReferralSummary)
+				selfRoute.GET("/referral/rewards", controller.GetReferralSelfRewards)
+				selfRoute.GET("/referral/activity", controller.GetReferralActivity)
 				selfRoute.PUT("/setting", controller.UpdateUserSetting)
 
 				// 2FA routes
@@ -259,6 +262,23 @@ func SetApiRouter(router *gin.Engine) {
 			{
 				tokenUsageRoute.GET("/", controller.GetTokenUsage)
 			}
+		}
+
+		referralAdminRoute := apiRouter.Group("/admin/referral")
+		referralAdminRoute.Use(middleware.AdminAuth())
+		{
+			referralAdminRoute.GET("/rewards", controller.AdminGetReferralRewards)
+			referralAdminRoute.GET("/risk-rewards", controller.AdminGetReferralRiskRewards)
+			referralAdminRoute.GET("/stats", controller.AdminGetReferralStats)
+			referralAdminRoute.GET("/stats/summary", controller.AdminGetReferralStatsSummary)
+			referralAdminRoute.GET("/stats/funnel", controller.AdminGetReferralStatsFunnel)
+			referralAdminRoute.GET("/stats/trend", controller.AdminGetReferralStatsTrend)
+			referralAdminRoute.GET("/stats/top-inviters", controller.AdminGetReferralTopInviters)
+			referralAdminRoute.POST("/rewards/:id/approve", controller.AdminApproveReferralReward)
+			referralAdminRoute.POST("/rewards/:id/block", controller.AdminBlockReferralReward)
+			referralAdminRoute.POST("/rewards/:id/cancel", controller.AdminCancelReferralReward)
+			referralAdminRoute.POST("/rewards/:id/reverse", controller.AdminReverseReferralReward)
+			referralAdminRoute.POST("/inviters/:id/block-pending", controller.AdminBlockInviterPendingReferralRewards)
 		}
 
 		redemptionRoute := apiRouter.Group("/redemption")

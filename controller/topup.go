@@ -135,17 +135,19 @@ func GetTopUpInfo(c *gin.Context) {
 			}
 			return nil
 		}(),
-		"creem_products":          setting.CreemProducts,
-		"pay_methods":             payMethods,
-		"min_topup":               operation_setting.MinTopUp,
-		"alipay_f2f_min_topup":    setting.AlipayF2FMinTopUp,
-		"stripe_min_topup":        setting.StripeMinTopUp,
-		"waffo_min_topup":         setting.WaffoMinTopUp,
-		"waffo_pancake_min_topup": setting.WaffoPancakeMinTopUp,
-		"amount_options":          operation_setting.GetPaymentSetting().AmountOptions,
-		"discount":                operation_setting.GetPaymentSetting().AmountDiscount,
-		"topup_bonus":             operation_setting.GetPaymentSetting().TopUpBonus,
-		"topup_link":              common.TopUpLink,
+		"creem_products":                    setting.CreemProducts,
+		"pay_methods":                       payMethods,
+		"min_topup":                         operation_setting.MinTopUp,
+		"alipay_f2f_min_topup":              setting.AlipayF2FMinTopUp,
+		"stripe_min_topup":                  setting.StripeMinTopUp,
+		"waffo_min_topup":                   setting.WaffoMinTopUp,
+		"waffo_pancake_min_topup":           setting.WaffoPancakeMinTopUp,
+		"amount_options":                    operation_setting.GetPaymentSetting().AmountOptions,
+		"discount":                          operation_setting.GetPaymentSetting().AmountDiscount,
+		"topup_bonus":                       operation_setting.GetPaymentSetting().TopUpBonus,
+		"referral_first_topup_reward":       operation_setting.GetPaymentSetting().ReferralFirstTopUpReward.Normalized(),
+		"referral_first_topup_reward_state": model.GetReferralFirstTopUpState(c.GetInt("id")),
+		"topup_link":                        common.TopUpLink,
 	}
 	common.ApiSuccess(c, data)
 }

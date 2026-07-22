@@ -43,6 +43,8 @@ func TestMain(m *testing.M) {
 		&QuotaData{},
 		&Ability{},
 		&TopUp{},
+		&ReferralInvite{},
+		&ReferralReward{},
 		&Redemption{},
 		&SubscriptionPlan{},
 		&SubscriptionOrder{},
@@ -70,6 +72,8 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM quota_data")
 		DB.Exec("DELETE FROM abilities")
 		DB.Exec("DELETE FROM top_ups")
+		DB.Exec("DELETE FROM referral_invites")
+		DB.Exec("DELETE FROM referral_rewards")
 		DB.Exec("DELETE FROM redemptions")
 		DB.Exec("DELETE FROM subscription_orders")
 		DB.Exec("DELETE FROM subscription_plans")

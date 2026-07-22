@@ -281,6 +281,8 @@ func migrateDB() error {
 		&Log{},
 		&Midjourney{},
 		&TopUp{},
+		&ReferralInvite{},
+		&ReferralReward{},
 		&QuotaData{},
 		&Task{},
 		&Model{},
@@ -314,6 +316,9 @@ func migrateDB() error {
 			return err
 		}
 	}
+	if err := BackfillReferralInvitesFromUsers(); err != nil {
+		return err
+	}
 	return enforceRecordIpLoggingForAllUsers()
 }
 
@@ -335,6 +340,8 @@ func migrateDBFast() error {
 		{&Log{}, "Log"},
 		{&Midjourney{}, "Midjourney"},
 		{&TopUp{}, "TopUp"},
+		{&ReferralInvite{}, "ReferralInvite"},
+		{&ReferralReward{}, "ReferralReward"},
 		{&QuotaData{}, "QuotaData"},
 		{&Task{}, "Task"},
 		{&Model{}, "Model"},
@@ -387,6 +394,9 @@ func migrateDBFast() error {
 		}
 	}
 	if err := enforceRecordIpLoggingForAllUsers(); err != nil {
+		return err
+	}
+	if err := BackfillReferralInvitesFromUsers(); err != nil {
 		return err
 	}
 	common.SysLog("database migrated")

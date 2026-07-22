@@ -264,6 +264,11 @@ func Register(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserRegisterFailed)
 		return
 	}
+	if inviterId > 0 {
+		if err := model.CreateReferralInviteIfNeeded(inviterId, insertedUser.Id, affCode, model.ReferralInviteSourceRegister, c.ClientIP(), c.Request.UserAgent(), user.DeviceFingerprint); err != nil {
+			common.SysLog(fmt.Sprintf("failed to create referral invite audit: %v", err))
+		}
+	}
 	// 生成默认令牌
 	if constant.GenerateDefaultToken {
 		key, err := common.GenerateKey()
@@ -578,6 +583,7 @@ func generateDefaultSidebarConfig(userRole int) string {
 			"enabled":    true,
 			"channel":    true,
 			"models":     true,
+			"referral":   true,
 			"redemption": true,
 			"user":       true,
 			"setting":    false, // 管理员不能访问系统设置
@@ -588,6 +594,7 @@ func generateDefaultSidebarConfig(userRole int) string {
 			"enabled":    true,
 			"channel":    true,
 			"models":     true,
+			"referral":   true,
 			"redemption": true,
 			"user":       true,
 			"setting":    true,

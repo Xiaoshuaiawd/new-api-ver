@@ -338,6 +338,7 @@ export type BillingSettings = {
   'payment_setting.amount_options': string
   'payment_setting.amount_discount': string
   'payment_setting.topup_bonus': string
+  'payment_setting.referral_first_topup_reward': string
   'payment_setting.compliance_confirmed': boolean
   'payment_setting.compliance_terms_version': string
   'payment_setting.compliance_confirmed_at': number

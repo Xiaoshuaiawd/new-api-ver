@@ -23,7 +23,7 @@ import type { User } from '@/features/users/types'
 import { getSelf } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { saveUserId } from '../lib/storage'
+import { clearAffiliateCode, saveUserId } from '../lib/storage'
 
 function getSavedLanguage(user: User): string | undefined {
   const userData = user as Record<string, unknown>
@@ -86,6 +86,8 @@ export function useAuthRedirect() {
       // eslint-disable-next-line no-console
       console.error('Failed to fetch user data:', error)
     }
+
+    clearAffiliateCode()
 
     // Navigate to target page
     const targetPath = redirectTo || '/dashboard'
