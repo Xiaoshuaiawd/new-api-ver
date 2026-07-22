@@ -23,8 +23,8 @@ import {
   FileText,
   FlaskConical,
   Gauge,
-  HeartPulse,
   Handshake,
+  HeartPulse,
   Key,
   LayoutDashboard,
   ListTodo,
@@ -115,6 +115,11 @@ export function buildSidebarData(t: Translate): SidebarData {
             title: t('Wallet'),
             url: '/wallet',
             icon: Wallet,
+          },
+          {
+            title: t('Referral Program'),
+            url: '/referral',
+            icon: Handshake,
           },
           {
             title: t('Profile'),

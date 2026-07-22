@@ -293,7 +293,7 @@ function SummaryCards({ summary }: { summary: ReferralStatsSummary }) {
             <CardDescription className='flex items-center gap-1'>
               {t('Rewards sent')}
               <Tooltip>
-                <TooltipTrigger asChild>
+                <TooltipTrigger>
                   <Info className='size-3 cursor-pointer' />
                 </TooltipTrigger>
                 <TooltipContent className='max-w-56 text-xs'>
@@ -452,7 +452,7 @@ function FilterBar({ filter, onChange }: FilterBarProps) {
             <Label className='text-xs'>{t('Reward status')}</Label>
             <Select
               value={filter.status || 'all'}
-              onValueChange={(v) => onChange({ status: v === 'all' ? '' : v })}
+              onValueChange={(v) => onChange({ status: v === 'all' ? undefined : (v || undefined) })}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -471,7 +471,7 @@ function FilterBar({ filter, onChange }: FilterBarProps) {
             <Label className='text-xs'>{t('Risk status')}</Label>
             <Select
               value={filter.riskStatus || 'all'}
-              onValueChange={(v) => onChange({ riskStatus: v === 'all' ? '' : v })}
+              onValueChange={(v) => onChange({ riskStatus: v === 'all' ? undefined : (v || undefined) })}
             >
               <SelectTrigger>
                 <SelectValue />

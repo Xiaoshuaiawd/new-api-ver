@@ -19,7 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 import { Handshake, Info } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useQuery } from '@tanstack/react-query'
-import { toast } from 'sonner'
 
 import { CopyButton } from '@/components/copy-button'
 import { Button } from '@/components/ui/button'
