@@ -18,12 +18,15 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, forceFormat bool, thinkToContent bool) error {
 	if data == "" {
 		return nil
 	}
+	data = string(restoreOpenAIModelInBody(common.StringToByteSlice(data), info))
 
 	if !forceFormat && !thinkToContent {
 		return helper.StringData(c, data)
@@ -293,7 +296,23 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 		responseBody = geminiRespStr
 	}
 
+	if info.RelayFormat == types.RelayFormatOpenAI {
+		responseBody = restoreOpenAIModelInBody(responseBody, info)
+	}
+
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
 	return &simpleResponse.Usage, nil
+}
+
+func restoreOpenAIModelInBody(responseBody []byte, info *relaycommon.RelayInfo) []byte {
+	modelName := responseModelNameForClient(info)
+	if modelName == "" || !gjson.GetBytes(responseBody, "model").Exists() {
+		return responseBody
+	}
+	mappedBody, err := sjson.SetBytes(responseBody, "model", modelName)
+	if err != nil {
+		return responseBody
+	}
+	return mappedBody
 }
