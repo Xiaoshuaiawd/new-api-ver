@@ -98,7 +98,10 @@ export function isViolationFeeLog(other: LogOtherData | null): boolean {
 export function parseLogOther(other: string): LogOtherData | null {
   if (!other) return null
   try {
-    return JSON.parse(other) as LogOtherData
+    const parsed = JSON.parse(other) as LogOtherData
+    delete parsed.is_model_mapped
+    delete parsed.upstream_model_name
+    return parsed
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to parse log other field:', error)

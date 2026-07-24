@@ -15,6 +15,8 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
@@ -39,6 +41,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		c.Set("image_generation_call_quality", responsesResponse.GetQuality())
 		c.Set("image_generation_call_size", responsesResponse.GetSize())
 	}
+	responseBody = restoreResponsesModelInBody(responseBody, info)
 
 	// 写入新的 response body
 	service.IOCopyBytesGracefully(c, resp, responseBody)
@@ -89,7 +92,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Error(err)
 			return
 		}
-		sendResponsesStreamData(c, streamResponse, data)
+		sendResponsesStreamData(c, streamResponse, restoreResponsesModelInStreamData(data, info))
 		switch streamResponse.Type {
 		case "response.completed":
 			if streamResponse.Response != nil {
@@ -149,4 +152,35 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 
 	return usage, nil
+}
+
+func responseModelNameForClient(info *relaycommon.RelayInfo) string {
+	if info == nil || info.ChannelMeta == nil || !info.IsModelMapped || strings.TrimSpace(info.OriginModelName) == "" {
+		return ""
+	}
+	return info.OriginModelName
+}
+
+func restoreResponsesModelInBody(responseBody []byte, info *relaycommon.RelayInfo) []byte {
+	modelName := responseModelNameForClient(info)
+	if modelName == "" || !gjson.GetBytes(responseBody, "model").Exists() {
+		return responseBody
+	}
+	mappedBody, err := sjson.SetBytes(responseBody, "model", modelName)
+	if err != nil {
+		return responseBody
+	}
+	return mappedBody
+}
+
+func restoreResponsesModelInStreamData(data string, info *relaycommon.RelayInfo) string {
+	modelName := responseModelNameForClient(info)
+	if modelName == "" || !gjson.Get(data, "response.model").Exists() {
+		return data
+	}
+	mappedData, err := sjson.Set(data, "response.model", modelName)
+	if err != nil {
+		return data
+	}
+	return mappedData
 }
