@@ -15,6 +15,8 @@ import (
 	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
@@ -34,9 +36,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
 
-	if mappedResponseBody, ok := restoreResponsesModelInBody(responseBody, info); ok {
-		responseBody = mappedResponseBody
-	}
+	responseBody = restoreResponsesModelInBody(responseBody, info)
 
 	// 写入新的 response body
 	service.IOCopyBytesGracefully(c, resp, responseBody)
@@ -188,46 +188,26 @@ func responseModelNameForClient(info *relaycommon.RelayInfo) string {
 	return info.OriginModelName
 }
 
-func restoreResponsesModelInBody(responseBody []byte, info *relaycommon.RelayInfo) ([]byte, bool) {
+func restoreResponsesModelInBody(responseBody []byte, info *relaycommon.RelayInfo) []byte {
 	modelName := responseModelNameForClient(info)
-	if modelName == "" {
-		return responseBody, false
+	if modelName == "" || !gjson.GetBytes(responseBody, "model").Exists() {
+		return responseBody
 	}
-	var payload map[string]any
-	if err := common.Unmarshal(responseBody, &payload); err != nil {
-		return responseBody, false
-	}
-	if _, ok := payload["model"]; !ok {
-		return responseBody, false
-	}
-	payload["model"] = modelName
-	mappedBody, err := common.Marshal(payload)
+	mappedBody, err := sjson.SetBytes(responseBody, "model", modelName)
 	if err != nil {
-		return responseBody, false
+		return responseBody
 	}
-	return mappedBody, true
+	return mappedBody
 }
 
 func restoreResponsesModelInStreamData(data string, info *relaycommon.RelayInfo) string {
 	modelName := responseModelNameForClient(info)
-	if modelName == "" {
+	if modelName == "" || !gjson.Get(data, "response.model").Exists() {
 		return data
 	}
-	var payload map[string]any
-	if err := common.UnmarshalJsonStr(data, &payload); err != nil {
-		return data
-	}
-	response, ok := payload["response"].(map[string]any)
-	if !ok {
-		return data
-	}
-	if _, ok := response["model"]; !ok {
-		return data
-	}
-	response["model"] = modelName
-	mappedData, err := common.Marshal(payload)
+	mappedData, err := sjson.Set(data, "response.model", modelName)
 	if err != nil {
 		return data
 	}
-	return string(mappedData)
+	return mappedData
 }
