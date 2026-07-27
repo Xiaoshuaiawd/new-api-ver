@@ -37,6 +37,20 @@ func TestChannelStatusRoutesRegisterWithoutConflict(t *testing.T) {
 	})
 }
 
+func TestSetApiRouterRegistersChannelStatusRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	SetApiRouter(engine)
+
+	routes := make(map[string]struct{}, len(engine.Routes()))
+	for _, route := range engine.Routes() {
+		routes[route.Method+" "+route.Path] = struct{}{}
+	}
+
+	assert.Contains(t, routes, http.MethodPost+" /api/channel/:id/status")
+	assert.Contains(t, routes, http.MethodPost+" /api/channel/status/batch")
+}
+
 func assertChannelRoutePermission(t *testing.T, method string, path string, permission authz.Permission, handler any) {
 	t.Helper()
 	for _, route := range channelPermissionRoutes {
