@@ -19,9 +19,6 @@ func getHeaderNavAccess(module string) headerNavAccess {
 		Enabled:     true,
 		RequireAuth: false,
 	}
-	if module == "groupMonitor" {
-		fallback.RequireAuth = true
-	}
 
 	common.OptionMapRWMutex.RLock()
 	raw := common.OptionMap["HeaderNavModules"]
@@ -36,11 +33,7 @@ func getHeaderNavAccess(module string) headerNavAccess {
 		return fallback
 	}
 
-	access := parseHeaderNavAccess(parsed[module], fallback)
-	if module == "groupMonitor" {
-		access.RequireAuth = true
-	}
-	return access
+	return parseHeaderNavAccess(parsed[module], fallback)
 }
 
 func parseHeaderNavAccess(raw any, fallback headerNavAccess) headerNavAccess {

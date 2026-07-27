@@ -286,23 +286,35 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
 	otherStr := common.MapToJsonStr(other)
+	// 判断是否需要记录 IP
+	needRecordIp := false
+	if settingMap, err := GetUserSetting(userId, false); err == nil {
+		if settingMap.RecordIpLog {
+			needRecordIp = true
+		}
+	}
 	log := &Log{
-		UserId:            userId,
-		Username:          username,
-		CreatedAt:         common.GetTimestamp(),
-		Type:              LogTypeError,
-		Content:           content,
-		PromptTokens:      0,
-		CompletionTokens:  0,
-		TokenName:         tokenName,
-		ModelName:         modelName,
-		Quota:             0,
-		ChannelId:         channelId,
-		TokenId:           tokenId,
-		UseTime:           useTimeSeconds,
-		IsStream:          isStream,
-		Group:             group,
-		Ip:                c.ClientIP(),
+		UserId:           userId,
+		Username:         username,
+		CreatedAt:        common.GetTimestamp(),
+		Type:             LogTypeError,
+		Content:          content,
+		PromptTokens:     0,
+		CompletionTokens: 0,
+		TokenName:        tokenName,
+		ModelName:        modelName,
+		Quota:            0,
+		ChannelId:        channelId,
+		TokenId:          tokenId,
+		UseTime:          useTimeSeconds,
+		IsStream:         isStream,
+		Group:            group,
+		Ip: func() string {
+			if needRecordIp {
+				return c.ClientIP()
+			}
+			return ""
+		}(),
 		RequestId:         requestId,
 		UpstreamRequestId: upstreamRequestId,
 		Other:             otherStr,
@@ -338,23 +350,35 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
 	createdAt := common.GetTimestamp()
 	otherStr := common.MapToJsonStr(params.Other)
+	// 判断是否需要记录 IP
+	needRecordIp := false
+	if settingMap, err := GetUserSetting(userId, false); err == nil {
+		if settingMap.RecordIpLog {
+			needRecordIp = true
+		}
+	}
 	log := &Log{
-		UserId:            userId,
-		Username:          username,
-		CreatedAt:         createdAt,
-		Type:              LogTypeConsume,
-		Content:           params.Content,
-		PromptTokens:      params.PromptTokens,
-		CompletionTokens:  params.CompletionTokens,
-		TokenName:         params.TokenName,
-		ModelName:         params.ModelName,
-		Quota:             params.Quota,
-		ChannelId:         params.ChannelId,
-		TokenId:           params.TokenId,
-		UseTime:           params.UseTimeSeconds,
-		IsStream:          params.IsStream,
-		Group:             params.Group,
-		Ip:                c.ClientIP(),
+		UserId:           userId,
+		Username:         username,
+		CreatedAt:        createdAt,
+		Type:             LogTypeConsume,
+		Content:          params.Content,
+		PromptTokens:     params.PromptTokens,
+		CompletionTokens: params.CompletionTokens,
+		TokenName:        params.TokenName,
+		ModelName:        params.ModelName,
+		Quota:            params.Quota,
+		ChannelId:        params.ChannelId,
+		TokenId:          params.TokenId,
+		UseTime:          params.UseTimeSeconds,
+		IsStream:         params.IsStream,
+		Group:            params.Group,
+		Ip: func() string {
+			if needRecordIp {
+				return c.ClientIP()
+			}
+			return ""
+		}(),
 		RequestId:         requestId,
 		UpstreamRequestId: upstreamRequestId,
 		Other:             otherStr,
@@ -709,140 +733,6 @@ func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	}
 	tx.Where("type = ?", LogTypeConsume).Scan(&token)
 	return token
-}
-
-var logBodyDetailKeys = []string{
-	"request_body",
-	"request_body_truncated",
-	"request_body_size",
-	"response_body",
-	"response_body_truncated",
-	"response_body_size",
-}
-
-func logBodyDetailCandidateQuery(tx *gorm.DB) *gorm.DB {
-	var queryParts []string
-	var args []interface{}
-	for _, key := range logBodyDetailKeys {
-		queryParts = append(queryParts, "other LIKE ?")
-		args = append(args, "%\""+key+"\"%")
-	}
-	return tx.Where(strings.Join(queryParts, " OR "), args...)
-}
-
-func removeLogBodyDetails(other string) (string, bool) {
-	if other == "" {
-		return "", false
-	}
-	otherMap, err := common.StrToMap(other)
-	if err != nil {
-		return "", false
-	}
-	detailRaw, ok := otherMap["log_detail"]
-	if !ok {
-		return "", false
-	}
-	detail, ok := detailRaw.(map[string]interface{})
-	if !ok {
-		return "", false
-	}
-
-	changed := false
-	for _, key := range logBodyDetailKeys {
-		if _, exists := detail[key]; exists {
-			delete(detail, key)
-			changed = true
-		}
-	}
-	if !changed {
-		return "", false
-	}
-	if len(detail) == 0 {
-		delete(otherMap, "log_detail")
-	} else {
-		otherMap["log_detail"] = detail
-	}
-	return common.MapToJsonStr(otherMap), true
-}
-
-func updateLogBodyDetailsByRow(ctx context.Context, log Log, other string) error {
-	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
-		if log.RequestId != "" {
-			return LOG_DB.WithContext(ctx).Exec(
-				"ALTER TABLE logs UPDATE other = ? WHERE request_id = ? SETTINGS mutations_sync = 1",
-				other,
-				log.RequestId,
-			).Error
-		}
-		return LOG_DB.WithContext(ctx).Exec(
-			"ALTER TABLE logs UPDATE other = ? WHERE created_at = ? AND other = ? SETTINGS mutations_sync = 1",
-			other,
-			log.CreatedAt,
-			log.Other,
-		).Error
-	}
-
-	return LOG_DB.WithContext(ctx).Model(&Log{}).Where("id = ?", log.Id).Update("other", other).Error
-}
-
-func ClearLogBodyDetails(ctx context.Context, limit int) (int64, error) {
-	if limit <= 0 {
-		limit = 500
-	}
-
-	var total int64
-	var lastID int
-	var lastCreatedAt int64
-	var lastRequestId string
-	hasClickHouseCursor := false
-	for {
-		if err := ctx.Err(); err != nil {
-			return total, err
-		}
-
-		var logs []Log
-		tx := LOG_DB.WithContext(ctx).Model(&Log{}).Select("id", "created_at", "request_id", "other")
-		tx = logBodyDetailCandidateQuery(tx)
-		if !common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
-			tx = tx.Where("id > ?", lastID).Order("id asc")
-		} else {
-			if hasClickHouseCursor {
-				tx = tx.Where("created_at > ? OR (created_at = ? AND request_id > ?)", lastCreatedAt, lastCreatedAt, lastRequestId)
-			}
-			tx = tx.Order("created_at asc, request_id asc")
-		}
-		if err := tx.Limit(limit).Find(&logs).Error; err != nil {
-			return total, err
-		}
-		if len(logs) == 0 {
-			break
-		}
-
-		for _, log := range logs {
-			if !common.UsingLogDatabase(common.DatabaseTypeClickHouse) && log.Id > lastID {
-				lastID = log.Id
-			}
-			if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
-				lastCreatedAt = log.CreatedAt
-				lastRequestId = log.RequestId
-				hasClickHouseCursor = true
-			}
-			newOther, changed := removeLogBodyDetails(log.Other)
-			if !changed {
-				continue
-			}
-			if err := updateLogBodyDetailsByRow(ctx, log, newOther); err != nil {
-				return total, err
-			}
-			total++
-		}
-
-		if len(logs) < limit {
-			break
-		}
-	}
-
-	return total, nil
 }
 
 func CountOldLog(ctx context.Context, targetTimestamp int64) (int64, error) {

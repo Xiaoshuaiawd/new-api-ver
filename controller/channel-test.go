@@ -41,26 +41,6 @@ type testResult struct {
 	newAPIError *types.NewAPIError
 }
 
-func init() {
-	service.SetChannelHealthProbeFunc(func(ctx context.Context, channel *model.Channel, modelName string) error {
-		if channel == nil {
-			return errors.New("channel is nil")
-		}
-		testUserID, err := resolveChannelTestUserID(nil)
-		if err != nil {
-			return err
-		}
-		result := testChannel(ctx, channel, testUserID, modelName, "", shouldUseStreamForAutomaticChannelTest(channel))
-		if result.localErr != nil {
-			return result.localErr
-		}
-		if result.newAPIError != nil {
-			return result.newAPIError
-		}
-		return nil
-	})
-}
-
 func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointType string) string {
 	normalized := strings.TrimSpace(endpointType)
 	if normalized != "" {
@@ -460,7 +440,7 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	if resp != nil {
 		httpResp = resp.(*http.Response)
 		if httpResp.StatusCode != http.StatusOK {
-			err := service.RelayErrorHandler(c, httpResp, true)
+			err := service.RelayErrorHandler(c.Request.Context(), httpResp, true)
 			common.SysError(fmt.Sprintf(
 				"channel test bad response: channel_id=%d name=%s type=%d model=%s endpoint_type=%s status=%d err=%v",
 				channel.Id,

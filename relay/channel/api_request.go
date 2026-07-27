@@ -310,7 +310,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, fmt.Errorf("get request url failed: %w", err)
 	}
 	logger.LogDebug(c, "fullRequestURL: %s", common.SanitizeURLForLog(fullRequestURL))
-	req, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, fullRequestURL, requestBody)
+	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
@@ -340,7 +340,7 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 		return nil, fmt.Errorf("get request url failed: %w", err)
 	}
 	logger.LogDebug(c, "fullRequestURL: %s", common.SanitizeURLForLog(fullRequestURL))
-	req, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, fullRequestURL, requestBody)
+	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
@@ -386,7 +386,7 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		targetHeader.Set(key, value)
 	}
 	targetHeader.Set("Content-Type", c.Request.Header.Get("Content-Type"))
-	targetConn, _, err := websocket.DefaultDialer.DialContext(c.Request.Context(), fullRequestURL, targetHeader)
+	targetConn, _, err := websocket.DefaultDialer.Dial(fullRequestURL, targetHeader)
 	if err != nil {
 		return nil, fmt.Errorf("dial failed to %s: %w", common.SanitizeURLForLog(fullRequestURL), err)
 	}
@@ -486,8 +486,24 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		client = service.GetHttpClient()
 	}
 
+	var stopPinger context.CancelFunc
+	var pingerDone <-chan struct{}
 	if info.IsStream {
 		helper.SetEventStreamHeaders(c)
+		// 处理流式请求的 ping 保活
+		generalSettings := operation_setting.GetGeneralSetting()
+		if generalSettings.PingIntervalEnabled && !info.DisablePing {
+			pingInterval := time.Duration(generalSettings.PingIntervalSeconds) * time.Second
+			stopPinger, pingerDone = startPingKeepAlive(c, pingInterval)
+			// 使用defer确保在任何情况下都能停止ping goroutine
+			defer func() {
+				if stopPinger != nil {
+					stopPinger()
+					<-pingerDone
+					logger.LogDebug(c, "SSE ping goroutine stopped by defer")
+				}
+			}()
+		}
 	}
 
 	startedAt := time.Now()
@@ -499,23 +515,6 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	}
 	if resp == nil {
 		return nil, errors.New("resp is nil")
-	}
-	info.MarkUpstreamHeadersReceived()
-	if info.IsStream && resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
-		generalSettings := operation_setting.GetGeneralSetting()
-		if !info.DisablePing {
-			if err := helper.PingData(c); err != nil {
-				logger.LogDebug(c, "initial SSE ack failed: %s", err.Error())
-			}
-		}
-		if generalSettings.PingIntervalEnabled && !info.DisablePing {
-			pingInterval := time.Duration(generalSettings.PingIntervalSeconds) * time.Second
-			stopPinger, pingerDone := startPingKeepAlive(c, pingInterval)
-			info.SetAttemptKeepAlive(stopPinger, pingerDone)
-		}
-	}
-	if !info.IsStream {
-		info.SetFirstResponseTime()
 	}
 
 	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {

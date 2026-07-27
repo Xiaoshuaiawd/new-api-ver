@@ -15,7 +15,6 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
-	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -103,107 +102,33 @@ func Distribute() func(c *gin.Context) {
 				}
 
 				if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
-					service.RecordChannelSelectionTrace(c, service.ChannelSelectionTraceEvent{
-						Stage:     service.ChannelSelectionTraceStageAffinity,
-						Action:    service.ChannelSelectionTraceActionHit,
-						Group:     usingGroup,
-						Model:     modelRequest.Model,
-						ChannelID: preferredChannelID,
-						Reason:    "affinity cache hit",
-					})
 					affinityUsable := false
 					preferred, err := model.CacheGetChannel(preferredChannelID)
 					if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled &&
 						channelSupportsRequestPath(preferred, c.Request.URL.Path, modelRequest.Model) {
-						if !service.IsChannelAvailable(preferred.Id) {
-							service.RecordChannelSelectionTrace(c, service.ChannelSelectionTraceEvent{
-								Stage:       service.ChannelSelectionTraceStageAffinity,
-								Action:      service.ChannelSelectionTraceActionClear,
-								Group:       usingGroup,
-								Model:       modelRequest.Model,
-								ChannelID:   preferred.Id,
-								Priority:    preferred.GetPriority(),
-								HealthState: string(service.GetChannelHealthSnapshotForDisplay(preferred.Id).State),
-								Reason:      "affinity channel runtime unavailable",
-							})
-							service.ClearCurrentChannelAffinityCache(c)
-						} else {
-							if usingGroup == "auto" {
-								userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-								autoGroups := service.GetUserAutoGroup(userGroup)
-								for _, g := range autoGroups {
-									if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
-										if service.IsChannelAffinityPriorityStale(g, modelRequest.Model, preferred.Id) {
-											service.RecordChannelSelectionTrace(c, service.ChannelSelectionTraceEvent{
-												Stage:     service.ChannelSelectionTraceStageAffinity,
-												Action:    service.ChannelSelectionTraceActionClear,
-												Group:     g,
-												Model:     modelRequest.Model,
-												ChannelID: preferred.Id,
-												Priority:  preferred.GetPriority(),
-												Reason:    "higher priority channel recovered",
-											})
-											service.ClearCurrentChannelAffinityCache(c)
-											break
-										}
-										selectGroup = g
-										common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
-										channel = preferred
-										affinityUsable = true
-										service.MarkChannelAffinityUsed(c, g, preferred.Id)
-										service.RecordChannelSelectionTrace(c, service.ChannelSelectionTraceEvent{
-											Stage:     service.ChannelSelectionTraceStageFinal,
-											Action:    service.ChannelSelectionTraceActionSelect,
-											Group:     g,
-											Model:     modelRequest.Model,
-											ChannelID: preferred.Id,
-											Priority:  preferred.GetPriority(),
-											Reason:    "selected by affinity",
-										})
-										break
-									}
-								}
-							} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {
-								if service.IsChannelAffinityPriorityStale(usingGroup, modelRequest.Model, preferred.Id) {
-									service.RecordChannelSelectionTrace(c, service.ChannelSelectionTraceEvent{
-										Stage:     service.ChannelSelectionTraceStageAffinity,
-										Action:    service.ChannelSelectionTraceActionClear,
-										Group:     usingGroup,
-										Model:     modelRequest.Model,
-										ChannelID: preferred.Id,
-										Priority:  preferred.GetPriority(),
-										Reason:    "higher priority channel recovered",
-									})
-									service.ClearCurrentChannelAffinityCache(c)
-								} else {
+						if usingGroup == "auto" {
+							userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+							autoGroups := service.GetUserAutoGroup(userGroup)
+							for _, g := range autoGroups {
+								if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
+									selectGroup = g
+									common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
 									channel = preferred
-									selectGroup = usingGroup
 									affinityUsable = true
-									service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
-									service.RecordChannelSelectionTrace(c, service.ChannelSelectionTraceEvent{
-										Stage:     service.ChannelSelectionTraceStageFinal,
-										Action:    service.ChannelSelectionTraceActionSelect,
-										Group:     usingGroup,
-										Model:     modelRequest.Model,
-										ChannelID: preferred.Id,
-										Priority:  preferred.GetPriority(),
-										Reason:    "selected by affinity",
-									})
+									service.MarkChannelAffinityUsed(c, g, preferred.Id)
+									break
 								}
 							}
+						} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {
+							channel = preferred
+							selectGroup = usingGroup
+							affinityUsable = true
+							service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
 						}
 					}
 					if !affinityUsable && !service.ShouldKeepChannelAffinityOnChannelDisabled() {
 						service.ClearCurrentChannelAffinityCache(c)
 					}
-				} else {
-					service.RecordChannelSelectionTrace(c, service.ChannelSelectionTraceEvent{
-						Stage:  service.ChannelSelectionTraceStageAffinity,
-						Action: service.ChannelSelectionTraceActionMiss,
-						Group:  usingGroup,
-						Model:  modelRequest.Model,
-						Reason: "affinity miss",
-					})
 				}
 
 				if channel == nil {
@@ -232,29 +157,14 @@ func Distribute() func(c *gin.Context) {
 						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 						return
 					}
-					service.RecordChannelSelectionTrace(c, service.ChannelSelectionTraceEvent{
-						Stage:     service.ChannelSelectionTraceStageFinal,
-						Action:    service.ChannelSelectionTraceActionSelect,
-						Group:     selectGroup,
-						Model:     modelRequest.Model,
-						ChannelID: channel.Id,
-						Priority:  channel.GetPriority(),
-						Reason:    "selected by priority and weight",
-					})
 				}
 			}
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
 		SetupContextForSelectedChannel(c, channel, modelRequest.Model)
 		c.Next()
-		if channel != nil {
-			if relayInfo, ok := c.Get("relay_info"); ok {
-				if info, ok := relayInfo.(*relaycommon.RelayInfo); ok && info.IsAttemptSuccessful() {
-					service.RecordChannelAffinity(c, channel.Id)
-				}
-			} else if c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
-				service.RecordChannelAffinity(c, channel.Id)
-			}
+		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
+			service.RecordChannelAffinity(c, channel.Id)
 		}
 	}
 }
@@ -555,7 +465,7 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	common.SetContextKey(c, constant.ContextKeyChannelModelMapping, channel.GetModelMapping())
 	common.SetContextKey(c, constant.ContextKeyChannelStatusCodeMapping, channel.GetStatusCodeMapping())
 
-	key, index, newAPIError := channel.GetNextEnabledKeyForModel(modelName)
+	key, index, newAPIError := channel.GetNextEnabledKey()
 	if newAPIError != nil {
 		return newAPIError
 	}

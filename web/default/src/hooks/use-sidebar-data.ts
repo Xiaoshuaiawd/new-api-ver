@@ -22,9 +22,7 @@ import {
   CreditCard,
   FileText,
   FlaskConical,
-  Gauge,
   Handshake,
-  HeartPulse,
   Key,
   LayoutDashboard,
   ListTodo,
@@ -42,15 +40,15 @@ import { useTranslation } from 'react-i18next'
 import type { SidebarData } from '@/components/layout/types'
 import { ROLE } from '@/lib/roles'
 
-type Translate = (key: string) => string
-
 /**
  * Root navigation groups for the application sidebar.
  *
  * These are shown when the URL does not match any nested sidebar view
  * registered in `layout/lib/sidebar-view-registry.ts`.
  */
-export function buildSidebarData(t: Translate): SidebarData {
+export function useSidebarData(): SidebarData {
+  const { t } = useTranslation()
+
   return {
     navGroups: [
       {
@@ -82,11 +80,6 @@ export function buildSidebarData(t: Translate): SidebarData {
             title: t('Dashboard'),
             url: '/dashboard/models',
             icon: LayoutDashboard,
-          },
-          {
-            title: t('Group Monitor'),
-            url: '/model-monitor',
-            icon: Gauge,
           },
           {
             title: t('API Keys'),
@@ -133,11 +126,6 @@ export function buildSidebarData(t: Translate): SidebarData {
         title: t('Admin'),
         items: [
           {
-            title: t('Channel Health'),
-            url: '/channel-health',
-            icon: HeartPulse,
-          },
-          {
             title: t('Channels'),
             url: '/channels',
             icon: Radio,
@@ -183,10 +171,4 @@ export function buildSidebarData(t: Translate): SidebarData {
       },
     ],
   }
-}
-
-export function useSidebarData(): SidebarData {
-  const { t } = useTranslation()
-
-  return buildSidebarData(t)
 }

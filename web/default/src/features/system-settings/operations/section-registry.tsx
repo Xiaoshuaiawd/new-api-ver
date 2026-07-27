@@ -17,13 +17,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { SystemBehaviorSection } from '../general/system-behavior-section'
-import {
-  CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES,
-  CHANNEL_MULTIPLIER_MONITOR_DEFAULT_VALUES,
-  CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY,
-  pickChannelHealthSettings,
-} from '../integrations/channel-health-settings'
-import { ChannelHealthSettingsSection } from '../integrations/channel-health-settings-section'
 import { EmailSettingsSection } from '../integrations/email-settings-section'
 import { MonitoringSettingsSection } from '../integrations/monitoring-settings-section'
 import { WorkerSettingsSection } from '../integrations/worker-settings-section'
@@ -62,105 +55,6 @@ const OPERATIONS_SECTIONS = [
             settings['perf_metrics_setting.bucket_time'] ?? 'hour',
           'perf_metrics_setting.retention_days':
             settings['perf_metrics_setting.retention_days'] ?? 0,
-          'channel_alert_setting.enabled':
-            settings['channel_alert_setting.enabled'] ?? false,
-          'channel_alert_setting.balance_alert_enabled':
-            settings['channel_alert_setting.balance_alert_enabled'] ?? true,
-          'channel_alert_setting.multiplier_change_enabled':
-            settings['channel_alert_setting.multiplier_change_enabled'] ?? true,
-          'channel_alert_setting.balance_threshold':
-            settings['channel_alert_setting.balance_threshold'] ?? 0,
-          'channel_alert_setting.min_interval_seconds':
-            settings['channel_alert_setting.min_interval_seconds'] ?? 300,
-          'channel_alert_setting.feishu_enabled':
-            settings['channel_alert_setting.feishu_enabled'] ?? false,
-          'channel_alert_setting.feishu_webhook_url':
-            settings['channel_alert_setting.feishu_webhook_url'] ?? '',
-          'channel_alert_setting.feishu_secret':
-            settings['channel_alert_setting.feishu_secret'] ?? '',
-          'channel_alert_setting.dingtalk_enabled':
-            settings['channel_alert_setting.dingtalk_enabled'] ?? false,
-          'channel_alert_setting.dingtalk_webhook_url':
-            settings['channel_alert_setting.dingtalk_webhook_url'] ?? '',
-          'channel_alert_setting.dingtalk_secret':
-            settings['channel_alert_setting.dingtalk_secret'] ?? '',
-        }}
-      />
-    ),
-  },
-  {
-    id: 'channel-health',
-    titleKey: 'Channel Health Guard',
-    build: (settings: OperationsSettings) => (
-      <ChannelHealthSettingsSection
-        defaultValues={{
-          ...pickChannelHealthSettings(settings),
-          [CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY]:
-            settings[CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY] ??
-            CHANNEL_MULTIPLIER_MONITOR_DEFAULT_VALUES[
-              CHANNEL_MULTIPLIER_MONITOR_SETTING_KEY
-            ],
-          'channel_auto_priority_setting.enabled':
-            settings['channel_auto_priority_setting.enabled'] ??
-            CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
-              'channel_auto_priority_setting.enabled'
-            ],
-          'channel_auto_priority_setting.min_weight':
-            settings['channel_auto_priority_setting.min_weight'] ??
-            CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
-              'channel_auto_priority_setting.min_weight'
-            ],
-          'channel_auto_priority_setting.max_weight':
-            settings['channel_auto_priority_setting.max_weight'] ??
-            CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
-              'channel_auto_priority_setting.max_weight'
-            ],
-          'channel_auto_priority_setting.latency_guard_enabled':
-            settings['channel_auto_priority_setting.latency_guard_enabled'] ??
-            CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
-              'channel_auto_priority_setting.latency_guard_enabled'
-            ],
-          'channel_auto_priority_setting.latency_threshold_seconds':
-            settings['channel_auto_priority_setting.latency_threshold_seconds'] ??
-            CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
-              'channel_auto_priority_setting.latency_threshold_seconds'
-            ],
-          'channel_auto_priority_setting.latency_window_minutes':
-            settings['channel_auto_priority_setting.latency_window_minutes'] ??
-            CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
-              'channel_auto_priority_setting.latency_window_minutes'
-            ],
-          'channel_auto_priority_setting.latency_min_samples':
-            settings['channel_auto_priority_setting.latency_min_samples'] ??
-            CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
-              'channel_auto_priority_setting.latency_min_samples'
-            ],
-          'channel_auto_priority_setting.latency_slow_ratio_threshold':
-            settings[
-              'channel_auto_priority_setting.latency_slow_ratio_threshold'
-            ] ??
-            CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
-              'channel_auto_priority_setting.latency_slow_ratio_threshold'
-            ],
-          'channel_auto_priority_setting.latency_recovery_ratio_threshold':
-            settings[
-              'channel_auto_priority_setting.latency_recovery_ratio_threshold'
-            ] ??
-            CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
-              'channel_auto_priority_setting.latency_recovery_ratio_threshold'
-            ],
-          'channel_auto_priority_setting.latency_retained_weight_percent':
-            settings[
-              'channel_auto_priority_setting.latency_retained_weight_percent'
-            ] ??
-            CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
-              'channel_auto_priority_setting.latency_retained_weight_percent'
-            ],
-          'channel_auto_priority_setting.latency_priority_penalty':
-            settings['channel_auto_priority_setting.latency_priority_penalty'] ??
-            CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES[
-              'channel_auto_priority_setting.latency_priority_penalty'
-            ],
         }}
       />
     ),
@@ -204,7 +98,6 @@ const OPERATIONS_SECTIONS = [
     build: (settings: OperationsSettings) => (
       <LogSettingsSection
         defaultEnabled={Boolean(settings.LogConsumeEnabled)}
-        defaultBodyCaptureEnabled={Boolean(settings.LogBodyCaptureEnabled)}
       />
     ),
   },

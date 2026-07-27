@@ -485,7 +485,6 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	if tieredBillingApplied {
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
-	appendLogBodyDetailsForZeroTokens(ctx, other, summary.TotalTokens)
 
 	attachQuotaSaturation(ctx, relayInfo, other)
 

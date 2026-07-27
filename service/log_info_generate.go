@@ -78,13 +78,7 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	other["cache_ratio"] = cacheRatio
 	other["model_price"] = modelPrice
 	other["user_group_ratio"] = userGroupRatio
-	if firstResponse, ok := relayInfo.FirstResponseDuration(); ok {
-		// Keep frt for existing reports while recording the explicit lifecycle.
-		other["frt"] = float64(firstResponse.Milliseconds())
-	}
-	if timings := relayInfo.AttemptTimingMetrics(); len(timings) > 0 {
-		other["relay_timing"] = timings
-	}
+	other["frt"] = float64(relayInfo.FirstResponseTime.UnixMilli() - relayInfo.StartTime.UnixMilli())
 	if relayInfo.ReasoningEffort != "" {
 		other["reasoning_effort"] = relayInfo.ReasoningEffort
 	}
@@ -112,7 +106,6 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	}
 
 	AppendChannelAffinityAdminInfo(ctx, adminInfo)
-	AppendChannelSelectionTraceAdminInfo(ctx, adminInfo)
 
 	other["admin_info"] = adminInfo
 	appendRequestPath(ctx, relayInfo, other)

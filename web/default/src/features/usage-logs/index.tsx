@@ -30,7 +30,6 @@ import {
   useLogsViewScope,
   useUsageLogsContext,
 } from './components/usage-logs-provider'
-import { CommonLogsHeaderActions } from './components/common-logs-header-actions'
 import { UsageLogsTable } from './components/usage-logs-table'
 import {
   isUsageLogsSectionId,
@@ -123,17 +122,14 @@ function UsageLogsContent() {
         <SectionPageLayout.Title>
           {t(pageMeta.titleKey)}
         </SectionPageLayout.Title>
-        {activeCategory === 'common' || canManageScope ? (
+        {canManageScope ? (
           <SectionPageLayout.Actions>
-            {activeCategory === 'common' ? <CommonLogsHeaderActions /> : null}
-            {canManageScope ? (
-              <Tabs value={viewScope} onValueChange={handleViewScopeChange}>
-                <TabsList>
-                  <TabsTrigger value='all'>{t('All')}</TabsTrigger>
-                  <TabsTrigger value='self'>{t('Only Mine')}</TabsTrigger>
-                </TabsList>
-              </Tabs>
-            ) : null}
+            <Tabs value={viewScope} onValueChange={handleViewScopeChange}>
+              <TabsList>
+                <TabsTrigger value='all'>{t('All')}</TabsTrigger>
+                <TabsTrigger value='self'>{t('Only Mine')}</TabsTrigger>
+              </TabsList>
+            </Tabs>
           </SectionPageLayout.Actions>
         ) : null}
         <SectionPageLayout.Content>

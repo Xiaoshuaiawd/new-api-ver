@@ -42,7 +42,6 @@ import {
   Copy,
   FileText,
   Eraser,
-  Gauge,
   Plus,
   Eye,
   RefreshCw,
@@ -253,7 +252,6 @@ const ADVANCED_SETTINGS_SECTION_IDS = {
   extraSettings: 'channel-section-advanced-extra-settings',
   fieldPassthrough: 'channel-section-advanced-field-passthrough',
   upstreamModelDetection: 'channel-section-advanced-upstream-model-detection',
-  keyMultiplier: 'channel-section-advanced-key-multiplier',
 } as const
 const ADVANCED_SETTINGS_CHILD_SECTION_IDS: string[] = Object.values(
   ADVANCED_SETTINGS_SECTION_IDS
@@ -292,11 +290,6 @@ const SENSITIVE_FORM_FIELDS = [
   'upstream_model_update_check_enabled',
   'upstream_model_update_auto_sync_enabled',
   'upstream_model_update_ignored_models',
-  'upstream_key_multiplier_enabled',
-  'upstream_key_multiplier_format',
-  'upstream_key_multiplier_base_url',
-  'upstream_key_multiplier_username',
-  'upstream_key_multiplier_password',
 ] satisfies (keyof ChannelFormValues)[]
 
 function readAdvancedSettingsPreference(): boolean {
@@ -341,11 +334,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.claude_beta_query ||
     values.upstream_model_update_check_enabled ||
     values.upstream_model_update_auto_sync_enabled ||
-    values.upstream_model_update_ignored_models?.trim() ||
-    values.upstream_key_multiplier_enabled ||
-    values.upstream_key_multiplier_base_url?.trim() ||
-    values.upstream_key_multiplier_username?.trim() ||
-    values.upstream_key_multiplier_password?.trim()
+    values.upstream_model_update_ignored_models?.trim()
   )
 }
 
@@ -751,18 +740,6 @@ export function ChannelMutateDrawer({
   const currentUpstreamModelUpdateIgnoredModels = form.watch(
     'upstream_model_update_ignored_models'
   )
-  const upstreamKeyMultiplierEnabled = form.watch(
-    'upstream_key_multiplier_enabled'
-  )
-  const currentUpstreamKeyMultiplierBaseUrl = form.watch(
-    'upstream_key_multiplier_base_url'
-  )
-  const currentUpstreamKeyMultiplierUsername = form.watch(
-    'upstream_key_multiplier_username'
-  )
-  const currentUpstreamKeyMultiplierPassword = form.watch(
-    'upstream_key_multiplier_password'
-  )
   const {
     unlocked: doubaoApiEditUnlocked,
     handleClick: handleApiConfigSecretClick,
@@ -965,20 +942,13 @@ export function ChannelMutateDrawer({
       currentUpstreamModelUpdateAutoSyncEnabled ||
       currentUpstreamModelUpdateIgnoredModels?.trim()
   )
-  const upstreamKeyMultiplierConfigured = Boolean(
-    upstreamKeyMultiplierEnabled ||
-      currentUpstreamKeyMultiplierBaseUrl?.trim() ||
-      currentUpstreamKeyMultiplierUsername?.trim() ||
-      currentUpstreamKeyMultiplierPassword?.trim()
-  )
   const advancedConfigured = Boolean(
     routingStrategyConfigured ||
       internalNotesConfigured ||
       overrideRulesConfigured ||
       extraSettingsConfigured ||
       fieldPassthroughConfigured ||
-      upstreamModelDetectionConfigured ||
-      upstreamKeyMultiplierConfigured
+      upstreamModelDetectionConfigured
   )
   const advancedNavChildren: ChannelEditorNavChildItem[] = [
     {
@@ -1016,11 +986,6 @@ export function ChannelMutateDrawer({
       configured: upstreamModelDetectionConfigured,
     })
   }
-  advancedNavChildren.push({
-    id: ADVANCED_SETTINGS_SECTION_IDS.keyMultiplier,
-    title: t('Upstream Key Multiplier'),
-    configured: upstreamKeyMultiplierConfigured,
-  })
   const editorNavItems: ChannelEditorNavItem[] = [
     {
       id: CHANNEL_EDITOR_SECTION_IDS.identity,
@@ -1526,20 +1491,6 @@ export function ChannelMutateDrawer({
     }
   }, [])
 
-  const handleAdvancedSettingsOpenChange = useCallback((nextOpen: boolean) => {
-    if (!nextOpen) {
-      advancedNavScrollPendingRef.current = false
-      setExpandedEditorNavItemId(undefined)
-    }
-    setAdvancedSettingsOpen(nextOpen)
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(
-        ADVANCED_SETTINGS_EXPANDED_KEY,
-        String(nextOpen)
-      )
-    }
-  }, [])
-
   const channelMutation = useChannelMutateForm({
     currentRow,
     isEditing,
@@ -1558,18 +1509,6 @@ export function ChannelMutateDrawer({
           type: 'manual',
           message: ERROR_MESSAGES.REQUIRED_KEY,
         })
-        return
-      }
-      if (
-        !isEditing &&
-        data.upstream_key_multiplier_enabled &&
-        !data.upstream_key_multiplier_password?.trim()
-      ) {
-        form.setError('upstream_key_multiplier_password', {
-          type: 'manual',
-          message: 'Upstream password is required',
-        })
-        handleAdvancedSettingsOpenChange(true)
         return
       }
 
@@ -1668,11 +1607,24 @@ export function ChannelMutateDrawer({
       form,
       confirmMissingModelMappings,
       confirmStatusCodeRisk,
-      handleAdvancedSettingsOpenChange,
       channelMutation,
       t,
     ]
   )
+
+  const handleAdvancedSettingsOpenChange = useCallback((nextOpen: boolean) => {
+    if (!nextOpen) {
+      advancedNavScrollPendingRef.current = false
+      setExpandedEditorNavItemId(undefined)
+    }
+    setAdvancedSettingsOpen(nextOpen)
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(
+        ADVANCED_SETTINGS_EXPANDED_KEY,
+        String(nextOpen)
+      )
+    }
+  }, [])
 
   const handleEditorNavNavigate = useCallback(
     (targetId: string) => {
@@ -1953,33 +1905,6 @@ export function ChannelMutateDrawer({
                             )}
                           />
                         )}
-
-                        <FormField
-                          control={form.control}
-                          name='supports_image_input'
-                          render={({ field }) => (
-                            <FormItem
-                              className={sideDrawerSwitchItemClassName()}
-                            >
-                              <div className='flex flex-col gap-0.5'>
-                                <FormLabel>
-                                  {t('Supports image input')}
-                                </FormLabel>
-                                <FormDescription className='text-xs'>
-                                  {t(
-                                    'Requests containing images will only use channels with this enabled'
-                                  )}
-                                </FormDescription>
-                              </div>
-                              <FormControl>
-                                <Switch
-                                  checked={field.value !== false}
-                                  onCheckedChange={field.onChange}
-                                />
-                              </FormControl>
-                            </FormItem>
-                          )}
-                        />
 
                         {currentType === 1 && (
                           <fieldset
@@ -4527,179 +4452,6 @@ export function ChannelMutateDrawer({
                             </fieldset>
                           </div>
                         )}
-
-                        <div
-                          id={ADVANCED_SETTINGS_SECTION_IDS.keyMultiplier}
-                          className={sideDrawerSectionClassName(
-                            configuredAdvancedSectionClassName(
-                              'scroll-mt-4',
-                              upstreamKeyMultiplierConfigured
-                            )
-                          )}
-                        >
-                          <CardHeading
-                            title={t('Upstream Key Multiplier')}
-                            icon={<Gauge className='h-4 w-4' />}
-                          />
-                          <fieldset
-                            disabled={sensitiveLocked}
-                            className='space-y-4 disabled:opacity-60'
-                          >
-                            <FormField
-                              control={form.control}
-                              name='upstream_key_multiplier_enabled'
-                              render={({ field }) => (
-                                <FormItem className='flex items-center justify-between gap-3 border-y px-4 py-3'>
-                                  <div className='space-y-0.5'>
-                                    <FormLabel>
-                                      {t('Monitor upstream key multiplier')}
-                                    </FormLabel>
-                                    <FormDescription>
-                                      {t(
-                                        'Poll the upstream console and show the current key multiplier next to the channel name'
-                                      )}
-                                    </FormDescription>
-                                  </div>
-                                  <FormControl>
-                                    <Switch
-                                      checked={field.value}
-                                      onCheckedChange={field.onChange}
-                                    />
-                                  </FormControl>
-                                </FormItem>
-                              )}
-                            />
-
-                            <div className='grid gap-4 sm:grid-cols-2'>
-                              <FormField
-                                control={form.control}
-                                name='upstream_key_multiplier_format'
-                                render={({ field }) => (
-                                  <FormItem>
-                                    <FormLabel>
-                                      {t('Upstream format')}
-                                    </FormLabel>
-                                    <Select
-                                      items={[
-                                        {
-                                          value: 'new-api',
-                                          label: 'new-api',
-                                        },
-                                        {
-                                          value: 'sub2api',
-                                          label: 'sub2api',
-                                        },
-                                      ]}
-                                      onValueChange={field.onChange}
-                                      value={field.value}
-                                    >
-                                      <FormControl>
-                                        <SelectTrigger>
-                                          <SelectValue />
-                                        </SelectTrigger>
-                                      </FormControl>
-                                      <SelectContent
-                                        alignItemWithTrigger={false}
-                                      >
-                                        <SelectGroup>
-                                          <SelectItem value='new-api'>
-                                            new-api
-                                          </SelectItem>
-                                          <SelectItem value='sub2api'>
-                                            sub2api
-                                          </SelectItem>
-                                        </SelectGroup>
-                                      </SelectContent>
-                                    </Select>
-                                    <FormMessage />
-                                  </FormItem>
-                                )}
-                              />
-
-                              <FormField
-                                control={form.control}
-                                name='upstream_key_multiplier_base_url'
-                                render={({ field }) => (
-                                  <FormItem>
-                                    <FormLabel>
-                                      {t('Upstream console URL')}
-                                    </FormLabel>
-                                    <FormControl>
-                                      <Input
-                                        placeholder={t(
-                                          'e.g., https://upstream.example.com'
-                                        )}
-                                        {...field}
-                                      />
-                                    </FormControl>
-                                    <FormDescription>
-                                      {t(
-                                        'Domain used to log in to the upstream console'
-                                      )}
-                                    </FormDescription>
-                                    <FormMessage />
-                                  </FormItem>
-                                )}
-                              />
-
-                              <FormField
-                                control={form.control}
-                                name='upstream_key_multiplier_username'
-                                render={({ field }) => (
-                                  <FormItem>
-                                    <FormLabel>
-                                      {t('Upstream account')}
-                                    </FormLabel>
-                                    <FormControl>
-                                      <Input
-                                        autoComplete='username'
-                                        placeholder={t('Account or email')}
-                                        {...field}
-                                      />
-                                    </FormControl>
-                                    <FormMessage />
-                                  </FormItem>
-                                )}
-                              />
-
-                              <FormField
-                                control={form.control}
-                                name='upstream_key_multiplier_password'
-                                render={({ field }) => (
-                                  <FormItem>
-                                    <FormLabel>
-                                      {t('Upstream password')}
-                                    </FormLabel>
-                                    <FormControl>
-                                      <Input
-                                        type='password'
-                                        autoComplete='new-password'
-                                        placeholder={
-                                          isEditing
-                                            ? t(
-                                                'Leave empty to keep existing password'
-                                              )
-                                            : t('Password')
-                                        }
-                                        {...field}
-                                      />
-                                    </FormControl>
-                                    <FormDescription>
-                                      {isEditing
-                                        ? t(
-                                            'Leave empty to keep the saved upstream password'
-                                          )
-                                        : t(
-                                            'Required when enabling multiplier monitoring'
-                                          )}
-                                    </FormDescription>
-                                    <FormMessage />
-                                  </FormItem>
-                                )}
-                              />
-                            </div>
-                          </fieldset>
-                        </div>
                       </ChannelAdvancedSection>
                     </div>
                   </div>

@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -179,7 +178,7 @@ func updateChannelCloseAIBalance(channel *model.Channel) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	service.UpdateChannelBalanceWithAlert(channel, response.TotalAvailable)
+	channel.UpdateBalance(response.TotalAvailable)
 	return response.TotalAvailable, nil
 }
 
@@ -201,7 +200,7 @@ func updateChannelOpenAISBBalance(channel *model.Channel) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	service.UpdateChannelBalanceWithAlert(channel, balance)
+	channel.UpdateBalance(balance)
 	return balance, nil
 }
 
@@ -221,7 +220,7 @@ func updateChannelAIProxyBalance(channel *model.Channel) (float64, error) {
 	if !response.Success {
 		return 0, fmt.Errorf("code: %d, message: %s", response.ErrorCode, response.Message)
 	}
-	service.UpdateChannelBalanceWithAlert(channel, response.Data.TotalPoints)
+	channel.UpdateBalance(response.Data.TotalPoints)
 	return response.Data.TotalPoints, nil
 }
 
@@ -237,7 +236,7 @@ func updateChannelAPI2GPTBalance(channel *model.Channel) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	service.UpdateChannelBalanceWithAlert(channel, response.TotalRemaining)
+	channel.UpdateBalance(response.TotalRemaining)
 	return response.TotalRemaining, nil
 }
 
@@ -259,7 +258,7 @@ func updateChannelSiliconFlowBalance(channel *model.Channel) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	service.UpdateChannelBalanceWithAlert(channel, balance)
+	channel.UpdateBalance(balance)
 	return balance, nil
 }
 
@@ -288,7 +287,7 @@ func updateChannelDeepSeekBalance(channel *model.Channel) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	service.UpdateChannelBalanceWithAlert(channel, balance)
+	channel.UpdateBalance(balance)
 	return balance, nil
 }
 
@@ -303,7 +302,7 @@ func updateChannelAIGC2DBalance(channel *model.Channel) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	service.UpdateChannelBalanceWithAlert(channel, response.TotalAvailable)
+	channel.UpdateBalance(response.TotalAvailable)
 	return response.TotalAvailable, nil
 }
 
@@ -319,7 +318,7 @@ func updateChannelOpenRouterBalance(channel *model.Channel) (float64, error) {
 		return 0, err
 	}
 	balance := response.Data.TotalCredits - response.Data.TotalUsage
-	service.UpdateChannelBalanceWithAlert(channel, balance)
+	channel.UpdateBalance(balance)
 	return balance, nil
 }
 
@@ -353,7 +352,7 @@ func updateChannelMoonshotBalance(channel *model.Channel) (float64, error) {
 	}
 	availableBalanceCny := response.Data.AvailableBalance
 	availableBalanceUsd := decimal.NewFromFloat(availableBalanceCny).Div(decimal.NewFromFloat(operation_setting.Price)).InexactFloat64()
-	service.UpdateChannelBalanceWithAlert(channel, availableBalanceUsd)
+	channel.UpdateBalance(availableBalanceUsd)
 	return availableBalanceUsd, nil
 }
 
@@ -362,14 +361,6 @@ func updateChannelBalance(channel *model.Channel) (float64, error) {
 	if channel.GetBaseURL() == "" {
 		channel.BaseURL = &baseURL
 	}
-	if balance, configured, err := service.FetchChannelMultiplierAccountBalance(context.Background(), channel); configured {
-		if err != nil {
-			return 0, err
-		}
-		service.UpdateChannelBalanceWithAlert(channel, balance)
-		return balance, nil
-	}
-
 	switch channel.Type {
 	case constant.ChannelTypeOpenAI:
 		if channel.GetBaseURL() != "" {
@@ -426,7 +417,7 @@ func updateChannelBalance(channel *model.Channel) (float64, error) {
 		return 0, err
 	}
 	balance := subscription.HardLimitUSD - usage.TotalUsage/100
-	service.UpdateChannelBalanceWithAlert(channel, balance)
+	channel.UpdateBalance(balance)
 	return balance, nil
 }
 

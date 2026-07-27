@@ -19,11 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 import { useStatus } from '@/hooks/use-status'
 
 import { SettingsPage } from '../components/settings-page'
-import {
-  CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES,
-  CHANNEL_HEALTH_DEFAULT_VALUES,
-  CHANNEL_MULTIPLIER_MONITOR_DEFAULT_VALUES,
-} from '../integrations/channel-health-settings'
 import type { OperationsSettings } from '../types'
 import {
   OPERATIONS_DEFAULT_SECTION,
@@ -49,7 +44,6 @@ const defaultOperationsSettings: OperationsSettings = {
   WorkerValidKey: '',
   WorkerAllowHttpImageRequestEnabled: false,
   LogConsumeEnabled: false,
-  LogBodyCaptureEnabled: false,
   'performance_setting.disk_cache_enabled': false,
   'performance_setting.disk_cache_threshold_mb': 10,
   'performance_setting.disk_cache_max_size_mb': 1024,
@@ -62,20 +56,6 @@ const defaultOperationsSettings: OperationsSettings = {
   'perf_metrics_setting.flush_interval': 5,
   'perf_metrics_setting.bucket_time': 'hour',
   'perf_metrics_setting.retention_days': 0,
-  'channel_alert_setting.enabled': false,
-  'channel_alert_setting.balance_alert_enabled': true,
-  'channel_alert_setting.multiplier_change_enabled': true,
-  'channel_alert_setting.balance_threshold': 0,
-  'channel_alert_setting.min_interval_seconds': 300,
-  'channel_alert_setting.feishu_enabled': false,
-  'channel_alert_setting.feishu_webhook_url': '',
-  'channel_alert_setting.feishu_secret': '',
-  'channel_alert_setting.dingtalk_enabled': false,
-  'channel_alert_setting.dingtalk_webhook_url': '',
-  'channel_alert_setting.dingtalk_secret': '',
-  ...CHANNEL_HEALTH_DEFAULT_VALUES,
-  ...CHANNEL_MULTIPLIER_MONITOR_DEFAULT_VALUES,
-  ...CHANNEL_AUTO_PRIORITY_DEFAULT_VALUES,
 }
 
 export function OperationsSettings() {

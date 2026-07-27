@@ -33,7 +33,6 @@ import type {
   GetChannelResponse,
   GetChannelsParams,
   GetChannelsResponse,
-  ChannelUpstreamMultiplier,
   MultiKeyManageParams,
   MultiKeyStatusResponse,
   SearchChannelsParams,
@@ -103,106 +102,6 @@ export async function searchChannels(
  */
 export async function getChannel(id: number): Promise<GetChannelResponse> {
   const res = await api.get(`/api/channel/${id}`)
-  return res.data
-}
-
-export async function runChannelRuntimeAction(
-  id: number,
-  data: {
-    action: 'isolate' | 'probe_now' | 'clear_isolation' | 'clear_affinity'
-    reason?: string
-    duration_seconds?: number
-  }
-): Promise<{ success: boolean; message?: string; data?: unknown }> {
-  const res = await api.post(
-    `/api/channel/${id}/runtime_action`,
-    data,
-    channelActionConfig()
-  )
-  return res.data
-}
-
-export async function refreshChannelMultiplier(id: number): Promise<{
-  success: boolean
-  message?: string
-  data?: ChannelUpstreamMultiplier
-}> {
-  const res = await api.post(
-    `/api/channel/${id}/multiplier/refresh`,
-    {},
-    channelActionConfig()
-  )
-  return res.data
-}
-
-export async function getChannelRuntimeHealthReport(params?: {
-  channel_id?: number
-  model?: string
-  group?: string
-  type?: string
-  state?: string
-  limit?: number
-}): Promise<{
-  success: boolean
-  message?: string
-  data?: {
-    isolation_count: number
-    recovery_count: number
-    probe_failure_count: number
-    average_first_response_ms: number
-    top_failing_channels: Array<{
-      channel_id: number
-      model_name?: string
-      group?: string
-      count: number
-    }>
-    selection_summary: Array<{
-      channel_id?: number
-      group?: string
-      model?: string
-      priority?: number
-      selected: number
-      skipped: number
-      runtime_unavailable: number
-      health_degraded: number
-      priority_fallbacks: number
-      probe_fallbacks: number
-      last_health_state?: string
-      last_reason?: string
-      last_seen_at: number
-    }>
-    events: Array<{
-      type: string
-      channel_id: number
-      model_name?: string
-      group?: string
-      state: string
-      state_v2?: string
-      reason?: string
-      occurred_at: number
-      snapshot?: {
-        active_inflight: number
-        stuck_inflight: number
-        window_samples: number
-        window_failures: number
-        error_rate: number
-        average_first_response_ms: number
-        p95_first_response_ms: number
-        probe_backoff_seconds: number
-        next_probe_at: number
-        probe_in_progress: boolean
-        warmup_percent: number
-        warmup_throttle_percent?: number
-      }
-      alert_sent: boolean
-      alert_subject?: string
-    }>
-  }
-}> {
-  const res = await api.get('/api/channel/runtime_health_report', {
-    params,
-    ...channelActionConfig(),
-  })
   return res.data
 }
 

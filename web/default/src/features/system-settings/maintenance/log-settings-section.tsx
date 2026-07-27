@@ -80,14 +80,12 @@ import type { LogCleanupTask } from '../types'
 
 const logSettingsSchema = z.object({
   LogConsumeEnabled: z.boolean(),
-  LogBodyCaptureEnabled: z.boolean(),
 })
 
 type LogSettingsFormValues = z.infer<typeof logSettingsSchema>
 
 type LogSettingsSectionProps = {
   defaultEnabled: boolean
-  defaultBodyCaptureEnabled: boolean
 }
 
 type ServerLogInfo = {
@@ -143,7 +141,6 @@ function isActiveLogCleanupTask(task: LogCleanupTask | null) {
 
 export function LogSettingsSection({
   defaultEnabled,
-  defaultBodyCaptureEnabled,
 }: LogSettingsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
@@ -151,7 +148,6 @@ export function LogSettingsSection({
     resolver: zodResolver(logSettingsSchema),
     defaultValues: {
       LogConsumeEnabled: defaultEnabled,
-      LogBodyCaptureEnabled: defaultBodyCaptureEnabled,
     },
   })
 
@@ -178,11 +174,8 @@ export function LogSettingsSection({
   }, [])
 
   useEffect(() => {
-    form.reset({
-      LogConsumeEnabled: defaultEnabled,
-      LogBodyCaptureEnabled: defaultBodyCaptureEnabled,
-    })
-  }, [defaultBodyCaptureEnabled, defaultEnabled, form])
+    form.reset({ LogConsumeEnabled: defaultEnabled })
+  }, [defaultEnabled, form])
 
   useEffect(() => {
     fetchServerLogInfo()
@@ -264,22 +257,11 @@ export function LogSettingsSection({
   }, [logCleanupActive, logCleanupTaskId, t])
 
   const onSubmit = async (values: LogSettingsFormValues) => {
-    const updates = []
-    if (values.LogConsumeEnabled !== defaultEnabled) {
-      updates.push({
-        key: 'LogConsumeEnabled',
-        value: values.LogConsumeEnabled,
-      })
-    }
-    if (values.LogBodyCaptureEnabled !== defaultBodyCaptureEnabled) {
-      updates.push({
-        key: 'LogBodyCaptureEnabled',
-        value: values.LogBodyCaptureEnabled,
-      })
-    }
-    for (const update of updates) {
-      await updateOption.mutateAsync(update)
-    }
+    if (values.LogConsumeEnabled === defaultEnabled) return
+    await updateOption.mutateAsync({
+      key: 'LogConsumeEnabled',
+      value: values.LogConsumeEnabled,
+    })
   }
 
   const handleRequestCleanLogs = () => {
@@ -371,31 +353,6 @@ export function LogSettingsSection({
                   <FormDescription>
                     {t(
                       'Track per-request consumption to power usage analytics. Keeping this on increases database writes.'
-                    )}
-                  </FormDescription>
-                </SettingsSwitchContent>
-                <FormControl>
-                  <Switch
-                    checked={field.value}
-                    onCheckedChange={field.onChange}
-                  />
-                </FormControl>
-                <FormMessage />
-              </SettingsSwitchItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name='LogBodyCaptureEnabled'
-            render={({ field }) => (
-              <SettingsSwitchItem>
-                <SettingsSwitchContent>
-                  <FormLabel>
-                    {t('Store request and response bodies for abnormal logs')}
-                  </FormLabel>
-                  <FormDescription>
-                    {t(
-                      'Save full request and response bodies only for failed or zero-token logs. Keep this off unless you are actively debugging because it can grow the database quickly.'
                     )}
                   </FormDescription>
                 </SettingsSwitchContent>

@@ -2,12 +2,6 @@ package operation_setting
 
 import "github.com/QuantumNous/new-api/setting/config"
 
-const (
-	ChannelAffinityRecoveryStrategyPriorityFirst  = "priority_first"
-	ChannelAffinityRecoveryStrategyStableAffinity = "stable_affinity"
-	ChannelAffinityRecoveryStrategyStrictAffinity = "strict_affinity"
-)
-
 type ChannelAffinityKeySource struct {
 	Type string `json:"type"` // context_int, context_string, request_header, gjson
 	Key  string `json:"key,omitempty"`
@@ -37,7 +31,6 @@ type ChannelAffinitySetting struct {
 	Enabled               bool                  `json:"enabled"`
 	SwitchOnSuccess       bool                  `json:"switch_on_success"`
 	KeepOnChannelDisabled bool                  `json:"keep_on_channel_disabled"`
-	RecoveryStrategy      string                `json:"recovery_strategy"`
 	MaxEntries            int                   `json:"max_entries"`
 	DefaultTTLSeconds     int                   `json:"default_ttl_seconds"`
 	Rules                 []ChannelAffinityRule `json:"rules"`
@@ -120,7 +113,6 @@ var channelAffinitySetting = ChannelAffinitySetting{
 	Enabled:               true,
 	SwitchOnSuccess:       true,
 	KeepOnChannelDisabled: false,
-	RecoveryStrategy:      ChannelAffinityRecoveryStrategyPriorityFirst,
 	MaxEntries:            100_000,
 	DefaultTTLSeconds:     3600,
 	Rules: []ChannelAffinityRule{

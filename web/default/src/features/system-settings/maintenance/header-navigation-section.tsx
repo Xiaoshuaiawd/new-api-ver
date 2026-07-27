@@ -55,7 +55,6 @@ const headerNavSchema = z.object({
   pricingRequireAuth: z.boolean(),
   rankingsEnabled: z.boolean(),
   rankingsRequireAuth: z.boolean(),
-  groupMonitor: z.boolean(),
   docs: z.boolean(),
   about: z.boolean(),
 })
@@ -90,10 +89,6 @@ const toFormValues = (config: HeaderNavModulesConfig): HeaderNavFormValues => ({
     config.rankings?.requireAuth === undefined
       ? HEADER_NAV_DEFAULT.rankings.requireAuth
       : Boolean(config.rankings.requireAuth),
-  groupMonitor:
-    config.groupMonitor === undefined
-      ? HEADER_NAV_DEFAULT.groupMonitor
-      : Boolean(config.groupMonitor),
   docs:
     config.docs === undefined ? HEADER_NAV_DEFAULT.docs : Boolean(config.docs),
   about:
@@ -124,7 +119,6 @@ export function HeaderNavigationSection({
       ...config,
       home: values.home,
       console: values.console,
-      groupMonitor: values.groupMonitor,
       docs: values.docs,
       about: values.about,
       pricing: {
@@ -168,11 +162,6 @@ export function HeaderNavigationSection({
       key: 'console',
       title: t('Console'),
       description: t('User dashboard and quota controls.'),
-    },
-    {
-      key: 'groupMonitor',
-      title: t('Group Monitor'),
-      description: t('Group-level realtime health monitor.'),
     },
     {
       key: 'docs',

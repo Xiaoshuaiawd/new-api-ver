@@ -7,7 +7,6 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -195,13 +194,4 @@ func DeleteHistoryLogs(c *gin.Context) {
 		"data":    count,
 	})
 	return
-}
-
-func ClearLogBodyDetails(c *gin.Context) {
-	task, err := service.StartLogBodyCleanupTask()
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	common.ApiSuccess(c, task.ToResponse())
 }

@@ -105,22 +105,40 @@ func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
 	return channelQuery, nil
 }
 
-func GetChannel(group string, model string, retry int, requestPath string, excludedChannelIDs ...map[int]struct{}) (*Channel, error) {
-	var excluded map[int]struct{}
-	if len(excludedChannelIDs) > 0 {
-		excluded = excludedChannelIDs[0]
-	}
-	return GetChannelWithOptions(group, model, retry, requestPath, excluded, ChannelSelectionOptions{})
-}
+func GetChannel(group string, model string, retry int, requestPath string) (*Channel, error) {
+	var abilities []Ability
 
-func GetChannelWithOptions(group string, model string, retry int, requestPath string, excludedChannelIDs map[int]struct{}, options ChannelSelectionOptions) (*Channel, error) {
-	abilities, err := getHealthyAbilities(group, model, retry, requestPath, excludedChannelIDs, options)
+	var err error = nil
+	channelQuery, err := getChannelQuery(group, model, retry)
 	if err != nil {
 		return nil, err
 	}
+	if common.UsingMainDatabase(common.DatabaseTypeSQLite) || common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+		err = channelQuery.Order("weight DESC").Find(&abilities).Error
+	} else {
+		err = channelQuery.Order("weight DESC").Find(&abilities).Error
+	}
+	if err != nil {
+		return nil, err
+	}
+	abilities = filterAbilitiesByRequestPathAndModel(abilities, requestPath, model)
 	channel := Channel{}
 	if len(abilities) > 0 {
-		channel.Id = abilities[0].ChannelId
+		// Randomly choose one
+		weightSum := uint(0)
+		for _, ability_ := range abilities {
+			weightSum += ability_.Weight + 10
+		}
+		// Randomly choose one
+		weight := common.GetRandomInt(int(weightSum))
+		for _, ability_ := range abilities {
+			weight -= int(ability_.Weight) + 10
+			//log.Printf("weight: %d, ability weight: %d", weight, *ability_.Weight)
+			if weight <= 0 {
+				channel.Id = ability_.ChannelId
+				break
+			}
+		}
 	} else {
 		return nil, nil
 	}
@@ -128,188 +146,11 @@ func GetChannelWithOptions(group string, model string, retry int, requestPath st
 	return &channel, err
 }
 
-type abilityRuntimeCandidate struct {
-	ability   Ability
-	candidate runtimeSelectionCandidate
-}
-
-func getHealthyAbilities(group string, modelName string, retry int, requestPath string, excludedChannelIDs map[int]struct{}, options ChannelSelectionOptions) ([]Ability, error) {
-	var priorities []int
-	err := DB.Model(&Ability{}).
-		Select("DISTINCT(priority)").
-		Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, modelName, true).
-		Order("priority DESC").
-		Pluck("priority", &priorities).Error
-	if err != nil {
-		return nil, err
-	}
-	if len(priorities) == 0 {
-		return nil, nil
-	}
-	if retry >= len(priorities) {
-		retry = len(priorities) - 1
-	}
-
-	retainedProbeCandidates := make([]abilityRuntimeCandidate, 0)
-	for i := retry; i < len(priorities); i++ {
-		var abilities []Ability
-		err = DB.Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = ?", group, modelName, true, priorities[i]).
-			Order("weight DESC").
-			Find(&abilities).Error
-		if err != nil {
-			return nil, err
-		}
-		abilities, err = filterAbilitiesBySelectionOptions(abilities, options)
-		if err != nil {
-			return nil, err
-		}
-		abilities = filterAbilitiesByRequestPathAndModel(abilities, requestPath, modelName)
-		normalCandidates := collectAbilityRuntimeCandidates(abilities, modelName, false, excludedChannelIDs)
-		probeCandidates := collectAbilityRuntimeCandidates(abilities, modelName, true, excludedChannelIDs)
-		probeCandidates = filterAbilityProbeCandidates(probeCandidates, normalCandidates)
-		if len(normalCandidates) > 0 {
-			candidates := make([]abilityRuntimeCandidate, 0, len(retainedProbeCandidates)+len(normalCandidates)+len(probeCandidates))
-			candidates = append(candidates, retainedProbeCandidates...)
-			candidates = append(candidates, normalCandidates...)
-			candidates = append(candidates, probeCandidates...)
-			selected, ok, err := selectAbilityRuntimeCandidate(group, modelName, candidates)
-			if err != nil {
-				return nil, err
-			}
-			if ok {
-				return []Ability{selected}, nil
-			}
-			return nil, nil
-		}
-		retainedProbeCandidates = append(retainedProbeCandidates, probeCandidates...)
-	}
-	if len(retainedProbeCandidates) > 0 {
-		selected, ok, err := selectAbilityRuntimeCandidate(group, modelName, retainedProbeCandidates)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			return []Ability{selected}, nil
-		}
-	}
-	return nil, nil
-}
-
-func collectAbilityRuntimeCandidates(abilities []Ability, modelName string, probe bool, excludedChannelIDs map[int]struct{}) []abilityRuntimeCandidate {
-	candidates := make([]abilityRuntimeCandidate, 0, len(abilities))
-	for _, ability := range abilities {
-		if _, excluded := excludedChannelIDs[ability.ChannelId]; excluded {
-			continue
-		}
-		var available bool
-		var inflight int
-		if probe {
-			available, inflight = getChannelProbeRuntimeState(ability.ChannelId, modelName)
-		} else {
-			available, inflight = getChannelRuntimeState(ability.ChannelId, modelName)
-		}
-		if !available {
-			continue
-		}
-		priority := int64(0)
-		if ability.Priority != nil {
-			priority = *ability.Priority
-		}
-		weight := int(ability.Weight)
-		candidates = append(candidates, abilityRuntimeCandidate{
-			ability: ability,
-			candidate: runtimeSelectionCandidate{
-				ChannelID:       ability.ChannelId,
-				Priority:        priority,
-				ModelName:       modelName,
-				Weight:          weight,
-				EffectiveWeight: runtimeCandidateEffectiveWeight(ability.ChannelId, modelName, weight, inflight, probe),
-				Inflight:        inflight,
-				Probe:           probe,
-			},
-		})
-	}
-	return candidates
-}
-
-func filterAbilityProbeCandidates(probeCandidates []abilityRuntimeCandidate, normalCandidates []abilityRuntimeCandidate) []abilityRuntimeCandidate {
-	if len(probeCandidates) == 0 || len(normalCandidates) == 0 {
-		return probeCandidates
-	}
-	normalByChannelID := make(map[int]struct{}, len(normalCandidates))
-	for _, candidate := range normalCandidates {
-		normalByChannelID[candidate.candidate.ChannelID] = struct{}{}
-	}
-	filtered := probeCandidates[:0]
-	for _, candidate := range probeCandidates {
-		if _, normal := normalByChannelID[candidate.candidate.ChannelID]; normal {
-			continue
-		}
-		filtered = append(filtered, candidate)
-	}
-	return filtered
-}
-
-func selectAbilityRuntimeCandidate(group string, modelName string, candidates []abilityRuntimeCandidate) (Ability, bool, error) {
-	for len(candidates) > 0 {
-		runtimeCandidates := make([]runtimeSelectionCandidate, 0, len(candidates))
-		for _, candidate := range candidates {
-			runtimeCandidates = append(runtimeCandidates, candidate.candidate)
-		}
-		selected, err := selectRuntimeCandidateWithProbeClaim(group, modelName, runtimeCandidates)
-		if err != nil {
-			return Ability{}, false, err
-		}
-		for i, candidate := range candidates {
-			if candidate.candidate.ChannelID == selected.ChannelID && candidate.candidate.Probe == selected.Probe {
-				return candidate.ability, true, nil
-			}
-			if candidate.candidate.ChannelID == selected.ChannelID {
-				candidates = append(candidates[:i], candidates[i+1:]...)
-				break
-			}
-		}
-	}
-	return Ability{}, false, nil
-}
-
-func filterAbilitiesBySelectionOptions(abilities []Ability, options ChannelSelectionOptions) ([]Ability, error) {
-	if !options.RequireImageInputSupport || len(abilities) == 0 {
-		return abilities, nil
-	}
-
-	channelIds := make([]int, 0, len(abilities))
-	seen := make(map[int]struct{}, len(abilities))
-	for _, ability := range abilities {
-		if _, ok := seen[ability.ChannelId]; ok {
-			continue
-		}
-		seen[ability.ChannelId] = struct{}{}
-		channelIds = append(channelIds, ability.ChannelId)
-	}
-
-	var channels []*Channel
-	if err := DB.Select("id", "settings").Where("id IN ?", channelIds).Find(&channels).Error; err != nil {
-		return nil, err
-	}
-	supportsImageInputByID := make(map[int]bool, len(channels))
-	for _, channel := range channels {
-		supportsImageInputByID[channel.Id] = channel.SupportsImageInput()
-	}
-
-	filtered := make([]Ability, 0, len(abilities))
-	for _, ability := range abilities {
-		if supportsImageInputByID[ability.ChannelId] {
-			filtered = append(filtered, ability)
-		}
-	}
-	return filtered, nil
-}
-
-// filterAbilitiesByRequestPathAndModel restricts candidates by request path and model for the DB
-// (non-memory-cache) selection path. Only Advanced Custom (type 58) channels are
-// path-checked: kept only when one of their routes matches requestPath and model; all other
-// channel types always pass. When requestPath is empty, filtering is skipped.
+// filterAbilitiesByRequestPathAndModel restricts candidates by request path and
+// model for the DB (non-memory-cache) selection path. Only Advanced Custom
+// (type 58) channels are path-checked: kept only when one of their routes matches
+// requestPath and model; all other channel types always pass. When requestPath is
+// empty, filtering is skipped.
 func filterAbilitiesByRequestPathAndModel(abilities []Ability, requestPath string, model string) []Ability {
 	if requestPath == "" || len(abilities) == 0 {
 		return abilities

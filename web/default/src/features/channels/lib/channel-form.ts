@@ -205,17 +205,10 @@ export const channelFormSchema = z
     allow_speed: z.boolean().optional(), // Anthropic: speed mode control
     claude_beta_query: z.boolean().optional(), // Anthropic: beta query passthrough
     disable_task_polling_sleep: z.boolean().optional(),
-    supports_image_input: z.boolean().optional(),
     // Upstream model update settings (stored in settings JSON)
     upstream_model_update_check_enabled: z.boolean().optional(),
     upstream_model_update_auto_sync_enabled: z.boolean().optional(),
     upstream_model_update_ignored_models: z.string().optional(),
-    // Upstream key multiplier monitor settings (stored in settings JSON)
-    upstream_key_multiplier_enabled: z.boolean().optional(),
-    upstream_key_multiplier_format: z.enum(['sub2api', 'new-api']).optional(),
-    upstream_key_multiplier_base_url: z.string().optional(),
-    upstream_key_multiplier_username: z.string().optional(),
-    upstream_key_multiplier_password: z.string().optional(),
   })
   .superRefine((data, ctx) => {
     if ([3, 8, 36, 45].includes(data.type) && !data.base_url?.trim()) {
@@ -297,30 +290,6 @@ export const channelFormSchema = z
         'Vertex AI API Key mode does not support batch creation'
       )
     }
-
-    if (data.upstream_key_multiplier_enabled) {
-      if (!data.upstream_key_multiplier_format) {
-        addRequiredIssue(
-          ctx,
-          'upstream_key_multiplier_format',
-          'Upstream format is required'
-        )
-      }
-      if (!data.upstream_key_multiplier_base_url?.trim()) {
-        addRequiredIssue(
-          ctx,
-          'upstream_key_multiplier_base_url',
-          'Upstream console URL is required'
-        )
-      }
-      if (!data.upstream_key_multiplier_username?.trim()) {
-        addRequiredIssue(
-          ctx,
-          'upstream_key_multiplier_username',
-          'Upstream account is required'
-        )
-      }
-    }
   })
 
 export type ChannelFormValues = z.infer<typeof channelFormSchema>
@@ -376,15 +345,9 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   allow_speed: false,
   claude_beta_query: false,
   disable_task_polling_sleep: false,
-  supports_image_input: true,
   upstream_model_update_check_enabled: false,
   upstream_model_update_auto_sync_enabled: false,
   upstream_model_update_ignored_models: '',
-  upstream_key_multiplier_enabled: false,
-  upstream_key_multiplier_format: 'new-api',
-  upstream_key_multiplier_base_url: '',
-  upstream_key_multiplier_username: '',
-  upstream_key_multiplier_password: '',
   advanced_custom: '',
 }
 
@@ -438,15 +401,9 @@ export function transformChannelToFormDefaults(
   let allowSpeed = false
   let claudeBetaQuery = false
   let disableTaskPollingSleep = false
-  let supportsImageInput = true
   let upstreamModelUpdateCheckEnabled = false
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
-  let upstreamKeyMultiplierEnabled = false
-  let upstreamKeyMultiplierFormat: 'sub2api' | 'new-api' = 'new-api'
-  let upstreamKeyMultiplierBaseUrl = ''
-  let upstreamKeyMultiplierUsername = ''
-  let upstreamKeyMultiplierPassword = ''
   let advancedCustom = ''
 
   if (channel.settings) {
@@ -464,7 +421,6 @@ export function transformChannelToFormDefaults(
       allowSpeed = parsed.allow_speed === true
       claudeBetaQuery = parsed.claude_beta_query === true
       disableTaskPollingSleep = parsed.disable_task_polling_sleep === true
-      supportsImageInput = parsed.supports_image_input !== false
       upstreamModelUpdateCheckEnabled =
         parsed.upstream_model_update_check_enabled === true
       upstreamModelUpdateAutoSyncEnabled =
@@ -474,18 +430,6 @@ export function transformChannelToFormDefaults(
       )
         ? parsed.upstream_model_update_ignored_models.join(',')
         : ''
-      if (
-        parsed.upstream_key_multiplier &&
-        typeof parsed.upstream_key_multiplier === 'object'
-      ) {
-        const monitor = parsed.upstream_key_multiplier
-        upstreamKeyMultiplierEnabled = monitor.enabled === true
-        upstreamKeyMultiplierFormat =
-          monitor.format === 'sub2api' ? 'sub2api' : 'new-api'
-        upstreamKeyMultiplierBaseUrl = monitor.base_url || ''
-        upstreamKeyMultiplierUsername = monitor.username || ''
-        upstreamKeyMultiplierPassword = monitor.password || ''
-      }
       if (parsed.advanced_custom) {
         advancedCustom = stringifyAdvancedCustomConfig(parsed.advanced_custom)
       }
@@ -535,16 +479,10 @@ export function transformChannelToFormDefaults(
     allow_speed: allowSpeed,
     claude_beta_query: claudeBetaQuery,
     disable_task_polling_sleep: disableTaskPollingSleep,
-    supports_image_input: supportsImageInput,
     allow_safety_identifier: allowSafetyIdentifier,
     upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
-    upstream_key_multiplier_enabled: upstreamKeyMultiplierEnabled,
-    upstream_key_multiplier_format: upstreamKeyMultiplierFormat,
-    upstream_key_multiplier_base_url: upstreamKeyMultiplierBaseUrl,
-    upstream_key_multiplier_username: upstreamKeyMultiplierUsername,
-    upstream_key_multiplier_password: upstreamKeyMultiplierPassword,
     advanced_custom: advancedCustom,
   }
 }
@@ -647,12 +585,6 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
   settingsObj.disable_task_polling_sleep =
     formData.disable_task_polling_sleep === true
 
-  if (formData.supports_image_input === false) {
-    settingsObj.supports_image_input = false
-  } else if ('supports_image_input' in settingsObj) {
-    delete settingsObj.supports_image_input
-  }
-
   // Upstream model update settings (for model-fetchable channel types)
   if (MODEL_FETCHABLE_TYPES.has(formData.type)) {
     settingsObj.upstream_model_update_check_enabled =
@@ -677,24 +609,6 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     if (typeof settingsObj.upstream_model_update_last_check_time !== 'number') {
       settingsObj.upstream_model_update_last_check_time = 0
     }
-  }
-
-  const hasUpstreamKeyMultiplierSettings =
-    formData.upstream_key_multiplier_enabled === true ||
-    Boolean(formData.upstream_key_multiplier_base_url?.trim()) ||
-    Boolean(formData.upstream_key_multiplier_username?.trim()) ||
-    Boolean(formData.upstream_key_multiplier_password?.trim())
-
-  if (hasUpstreamKeyMultiplierSettings) {
-    settingsObj.upstream_key_multiplier = {
-      enabled: formData.upstream_key_multiplier_enabled === true,
-      format: formData.upstream_key_multiplier_format || 'new-api',
-      base_url: normalizeBaseUrl(formData.upstream_key_multiplier_base_url),
-      username: formData.upstream_key_multiplier_username || '',
-      password: formData.upstream_key_multiplier_password || '',
-    }
-  } else if ('upstream_key_multiplier' in settingsObj) {
-    delete settingsObj.upstream_key_multiplier
   }
 
   if (formData.type === CHANNEL_TYPE_ADVANCED_CUSTOM) {

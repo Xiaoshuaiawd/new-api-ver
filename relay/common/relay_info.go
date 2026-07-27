@@ -1,13 +1,11 @@
 package common
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -22,8 +20,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/tidwall/gjson"
 )
-
-var MarkChannelHealthFirstResponseFunc func(*gin.Context)
 
 type ThinkingContentInfo struct {
 	IsFirstThinkingContent  bool
@@ -90,30 +86,16 @@ type TokenCountMeta struct {
 }
 
 type RelayInfo struct {
-	TokenId                        int
-	TokenKey                       string
-	TokenGroup                     string
-	UserId                         int
-	UsingGroup                     string // 使用的分组，当auto跨分组重试时，会变动
-	UserGroup                      string // 用户所在分组
-	TokenUnlimited                 bool
-	StartTime                      time.Time
-	FirstResponseTime              time.Time
-	isFirstResponse                bool
-	attemptMu                      sync.RWMutex
-	attemptStartedAt               time.Time
-	attemptIndex                   int
-	upstreamHeadersReceived        bool
-	upstreamHeadersReceivedAt      time.Time
-	downstreamAckSent              bool
-	downstreamSemanticStarted      bool
-	upstreamFirstEventAt           time.Time
-	downstreamFirstDataAt          time.Time
-	downstreamFirstSemanticChunkAt time.Time
-	downstreamResponseCommitted    bool
-	attemptSucceeded               bool
-	attemptKeepAliveStop           context.CancelFunc
-	attemptKeepAliveDone           <-chan struct{}
+	TokenId           int
+	TokenKey          string
+	TokenGroup        string
+	UserId            int
+	UsingGroup        string // 使用的分组，当auto跨分组重试时，会变动
+	UserGroup         string // 用户所在分组
+	TokenUnlimited    bool
+	StartTime         time.Time
+	FirstResponseTime time.Time
+	isFirstResponse   bool
 	//SendLastReasoningResponse bool
 	IsStream               bool
 	IsGeminiBatchEmbedding bool
@@ -201,7 +183,6 @@ type RelayInfo struct {
 	FinalRequestRelayFormat types.RelayFormat
 
 	StreamStatus *StreamStatus
-	GinContext   *gin.Context
 
 	ThinkingContentInfo
 	TokenCountMeta
@@ -486,8 +467,7 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		reqId = common.NewRequestId()
 	}
 	info := &RelayInfo{
-		Request:    request,
-		GinContext: c,
+		Request: request,
 
 		RequestId:  reqId,
 		UserId:     common.GetContextKeyInt(c, constant.ContextKeyUserId),
@@ -592,8 +572,7 @@ func GenRelayInfo(c *gin.Context, relayFormat types.RelayFormat, request dto.Req
 		err = errors.New("request is not a OpenAIResponsesRequest")
 	case types.RelayFormatOpenAIResponsesCompaction:
 		if request, ok := request.(*dto.OpenAIResponsesCompactionRequest); ok {
-			info = GenRelayInfoResponsesCompaction(c, request)
-			break
+			return GenRelayInfoResponsesCompaction(c, request), nil
 		}
 		return nil, errors.New("request is not a OpenAIResponsesCompactionRequest")
 	case types.RelayFormatTask:
@@ -614,9 +593,6 @@ func GenRelayInfo(c *gin.Context, relayFormat types.RelayFormat, request dto.Req
 	}
 
 	info.InitRequestConversionChain()
-	if c != nil {
-		c.Set("relay_info", info)
-	}
 	return info, nil
 }
 
@@ -686,219 +662,14 @@ func (info *RelayInfo) GetEstimatePromptTokens() int {
 }
 
 func (info *RelayInfo) SetFirstResponseTime() {
-	if info == nil {
-		return
-	}
-	info.attemptMu.Lock()
-	defer info.attemptMu.Unlock()
 	if info.isFirstResponse {
-		now := time.Now()
-		info.FirstResponseTime = now
-		info.upstreamFirstEventAt = now
+		info.FirstResponseTime = time.Now()
 		info.isFirstResponse = false
-		if MarkChannelHealthFirstResponseFunc != nil {
-			MarkChannelHealthFirstResponseFunc(info.GinContext)
-		}
 	}
 }
 
 func (info *RelayInfo) HasSendResponse() bool {
-	if info == nil {
-		return false
-	}
-	info.attemptMu.RLock()
-	defer info.attemptMu.RUnlock()
-	return !info.FirstResponseTime.IsZero() && info.FirstResponseTime.After(info.attemptStartTimeLocked())
-}
-
-func (info *RelayInfo) FirstResponseDuration() (time.Duration, bool) {
-	if info == nil {
-		return 0, false
-	}
-	info.attemptMu.RLock()
-	defer info.attemptMu.RUnlock()
-	if info.FirstResponseTime.IsZero() || !info.FirstResponseTime.After(info.attemptStartTimeLocked()) {
-		return 0, false
-	}
-	return info.FirstResponseTime.Sub(info.attemptStartTimeLocked()), true
-}
-
-// AttemptTimingMetrics returns attempt-relative lifecycle timings in
-// milliseconds. Retry attempts therefore cannot inherit timings from a
-// previous channel.
-func (info *RelayInfo) AttemptTimingMetrics() map[string]int64 {
-	if info == nil {
-		return nil
-	}
-	info.attemptMu.RLock()
-	defer info.attemptMu.RUnlock()
-	startedAt := info.attemptStartTimeLocked()
-	if startedAt.IsZero() {
-		return nil
-	}
-	gatewayStartedAt := info.StartTime
-	if gatewayStartedAt.IsZero() {
-		gatewayStartedAt = startedAt
-	}
-	metrics := map[string]int64{
-		"gateway_processing_ms": time.Since(gatewayStartedAt).Milliseconds(),
-	}
-	if !info.upstreamHeadersReceivedAt.IsZero() {
-		metrics["upstream_headers_ms"] = info.upstreamHeadersReceivedAt.Sub(startedAt).Milliseconds()
-	}
-	if !info.upstreamFirstEventAt.IsZero() {
-		metrics["upstream_first_event_ms"] = info.upstreamFirstEventAt.Sub(startedAt).Milliseconds()
-	}
-	if !info.downstreamFirstDataAt.IsZero() {
-		metrics["downstream_first_flush_ms"] = info.downstreamFirstDataAt.Sub(startedAt).Milliseconds()
-	}
-	if !info.downstreamFirstSemanticChunkAt.IsZero() {
-		metrics["downstream_first_semantic_chunk_ms"] = info.downstreamFirstSemanticChunkAt.Sub(startedAt).Milliseconds()
-	}
-	return metrics
-}
-
-// BeginRelayAttempt clears state whose meaning is limited to one selected
-// channel. Request identity, billing and original request metadata remain on
-// RelayInfo for the complete retry chain.
-func (info *RelayInfo) BeginRelayAttempt(startedAt time.Time) {
-	if info == nil {
-		return
-	}
-	info.StopAttemptKeepAlive()
-	if startedAt.IsZero() {
-		startedAt = time.Now()
-	}
-	info.attemptMu.Lock()
-	defer info.attemptMu.Unlock()
-	info.attemptStartedAt = startedAt
-	info.attemptIndex++
-	info.FirstResponseTime = startedAt.Add(-time.Second)
-	info.isFirstResponse = true
-	info.ReceivedResponseCount = 0
-	info.SendResponseCount = 0
-	info.upstreamHeadersReceived = false
-	info.upstreamHeadersReceivedAt = time.Time{}
-	info.downstreamAckSent = false
-	info.downstreamSemanticStarted = false
-	info.upstreamFirstEventAt = time.Time{}
-	info.downstreamFirstDataAt = time.Time{}
-	info.downstreamFirstSemanticChunkAt = time.Time{}
-	info.attemptSucceeded = false
-}
-
-func (info *RelayInfo) SetAttemptKeepAlive(stop context.CancelFunc, done <-chan struct{}) {
-	if info == nil || stop == nil || done == nil {
-		return
-	}
-	info.StopAttemptKeepAlive()
-	info.attemptMu.Lock()
-	info.attemptKeepAliveStop = stop
-	info.attemptKeepAliveDone = done
-	info.attemptMu.Unlock()
-}
-
-func (info *RelayInfo) StopAttemptKeepAlive() {
-	if info == nil {
-		return
-	}
-	info.attemptMu.Lock()
-	stop := info.attemptKeepAliveStop
-	done := info.attemptKeepAliveDone
-	info.attemptKeepAliveStop = nil
-	info.attemptKeepAliveDone = nil
-	info.attemptMu.Unlock()
-	if stop != nil {
-		stop()
-		<-done
-	}
-}
-
-func (info *RelayInfo) MarkUpstreamHeadersReceived() {
-	if info == nil {
-		return
-	}
-	info.attemptMu.Lock()
-	info.upstreamHeadersReceived = true
-	if info.upstreamHeadersReceivedAt.IsZero() {
-		info.upstreamHeadersReceivedAt = time.Now()
-	}
-	info.attemptMu.Unlock()
-}
-
-func (info *RelayInfo) MarkDownstreamAckSent() {
-	if info == nil {
-		return
-	}
-	info.attemptMu.Lock()
-	defer info.attemptMu.Unlock()
-	if !info.downstreamAckSent {
-		info.downstreamAckSent = true
-		info.downstreamResponseCommitted = true
-		if info.downstreamFirstDataAt.IsZero() {
-			info.downstreamFirstDataAt = time.Now()
-		}
-	}
-}
-
-func (info *RelayInfo) MarkDownstreamSemanticStarted() {
-	if info == nil {
-		return
-	}
-	info.attemptMu.Lock()
-	defer info.attemptMu.Unlock()
-	now := time.Now()
-	if info.downstreamFirstDataAt.IsZero() {
-		info.downstreamFirstDataAt = now
-	}
-	if !info.downstreamSemanticStarted {
-		info.downstreamSemanticStarted = true
-		info.downstreamResponseCommitted = true
-		info.downstreamFirstSemanticChunkAt = now
-	}
-}
-
-func (info *RelayInfo) HasDownstreamSemanticStarted() bool {
-	if info == nil {
-		return false
-	}
-	info.attemptMu.RLock()
-	defer info.attemptMu.RUnlock()
-	return info.downstreamSemanticStarted
-}
-
-func (info *RelayInfo) HasDownstreamResponseCommitted() bool {
-	if info == nil {
-		return false
-	}
-	info.attemptMu.RLock()
-	defer info.attemptMu.RUnlock()
-	return info.downstreamResponseCommitted
-}
-
-func (info *RelayInfo) MarkAttemptSucceeded() {
-	if info == nil {
-		return
-	}
-	info.attemptMu.Lock()
-	info.attemptSucceeded = true
-	info.attemptMu.Unlock()
-}
-
-func (info *RelayInfo) IsAttemptSuccessful() bool {
-	if info == nil {
-		return false
-	}
-	info.attemptMu.RLock()
-	defer info.attemptMu.RUnlock()
-	return info.attemptSucceeded
-}
-
-func (info *RelayInfo) attemptStartTimeLocked() time.Time {
-	if !info.attemptStartedAt.IsZero() {
-		return info.attemptStartedAt
-	}
-	return info.StartTime
+	return info.FirstResponseTime.After(info.StartTime)
 }
 
 type TaskRelayInfo struct {

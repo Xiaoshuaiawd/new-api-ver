@@ -16,12 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type {
-  ChannelAutoPrioritySettings,
-  ChannelHealthSettings,
-  ChannelMultiplierMonitorSettings,
-} from './integrations/channel-health-settings'
-
 export type SystemOption = {
   key: string
   value: string
@@ -43,25 +37,6 @@ export type UpdateOptionRequest = {
 export type UpdateOptionResponse = {
   success: boolean
   message: string
-}
-
-export type ChannelAutoPriorityApplySummary = {
-  updated_channels: number
-  skipped_channels: number
-  items?: Array<{
-    channel_id: number
-    name: string
-    multiplier?: number
-    priority?: number
-    weight?: number
-    reason?: string
-  }>
-}
-
-export type ChannelAutoPriorityApplyResponse = {
-  success: boolean
-  message: string
-  data?: ChannelAutoPriorityApplySummary
 }
 
 export type ConfirmPaymentComplianceResponse = {
@@ -117,25 +92,6 @@ export type LogCleanupTask = SystemTask<
   LogCleanupTaskPayload,
   LogCleanupTaskState,
   LogCleanupTaskResult
->
-
-export type LogBodyCleanupTaskPayload = {
-  batch_size: number
-}
-
-export type LogBodyCleanupTaskState = {
-  updated_count: number
-  progress: number
-}
-
-export type LogBodyCleanupTaskResult = {
-  updated_count: number
-}
-
-export type LogBodyCleanupTask = SystemTask<
-  LogBodyCleanupTaskPayload,
-  LogBodyCleanupTaskState,
-  LogBodyCleanupTaskResult
 >
 
 export type SystemTaskResponse<TTask = SystemTask | null> = {
@@ -284,7 +240,6 @@ export type ModelSettings = {
   'channel_affinity_setting.enabled': boolean
   'channel_affinity_setting.switch_on_success': boolean
   'channel_affinity_setting.keep_on_channel_disabled': boolean
-  'channel_affinity_setting.recovery_strategy': string
   'channel_affinity_setting.max_entries': number
   'channel_affinity_setting.default_ttl_seconds': number
   'channel_affinity_setting.rules': string
@@ -399,7 +354,6 @@ export type OperationsSettings = {
   WorkerValidKey: string
   WorkerAllowHttpImageRequestEnabled: boolean
   LogConsumeEnabled: boolean
-  LogBodyCaptureEnabled: boolean
   'performance_setting.disk_cache_enabled': boolean
   'performance_setting.disk_cache_threshold_mb': number
   'performance_setting.disk_cache_max_size_mb': number
@@ -412,20 +366,7 @@ export type OperationsSettings = {
   'perf_metrics_setting.flush_interval': number
   'perf_metrics_setting.bucket_time': 'hour' | 'minute' | '5min'
   'perf_metrics_setting.retention_days': number
-  'channel_alert_setting.enabled': boolean
-  'channel_alert_setting.balance_alert_enabled': boolean
-  'channel_alert_setting.multiplier_change_enabled': boolean
-  'channel_alert_setting.balance_threshold': number
-  'channel_alert_setting.min_interval_seconds': number
-  'channel_alert_setting.feishu_enabled': boolean
-  'channel_alert_setting.feishu_webhook_url': string
-  'channel_alert_setting.feishu_secret': string
-  'channel_alert_setting.dingtalk_enabled': boolean
-  'channel_alert_setting.dingtalk_webhook_url': string
-  'channel_alert_setting.dingtalk_secret': string
-} & ChannelHealthSettings &
-  ChannelMultiplierMonitorSettings &
-  ChannelAutoPrioritySettings
+}
 
 export type SecuritySettings = {
   ModelRequestRateLimitEnabled: boolean

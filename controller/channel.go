@@ -53,43 +53,6 @@ type OpenAIModelsResponse struct {
 	Success bool          `json:"success"`
 }
 
-type channelRuntimeHealthItem struct {
-	*model.Channel
-	RuntimeHealth      service.ChannelHealthSnapshot     `json:"runtime_health"`
-	UpstreamMultiplier service.ChannelMultiplierSnapshot `json:"upstream_multiplier"`
-}
-
-func sanitizeChannelForResponse(channel *model.Channel) *model.Channel {
-	if channel == nil {
-		return nil
-	}
-	safe := *channel
-	safe.OtherSettings = service.RedactChannelMultiplierMonitorSettings(channel.OtherSettings)
-	return &safe
-}
-
-func withChannelRuntimeHealth(channel *model.Channel) channelRuntimeHealthItem {
-	if channel == nil {
-		return channelRuntimeHealthItem{}
-	}
-	return channelRuntimeHealthItem{
-		Channel:            sanitizeChannelForResponse(channel),
-		RuntimeHealth:      service.GetChannelHealthSnapshotForChannelDisplay(channel),
-		UpstreamMultiplier: service.GetChannelMultiplierSnapshotForDisplay(channel),
-	}
-}
-
-func withChannelsRuntimeHealth(channels []*model.Channel) []channelRuntimeHealthItem {
-	items := make([]channelRuntimeHealthItem, 0, len(channels))
-	for _, channel := range channels {
-		if channel == nil {
-			continue
-		}
-		items = append(items, withChannelRuntimeHealth(channel))
-	}
-	return items
-}
-
 func parseStatusFilter(statusParam string) int {
 	switch strings.ToLower(statusParam) {
 	case "enabled", "1":
@@ -221,7 +184,7 @@ func GetAllChannels(c *gin.Context) {
 		typeCounts[r.Type] = r.Count
 	}
 	common.ApiSuccess(c, gin.H{
-		"items":       withChannelsRuntimeHealth(channelData),
+		"items":       channelData,
 		"total":       total,
 		"page":        pageInfo.GetPage(),
 		"page_size":   pageInfo.GetPageSize(),
@@ -416,7 +379,7 @@ func SearchChannels(c *gin.Context) {
 		"success": true,
 		"message": "",
 		"data": gin.H{
-			"items":       withChannelsRuntimeHealth(pagedData),
+			"items":       pagedData,
 			"total":       total,
 			"type_counts": typeCounts,
 		},
@@ -441,7 +404,7 @@ func GetChannel(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    withChannelRuntimeHealth(channel),
+		"data":    channel,
 	})
 	return
 }
@@ -723,9 +686,6 @@ func AddChannel(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	for _, channel := range channels {
-		service.RefreshChannelMultiplierSnapshotAsync(channel.Id)
-	}
 	service.ResetProxyClientCache()
 	recordManageAudit(c, "channel.create", map[string]interface{}{
 		"name":  addChannelRequest.Channel.Name,
@@ -994,9 +954,6 @@ func UpdateChannel(c *gin.Context) {
 
 	// Always copy the original ChannelInfo so that fields like IsMultiKey and MultiKeySize are retained.
 	channel.ChannelInfo = originChannel.ChannelInfo
-	if _, ok := requestData["settings"]; ok {
-		channel.OtherSettings = service.MergeChannelMultiplierMonitorSecret(channel.OtherSettings, originChannel.OtherSettings)
-	}
 
 	if channelHasSensitiveChanges(&channel, originChannel, requestData) &&
 		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite) {
@@ -1096,7 +1053,6 @@ func UpdateChannel(c *gin.Context) {
 	}
 	model.InitChannelCache()
 	service.ResetProxyClientCache()
-	service.RefreshChannelMultiplierSnapshotAsync(channel.Id)
 	// 记录变更的字段名（语言无关的字段标识），密钥仅记录"已更换"绝不记录内容。
 	changedFields := make([]string, 0)
 	if channel.Models != originChannel.Models {
@@ -1121,43 +1077,12 @@ func UpdateChannel(c *gin.Context) {
 	})
 	channel.Key = ""
 	clearChannelInfo(&channel.Channel)
-	channel.OtherSettings = service.RedactChannelMultiplierMonitorSettings(channel.OtherSettings)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
 		"data":    channel,
 	})
 	return
-}
-
-func RefreshChannelMultiplier(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
-		return
-	}
-	channel, err := model.GetChannelById(id, true)
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": "获取渠道信息失败，请稍后重试",
-		})
-		return
-	}
-	snapshot, err := service.RefreshChannelMultiplierSnapshot(c.Request.Context(), channel)
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": err.Error(),
-			"data":    snapshot,
-		})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    snapshot,
-	})
 }
 
 func UpdateChannelStatus(c *gin.Context) {

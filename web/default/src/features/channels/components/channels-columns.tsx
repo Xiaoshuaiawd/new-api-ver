@@ -23,9 +23,7 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
-  Gauge,
   ListOrdered,
-  RefreshCw,
   Shuffle,
   SlidersHorizontal,
 } from 'lucide-react'
@@ -40,7 +38,6 @@ import { ProviderBadge } from '@/components/provider-badge'
 import {
   StatusBadge,
   type StatusBadgeProps,
-  type StatusVariant,
 } from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
 import { TruncatedText } from '@/components/truncated-text'
@@ -61,10 +58,9 @@ import { toIntlLocale } from '@/i18n/languages'
 import { formatTimestampToDate } from '@/lib/format'
 import { truncateText } from '@/lib/utils'
 
-import { getCodexUsage, refreshChannelMultiplier } from '../api'
+import { getCodexUsage } from '../api'
 import { CHANNEL_STATUS_CONFIG, MODEL_FETCHABLE_TYPES } from '../constants'
 import {
-  channelsQueryKeys,
   formatRelativeTime,
   formatResponseTime,
   getBalanceVariant,
@@ -83,11 +79,7 @@ import {
 } from '../lib'
 import { parseUpstreamUpdateMeta } from '../lib/upstream-update-utils'
 import { ChannelRowActionsLayoutContext } from './channel-row-actions-context'
-import type {
-  Channel,
-  ChannelRuntimeHealth,
-  ChannelUpstreamMultiplier,
-} from '../types'
+import type { Channel } from '../types'
 import { useChannels } from './channels-provider'
 import { DataTableRowActions } from './data-table-row-actions'
 import { DataTableTagRowActions } from './data-table-tag-row-actions'
@@ -113,421 +105,6 @@ function parseIonetMeta(otherInfo: string | null | undefined): null | {
     return null
   }
   return null
-}
-
-function getRuntimeHealth(channel: Channel): ChannelRuntimeHealth {
-  return (
-    channel.runtime_health ?? {
-      channel_id: channel.id,
-      state: 'healthy',
-      state_v2: 'healthy',
-      traffic_percent: 100,
-      reason: '',
-      opened_at: 0,
-      next_probe_at: 0,
-      probe_in_progress: false,
-      consecutive_failure: 0,
-      probe_successes: 0,
-      probe_failures: 0,
-      inflight: 0,
-      window_samples: 0,
-      window_failures: 0,
-      error_rate: 0,
-      average_first_response_ms: 0,
-      p95_first_response_ms: 0,
-      runtime_available: true,
-      probe_available: true,
-      warmup_started_at: 0,
-      warmup_ends_at: 0,
-      warmup_percent: 100,
-      warmup_throttle_percent: 0,
-    }
-  )
-}
-
-function getUpstreamMultiplier(channel: Channel): ChannelUpstreamMultiplier {
-  return (
-    channel.upstream_multiplier ?? {
-      channel_id: channel.id,
-      enabled: false,
-      state: 'empty',
-      multiplier: 0,
-      balance: 0,
-      observed_at: 0,
-    }
-  )
-}
-
-function formatMultiplierValue(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return '-'
-  return `x${Number(value.toFixed(4)).toString()}`
-}
-
-function getUpstreamMultiplierBadgeConfig(
-  snapshot: ChannelUpstreamMultiplier,
-  t: (key: string) => string
-): { label: string; variant: StatusVariant; pulse?: boolean } {
-  if (snapshot.state === 'healthy') {
-    return {
-      label: formatMultiplierValue(snapshot.multiplier),
-      variant: 'cyan',
-    }
-  }
-  if (snapshot.state === 'stale') {
-    return {
-      label: formatMultiplierValue(snapshot.multiplier),
-      variant: 'warning',
-    }
-  }
-  if (snapshot.state === 'error') {
-    return { label: t('Multiplier error'), variant: 'danger' }
-  }
-  return { label: t('Multiplier pending'), variant: 'neutral', pulse: true }
-}
-
-function getUpstreamMultiplierStatusLabel(
-  snapshot: ChannelUpstreamMultiplier,
-  t: (key: string) => string
-): string {
-  if (snapshot.state === 'healthy') return t('Healthy')
-  if (snapshot.state === 'stale') return t('Stale')
-  if (snapshot.state === 'error') return t('Error')
-  return t('Waiting for first probe')
-}
-
-function getRuntimeHealthBadgeConfig(
-  health: ChannelRuntimeHealth,
-  t: (key: string) => string
-): { label: string; variant: StatusVariant; pulse?: boolean } {
-  if (health.state === 'probing') {
-    return { label: t('Probing'), variant: 'warning', pulse: true }
-  }
-  if (health.state_v2 === 'unavailable' || health.state === 'open') {
-    return { label: t('Unavailable'), variant: 'danger' }
-  }
-  if (health.state_v2 === 'degraded') {
-    return {
-      label: `${t('Degraded')} ${Math.max(0, health.traffic_percent ?? 0)}%`,
-      variant: 'warning',
-    }
-  }
-
-  switch (health.state) {
-    case 'warming':
-      return {
-        label: `${t('Warming')} ${Math.max(0, health.warmup_percent || 0)}%`,
-        variant: 'purple',
-      }
-    case 'healthy':
-      return { label: t('Healthy'), variant: 'success' }
-    default:
-      return { label: t('Unknown'), variant: 'neutral' }
-  }
-}
-
-function formatHealthPercent(value: number): string {
-  if (!Number.isFinite(value)) return '0%'
-  return `${Math.round(value * 100)}%`
-}
-
-function formatHealthTimestamp(timestamp: number): string {
-  if (!timestamp) return '-'
-  return formatTimestampToDate(timestamp)
-}
-
-function RuntimeHealthCell({ channel }: { channel: Channel }) {
-  const { t } = useTranslation()
-  const isTagRow = isTagAggregateRow(channel)
-
-  if (isTagRow) {
-    const children = (channel as TagRow).children || []
-    const total = children.length
-    const openCount = children.filter((child) => {
-      const health = getRuntimeHealth(child)
-      return (
-        health.state !== 'probing' &&
-        (health.state_v2 === 'unavailable' || health.state === 'open')
-      )
-    }).length
-    const probingCount = children.filter(
-      (child) => getRuntimeHealth(child).state === 'probing'
-    ).length
-    const degradedCount = children.filter((child) => {
-      const health = getRuntimeHealth(child)
-      return health.state_v2 === 'degraded'
-    }).length
-    const warmingCount = children.filter((child) => {
-      const health = getRuntimeHealth(child)
-      return health.state === 'warming' && health.state_v2 == null
-    }).length
-
-    if (openCount > 0) {
-      return (
-        <StatusBadge
-          label={`${t('Unavailable')} (${openCount}/${total})`}
-          variant='danger'
-          size='sm'
-          copyable={false}
-          className='-ml-1.5'
-        />
-      )
-    }
-    if (probingCount > 0) {
-      return (
-        <StatusBadge
-          label={`${t('Probing')} (${probingCount}/${total})`}
-          variant='warning'
-          size='sm'
-          pulse
-          copyable={false}
-          className='-ml-1.5'
-        />
-      )
-    }
-    if (degradedCount > 0) {
-      return (
-        <StatusBadge
-          label={`${t('Degraded')} (${degradedCount}/${total})`}
-          variant='warning'
-          size='sm'
-          copyable={false}
-          className='-ml-1.5'
-        />
-      )
-    }
-    if (warmingCount > 0) {
-      return (
-        <StatusBadge
-          label={`${t('Warming')} (${warmingCount}/${total})`}
-          variant='purple'
-          size='sm'
-          copyable={false}
-          className='-ml-1.5'
-        />
-      )
-    }
-    return (
-      <StatusBadge
-        label={`${t('Healthy')} (${total})`}
-        variant='success'
-        size='sm'
-        copyable={false}
-        className='-ml-1.5'
-      />
-    )
-  }
-
-  const health = getRuntimeHealth(channel)
-  const config = getRuntimeHealthBadgeConfig(health, t)
-  const hasDetails =
-    health.reason ||
-    health.inflight > 0 ||
-    health.window_samples > 0 ||
-    health.next_probe_at > 0 ||
-    health.opened_at > 0 ||
-    health.availability_reason ||
-    health.probe_unavailable_reason ||
-    health.average_first_response_ms > 0 ||
-    health.p95_first_response_ms > 0 ||
-    health.state_v2 === 'degraded' ||
-    health.state === 'warming'
-
-  const badge = (
-    <StatusBadge
-      label={config.label}
-      variant={config.variant}
-      size='sm'
-      pulse={config.pulse}
-      copyable={false}
-      className='-ml-1.5'
-    />
-  )
-
-  if (!hasDetails) return badge
-
-  return (
-    <TooltipProvider delay={100}>
-      <Tooltip>
-        <TooltipTrigger render={<span />}>{badge}</TooltipTrigger>
-        <TooltipContent side='top' className='max-w-xs'>
-          <div className='space-y-1 text-xs'>
-            {health.reason && (
-              <div>
-                {t('Reason:')} {health.reason}
-              </div>
-            )}
-            {health.availability_reason && (
-              <div>
-                {t('Availability:')} {health.availability_reason}
-              </div>
-            )}
-            {health.probe_unavailable_reason && (
-              <div>
-                {t('Probe unavailable:')} {health.probe_unavailable_reason}
-              </div>
-            )}
-            <div>
-              {t('Error rate:')} {formatHealthPercent(health.error_rate)}
-            </div>
-            <div>
-              {t('Window:')} {health.window_failures}/{health.window_samples}
-            </div>
-            {health.average_first_response_ms > 0 && (
-              <div>
-                {t('Average first response:')}{' '}
-                {formatResponseTime(health.average_first_response_ms)}
-              </div>
-            )}
-            {health.p95_first_response_ms > 0 && (
-              <div>
-                {t('P95 first response:')}{' '}
-                {formatResponseTime(health.p95_first_response_ms)}
-              </div>
-            )}
-            <div>
-              {t('Inflight:')} {health.inflight}
-            </div>
-            {health.opened_at > 0 && (
-              <div>
-                {t('Opened at:')} {formatHealthTimestamp(health.opened_at)}
-              </div>
-            )}
-            {health.next_probe_at > 0 && (
-              <div>
-                {t('Next probe:')} {formatHealthTimestamp(health.next_probe_at)}
-              </div>
-            )}
-            {health.state_v2 === 'degraded' && (
-              <div>
-                {t('Traffic:')} {health.traffic_percent ?? 0}%
-              </div>
-            )}
-            {health.state === 'warming' && health.state_v2 == null && (
-              <div>
-                {t('Warm-up:')} {health.warmup_percent}%
-              </div>
-            )}
-          </div>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  )
-}
-
-function UpstreamMultiplierBadge({ channel }: { channel: Channel }) {
-  const { t } = useTranslation()
-  const { sensitiveVisible } = useChannels()
-  const queryClient = useQueryClient()
-  const [isRefreshing, setIsRefreshing] = useState(false)
-  const snapshot = getUpstreamMultiplier(channel)
-
-  if (!snapshot.enabled) {
-    return null
-  }
-
-  const config = getUpstreamMultiplierBadgeConfig(snapshot, t)
-  const observedAt = snapshot.observed_at
-    ? formatTimestampToDate(snapshot.observed_at)
-    : '-'
-  const balance = sensitiveVisible
-    ? formatCurrencyFromUSD(snapshot.balance, {
-        digitsLarge: 2,
-        digitsSmall: 4,
-        abbreviate: false,
-      })
-    : SENSITIVE_MASK
-  const username = sensitiveVisible ? snapshot.username || '-' : SENSITIVE_MASK
-  const statusLabel = getUpstreamMultiplierStatusLabel(snapshot, t)
-
-  const handleRefresh = async () => {
-    setIsRefreshing(true)
-    try {
-      const res = await refreshChannelMultiplier(channel.id)
-      if (res.success) {
-        toast.success(t('Multiplier refreshed'))
-      } else {
-        toast.error(res.message || t('Multiplier refresh failed'))
-      }
-      await queryClient.invalidateQueries({
-        queryKey: channelsQueryKeys.lists(),
-      })
-    } finally {
-      setIsRefreshing(false)
-    }
-  }
-
-  return (
-    <TooltipProvider delay={100}>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <StatusBadge
-              icon={Gauge}
-              label={config.label}
-              variant={config.variant}
-              size='sm'
-              pulse={config.pulse}
-              copyable={false}
-              className='cursor-help'
-            />
-          }
-        />
-        <TooltipContent side='top' className='max-w-xs'>
-          <div className='space-y-1 text-xs'>
-            <div>
-              {t('Probe status:')} {statusLabel}
-            </div>
-            <div>
-              {t('Upstream format:')} {snapshot.format || '-'}
-            </div>
-            <div>
-              {t('Upstream account:')} {username}
-            </div>
-            <div>
-              {t('Current multiplier:')}{' '}
-              {formatMultiplierValue(snapshot.multiplier)}
-            </div>
-            {snapshot.observed_group && (
-              <div>
-                {t('Observed group:')} {snapshot.observed_group}
-              </div>
-            )}
-            {snapshot.observed_token_id && (
-              <div>
-                {t('Observed token:')} {snapshot.observed_token_id}
-              </div>
-            )}
-            <div>
-              {t('Upstream balance:')} {balance}
-            </div>
-            <div>
-              {t('Last probe:')} {observedAt}
-            </div>
-            {snapshot.reason && (
-              <div>
-                {t('Error reason:')} {snapshot.reason}
-              </div>
-            )}
-            <Button
-              type='button'
-              variant='outline'
-              size='sm'
-              className='mt-2 h-7 w-full gap-1.5 text-xs text-foreground hover:text-foreground'
-              disabled={isRefreshing}
-              onClick={handleRefresh}
-            >
-              <RefreshCw
-                className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`}
-              />
-              {isRefreshing
-                ? t('Refreshing multiplier...')
-                : t('Refresh multiplier')}
-            </Button>
-          </div>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  )
 }
 
 /**
@@ -1089,7 +666,6 @@ export function useChannelsColumns(
                       </Tooltip>
                     </TooltipProvider>
                   )}
-                  <UpstreamMultiplierBadge channel={channel} />
                   <UpstreamUpdateTags channel={channel} />
                 </div>
                 {channel.remark && (
@@ -1379,16 +955,6 @@ export function useChannelsColumns(
           return false
         },
         size: 120,
-        enableSorting: false,
-      },
-
-      // Runtime Health column
-      {
-        accessorKey: 'runtime_health',
-        header: t('Runtime Health'),
-        meta: { mobileHidden: false },
-        cell: ({ row }) => <RuntimeHealthCell channel={row.original} />,
-        size: 140,
         enableSorting: false,
       },
 

@@ -34,89 +34,6 @@ export const channelInfoSchema = z.object({
 
 export type ChannelInfo = z.infer<typeof channelInfoSchema>
 
-export const channelRuntimeHealthSchema = z
-  .object({
-    channel_id: z.number().default(0),
-    state: z.enum(['healthy', 'open', 'probing', 'warming']).or(z.string()),
-    state_v2: z.enum(['healthy', 'degraded', 'unavailable']).optional(),
-    traffic_percent: z.number().min(0).max(100).optional(),
-    reason: z.string().default(''),
-    opened_at: z.number().default(0),
-    next_probe_at: z.number().default(0),
-    probe_in_progress: z.boolean().default(false),
-    consecutive_failure: z.number().default(0),
-    probe_successes: z.number().default(0),
-    probe_failures: z.number().default(0),
-    inflight: z.number().default(0),
-    window_samples: z.number().default(0),
-    window_failures: z.number().default(0),
-    error_rate: z.number().default(0),
-    average_first_response_ms: z.number().default(0),
-    p95_first_response_ms: z.number().default(0),
-    runtime_available: z.boolean().default(true),
-    availability_reason: z.string().optional(),
-    probe_available: z.boolean().default(true),
-    probe_unavailable_reason: z.string().optional(),
-    warmup_started_at: z.number().default(0),
-    warmup_ends_at: z.number().default(0),
-    warmup_percent: z.number().default(0),
-    warmup_throttle_percent: z.number().default(0),
-  })
-  .default({
-    channel_id: 0,
-    state: 'healthy',
-    reason: '',
-    opened_at: 0,
-    next_probe_at: 0,
-    probe_in_progress: false,
-    consecutive_failure: 0,
-    probe_successes: 0,
-    probe_failures: 0,
-    inflight: 0,
-    window_samples: 0,
-    window_failures: 0,
-    error_rate: 0,
-    average_first_response_ms: 0,
-    p95_first_response_ms: 0,
-    runtime_available: true,
-    probe_available: true,
-    warmup_started_at: 0,
-    warmup_ends_at: 0,
-    warmup_percent: 100,
-    warmup_throttle_percent: 0,
-  })
-
-export type ChannelRuntimeHealth = z.infer<typeof channelRuntimeHealthSchema>
-
-export const channelUpstreamMultiplierSchema = z
-  .object({
-    channel_id: z.number().default(0),
-    enabled: z.boolean().default(false),
-    format: z.enum(['sub2api', 'new-api']).or(z.string()).optional(),
-    base_url: z.string().optional(),
-    state: z.enum(['healthy', 'stale', 'error', 'empty']).or(z.string()),
-    multiplier: z.number().default(0),
-    balance: z.number().default(0),
-    username: z.string().optional(),
-    observed_group: z.string().optional(),
-    observed_token_id: z.string().optional(),
-    reason: z.string().optional(),
-    observed_at: z.number().default(0),
-    expires_at: z.number().optional(),
-  })
-  .default({
-    channel_id: 0,
-    enabled: false,
-    state: 'empty',
-    multiplier: 0,
-    balance: 0,
-    observed_at: 0,
-  })
-
-export type ChannelUpstreamMultiplier = z.infer<
-  typeof channelUpstreamMultiplierSchema
->
-
 export const channelSchema = z.object({
   id: z.number(),
   type: z.number(),
@@ -154,8 +71,6 @@ export const channelSchema = z.object({
     multi_key_mode: 'random',
   }),
   settings: z.string().default('{}'), // other_settings JSON
-  runtime_health: channelRuntimeHealthSchema.nullish(),
-  upstream_multiplier: channelUpstreamMultiplierSchema.nullish(),
 })
 
 export type Channel = z.infer<typeof channelSchema>
@@ -186,22 +101,12 @@ export interface ChannelOtherSettings {
   allow_speed?: boolean
   claude_beta_query?: boolean
   disable_task_polling_sleep?: boolean
-  supports_image_input?: boolean
   upstream_model_update_check_enabled?: boolean
   upstream_model_update_auto_sync_enabled?: boolean
   upstream_model_update_ignored_models?: string[]
   upstream_model_update_last_check_time?: number
   upstream_model_update_last_detected_models?: string[]
-  upstream_key_multiplier?: ChannelMultiplierMonitorConfig
   advanced_custom?: AdvancedCustomConfig
-}
-
-export interface ChannelMultiplierMonitorConfig {
-  enabled?: boolean
-  format?: 'sub2api' | 'new-api'
-  base_url?: string
-  username?: string
-  password?: string
 }
 
 export interface AdvancedCustomConfig {
