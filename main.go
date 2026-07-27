@@ -166,7 +166,6 @@ func main() {
 	if err != nil {
 		common.SysError(fmt.Sprintf("start pyroscope error : %v", err))
 	}
-	common.InitPrometheusMetrics()
 
 	// Initialize HTTP server
 	server := gin.New()
@@ -188,9 +187,6 @@ func main() {
 	server.Use(middleware.RequestId())
 	server.Use(middleware.Version())
 	server.Use(middleware.I18n())
-	if common.GetPrometheusConfig().Enabled {
-		server.Use(middleware.Prometheus())
-	}
 	middleware.SetUpLogger(server)
 	InjectUmamiAnalytics()
 	InjectGoogleAnalytics()

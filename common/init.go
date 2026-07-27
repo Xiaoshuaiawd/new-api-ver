@@ -134,11 +134,6 @@ func InitEnv() {
 	SearchRateLimitNum = GetEnvOrDefault("SEARCH_RATE_LIMIT", 10)
 	SearchRateLimitDuration = int64(GetEnvOrDefault("SEARCH_RATE_LIMIT_DURATION", 60))
 
-	SetPrometheusConfig(PrometheusConfig{
-		Enabled:     GetEnvOrDefaultBool("PROMETHEUS_ENABLED", false),
-		Path:        GetEnvOrDefaultString("PROMETHEUS_PATH", defaultPrometheusPath),
-		BearerToken: GetEnvOrDefaultString("PROMETHEUS_BEARER_TOKEN", ""),
-	})
 	initConstantEnv()
 }
 

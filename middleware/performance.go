@@ -48,7 +48,6 @@ func checkSystemPerformance() *types.NewAPIError {
 
 	// 检查 CPU
 	if config.CPUThreshold > 0 && int(status.CPUUsage) > config.CPUThreshold {
-		common.ObserveSystemPerformanceRejection("cpu")
 		return types.NewErrorWithStatusCode(
 			fmt.Errorf("system cpu overloaded (current: %.1f%%, threshold: %d%%)", status.CPUUsage, config.CPUThreshold),
 			"system_cpu_overloaded", http.StatusServiceUnavailable)
@@ -56,7 +55,6 @@ func checkSystemPerformance() *types.NewAPIError {
 
 	// 检查内存
 	if config.MemoryThreshold > 0 && int(status.MemoryUsage) > config.MemoryThreshold {
-		common.ObserveSystemPerformanceRejection("memory")
 		return types.NewErrorWithStatusCode(
 			fmt.Errorf("system memory overloaded (current: %.1f%%, threshold: %d%%)", status.MemoryUsage, config.MemoryThreshold),
 			"system_memory_overloaded", http.StatusServiceUnavailable)
@@ -64,7 +62,6 @@ func checkSystemPerformance() *types.NewAPIError {
 
 	// 检查磁盘
 	if config.DiskThreshold > 0 && int(status.DiskUsage) > config.DiskThreshold {
-		common.ObserveSystemPerformanceRejection("disk")
 		return types.NewErrorWithStatusCode(
 			fmt.Errorf("system disk overloaded (current: %.1f%%, threshold: %d%%)", status.DiskUsage, config.DiskThreshold),
 			"system_disk_overloaded", http.StatusServiceUnavailable)
