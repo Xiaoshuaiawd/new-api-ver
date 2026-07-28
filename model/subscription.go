@@ -148,6 +148,8 @@ const (
 var (
 	ErrSubscriptionOrderNotFound      = errors.New("subscription order not found")
 	ErrSubscriptionOrderStatusInvalid = errors.New("subscription order status invalid")
+	ErrNoActiveSubscription           = errors.New("no active subscription")
+	ErrSubscriptionQuotaInsufficient  = errors.New("subscription quota insufficient")
 )
 
 const (
@@ -1004,6 +1006,22 @@ func HasActiveUserSubscription(userId int) (bool, error) {
 	return count > 0, nil
 }
 
+// HasUserSubscription returns whether the user has any subscription record,
+// including expired or cancelled subscriptions.
+func HasUserSubscription(userId int) (bool, error) {
+	if userId <= 0 {
+		return false, errors.New("invalid userId")
+	}
+	var count int64
+	if err := DB.Model(&UserSubscription{}).
+		Where("user_id = ?", userId).
+		Limit(1).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 // HasActiveUserSubscriptionForGroup returns whether the user has an active subscription
 // whose allowed group matches the request group.
 func HasActiveUserSubscriptionForGroup(userId int, usingGroup string) (bool, error) {
@@ -1466,7 +1484,7 @@ func PreConsumeUserSubscriptionForGroup(requestId string, userId int, modelName 
 	}
 	requestGroup := strings.TrimSpace(usingGroup)
 	if requestGroup == "" {
-		return nil, errors.New("no active subscription")
+		return nil, ErrNoActiveSubscription
 	}
 	now := GetDBTimestamp()
 
@@ -1499,10 +1517,10 @@ func PreConsumeUserSubscriptionForGroup(requestId string, userId int, modelName 
 			Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
 			Order("end_time asc, id asc").
 			Find(&subs).Error; err != nil {
-			return errors.New("no active subscription")
+			return ErrNoActiveSubscription
 		}
 		if len(subs) == 0 {
-			return errors.New("no active subscription")
+			return ErrNoActiveSubscription
 		}
 		for _, candidate := range subs {
 			sub := candidate
@@ -1556,7 +1574,7 @@ func PreConsumeUserSubscriptionForGroup(requestId string, userId int, modelName 
 			returnValue.AmountUsedAfter = sub.AmountUsed
 			return nil
 		}
-		return fmt.Errorf("subscription quota insufficient, need=%d", amount)
+		return fmt.Errorf("%w, need=%d", ErrSubscriptionQuotaInsufficient, amount)
 	})
 	if err != nil {
 		return nil, err

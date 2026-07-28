@@ -203,12 +203,6 @@ export function SubscriptionPlansCard({
   const hasActive = activeSubscriptions.length > 0
   const hasAny = allSubscriptions.length > 0
   const isAvailable = loading || plans.length > 0 || hasAny
-  const disablePref = !hasActive
-  const isSubPref =
-    billingPreference === 'subscription_first' ||
-    billingPreference === 'subscription_only'
-  const displayPref =
-    disablePref && isSubPref ? 'wallet_first' : billingPreference
 
   const planPurchaseCountMap = useMemo(() => {
     const map = new Map<number, number>()
@@ -323,7 +317,7 @@ export function SubscriptionPlansCard({
                     label: (
                       <>
                         {getBillingPreferenceLabel('subscription_first', t)}
-                        {disablePref ? ` (${t('No Active')})` : ''}
+                        {!hasActive ? ` (${t('No Active')})` : ''}
                       </>
                     ),
                   },
@@ -336,7 +330,7 @@ export function SubscriptionPlansCard({
                     label: (
                       <>
                         {getBillingPreferenceLabel('subscription_only', t)}
-                        {disablePref ? ` (${t('No Active')})` : ''}
+                        {!hasActive ? ` (${t('No Active')})` : ''}
                       </>
                     ),
                   },
@@ -345,32 +339,26 @@ export function SubscriptionPlansCard({
                     label: getBillingPreferenceLabel('wallet_only', t),
                   },
                 ]}
-                value={displayPref}
+                value={billingPreference}
                 onValueChange={(v) => v !== null && handlePreferenceChange(v)}
               >
                 <SelectTrigger className='h-8 flex-1 text-xs sm:w-[140px] sm:flex-none'>
                   <SelectValue>
-                    {getBillingPreferenceLabel(displayPref, t)}
+                    {getBillingPreferenceLabel(billingPreference, t)}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent alignItemWithTrigger={false}>
                   <SelectGroup>
-                    <SelectItem
-                      value='subscription_first'
-                      disabled={disablePref}
-                    >
+                    <SelectItem value='subscription_first'>
                       {getBillingPreferenceLabel('subscription_first', t)}
-                      {disablePref ? ` (${t('No Active')})` : ''}
+                      {!hasActive ? ` (${t('No Active')})` : ''}
                     </SelectItem>
                     <SelectItem value='wallet_first'>
                       {getBillingPreferenceLabel('wallet_first', t)}
                     </SelectItem>
-                    <SelectItem
-                      value='subscription_only'
-                      disabled={disablePref}
-                    >
+                    <SelectItem value='subscription_only'>
                       {getBillingPreferenceLabel('subscription_only', t)}
-                      {disablePref ? ` (${t('No Active')})` : ''}
+                      {!hasActive ? ` (${t('No Active')})` : ''}
                     </SelectItem>
                     <SelectItem value='wallet_only'>
                       {getBillingPreferenceLabel('wallet_only', t)}
@@ -392,15 +380,12 @@ export function SubscriptionPlansCard({
             </div>
           </div>
 
-          {disablePref && isSubPref && (
+          {!hasActive && billingPreference === 'subscription_first' && (
             <p className='text-muted-foreground mt-2 text-xs'>
               {t(
                 'Preference saved as {{pref}}, but no active subscription. Wallet will be used automatically.',
                 {
-                  pref:
-                    billingPreference === 'subscription_only'
-                      ? t('Subscription Only')
-                      : t('Subscription First'),
+                  pref: t('Subscription First'),
                 }
               )}
             </p>
@@ -546,12 +531,12 @@ export function SubscriptionPlansCard({
               const limit = Number(plan.max_purchase_per_user || 0)
               const count = planPurchaseCountMap.get(plan.id) || 0
               const reached = limit > 0 && count >= limit
-              const availableGroups =
-                plan.available_groups && plan.available_groups.length > 0
-                  ? plan.available_groups
-                  : plan.upgrade_group
-                    ? [plan.upgrade_group]
-                    : []
+              let availableGroups: string[] = []
+              if (plan.available_groups && plan.available_groups.length > 0) {
+                availableGroups = plan.available_groups
+              } else if (plan.upgrade_group) {
+                availableGroups = [plan.upgrade_group]
+              }
 
               const benefits = [
                 `${t('Validity Period')}: ${formatDuration(plan, t)}`,

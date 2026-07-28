@@ -50,15 +50,15 @@ func seedSubscriptionPlanWithAvailableGroupsForBillingGroupTest(t *testing.T, id
 func seedUserSubscriptionForBillingGroupTest(t *testing.T, id int, userId int, planId int, allowedGroup string) {
 	t.Helper()
 	sub := &model.UserSubscription{
-		Id:           id,
-		UserId:       userId,
-		PlanId:       planId,
-		AmountTotal:  1000,
-		AmountUsed:   0,
-		Status:       "active",
-		StartTime:    time.Now().Unix(),
-		EndTime:      time.Now().Add(30 * 24 * time.Hour).Unix(),
-		UpgradeGroup: allowedGroup,
+		Id:                  id,
+		UserId:              userId,
+		PlanId:              planId,
+		AmountTotal:         1000,
+		AmountUsed:          0,
+		Status:              "active",
+		StartTime:           time.Now().Unix(),
+		EndTime:             time.Now().Add(30 * 24 * time.Hour).Unix(),
+		UpgradeGroup:        allowedGroup,
 		AllowWalletOverflow: true,
 	}
 	require.NoError(t, model.DB.Create(sub).Error)
@@ -220,7 +220,7 @@ func TestNewBillingSession_SubscriptionWithoutAvailableGroupUsesWallet(t *testin
 	assert.Equal(t, 1000, getTokenRemainForBillingGroupTest(t, tokenId))
 }
 
-func TestNewBillingSession_SubscriptionOnlyUsesWalletWhenGroupDoesNotMatch(t *testing.T) {
+func TestNewBillingSession_SubscriptionOnlyRejectsWhenGroupDoesNotMatch(t *testing.T) {
 	truncate(t)
 
 	userId := 7103
@@ -239,12 +239,89 @@ func TestNewBillingSession_SubscriptionOnlyUsesWalletWhenGroupDoesNotMatch(t *te
 
 	session, apiErr := NewBillingSession(ctx, relayInfo, quota)
 
+	require.Nil(t, session)
+	require.NotNil(t, apiErr)
+	assert.Equal(t, "当前无可用订阅", apiErr.Error())
+	assert.Equal(t, types.ErrorCodeInsufficientUserQuota, apiErr.GetErrorCode())
+	assert.Equal(t, 0, relayInfo.SubscriptionId)
+	assert.Equal(t, 1000, getWalletQuotaForBillingGroupTest(t, userId))
+	assert.Equal(t, int64(0), getSubscriptionUsedForBillingGroupTest(t, subId))
+	assert.Equal(t, 1000, getTokenRemainForBillingGroupTest(t, tokenId))
+}
+
+func TestNewBillingSession_SubscriptionFirstUsesWalletWithoutSubscription(t *testing.T) {
+	truncate(t)
+
+	userId := 7105
+	tokenId := 8105
+	quota := 100
+	seedUser(t, userId, 1000)
+	seedUnlimitedTokenForBillingGroupTest(t, tokenId, userId, "billing-no-subscription-first", 1000)
+
+	ctx := &gin.Context{}
+	ctx.Set("token_quota", 1000)
+	relayInfo := makeBillingGroupRelayInfo(userId, tokenId, "billing-no-subscription-first", "default", "subscription_first")
+
+	session, apiErr := NewBillingSession(ctx, relayInfo, quota)
+
 	require.Nil(t, apiErr)
 	require.NotNil(t, session)
 	assert.Equal(t, BillingSourceWallet, relayInfo.BillingSource)
 	assert.Equal(t, quota, relayInfo.FinalPreConsumedQuota)
-	assert.Equal(t, 0, relayInfo.SubscriptionId)
 	assert.Equal(t, 900, getWalletQuotaForBillingGroupTest(t, userId))
+	assert.Equal(t, 1000, getTokenRemainForBillingGroupTest(t, tokenId))
+}
+
+func TestNewBillingSession_SubscriptionOnlyRejectsWithoutSubscription(t *testing.T) {
+	truncate(t)
+
+	userId := 7106
+	tokenId := 8106
+	quota := 100
+	seedUser(t, userId, 1000)
+	seedUnlimitedTokenForBillingGroupTest(t, tokenId, userId, "billing-no-subscription-only", 1000)
+
+	ctx := &gin.Context{}
+	ctx.Set("token_quota", 1000)
+	relayInfo := makeBillingGroupRelayInfo(userId, tokenId, "billing-no-subscription-only", "default", "subscription_only")
+
+	session, apiErr := NewBillingSession(ctx, relayInfo, quota)
+
+	require.Nil(t, session)
+	require.NotNil(t, apiErr)
+	assert.Equal(t, "当前无可用订阅", apiErr.Error())
+	assert.Equal(t, types.ErrorCodeInsufficientUserQuota, apiErr.GetErrorCode())
+	assert.Equal(t, 1000, getWalletQuotaForBillingGroupTest(t, userId))
+	assert.Equal(t, 1000, getTokenRemainForBillingGroupTest(t, tokenId))
+}
+
+func TestNewBillingSession_SubscriptionOnlyReportsInsufficientForExpiredSubscription(t *testing.T) {
+	truncate(t)
+
+	userId := 7107
+	tokenId := 8107
+	subId := 9107
+	planId := 9207
+	quota := 100
+	seedUser(t, userId, 1000)
+	seedUnlimitedTokenForBillingGroupTest(t, tokenId, userId, "billing-expired-subscription-only", 1000)
+	seedSubscriptionPlanForBillingGroupTest(t, planId, "default")
+	seedUserSubscriptionForBillingGroupTest(t, subId, userId, planId, "default")
+	require.NoError(t, model.DB.Model(&model.UserSubscription{}).
+		Where("id = ?", subId).
+		Update("end_time", time.Now().Add(-time.Hour).Unix()).Error)
+
+	ctx := &gin.Context{}
+	ctx.Set("token_quota", 1000)
+	relayInfo := makeBillingGroupRelayInfo(userId, tokenId, "billing-expired-subscription-only", "default", "subscription_only")
+
+	session, apiErr := NewBillingSession(ctx, relayInfo, quota)
+
+	require.Nil(t, session)
+	require.NotNil(t, apiErr)
+	assert.Equal(t, "订阅额度不足", apiErr.Error())
+	assert.Equal(t, types.ErrorCodeInsufficientUserQuota, apiErr.GetErrorCode())
+	assert.Equal(t, 1000, getWalletQuotaForBillingGroupTest(t, userId))
 	assert.Equal(t, int64(0), getSubscriptionUsedForBillingGroupTest(t, subId))
 	assert.Equal(t, 1000, getTokenRemainForBillingGroupTest(t, tokenId))
 }
@@ -412,6 +489,42 @@ func TestNewBillingSession_GroupMatchFallsBackToWalletWhenSubscriptionInsufficie
 			assert.Equal(t, 1000, getTokenRemainForBillingGroupTest(t, tokenId))
 		})
 	}
+}
+
+func TestNewBillingSession_SubscriptionOnlyDoesNotFallbackWhenSubscriptionInsufficient(t *testing.T) {
+	truncate(t)
+
+	userId := 7207
+	tokenId := 8207
+	subId := 9309
+	planId := 9409
+	quota := 100
+	allowedGroup := "vip"
+	tokenKey := "billing-group-subscription-only-insufficient"
+	seedUser(t, userId, 1000)
+	seedUnlimitedTokenForBillingGroupTest(t, tokenId, userId, tokenKey, 1000)
+	seedSubscriptionPlanForBillingGroupTest(t, planId, allowedGroup)
+	seedUserSubscriptionForBillingGroupTest(t, subId, userId, planId, allowedGroup)
+	require.NoError(t, model.DB.Model(&model.UserSubscription{}).
+		Where("id = ?", subId).
+		Updates(map[string]interface{}{
+			"amount_total": 50,
+			"amount_used":  0,
+		}).Error)
+
+	ctx := &gin.Context{}
+	ctx.Set("token_quota", 1000)
+	relayInfo := makeBillingGroupRelayInfo(userId, tokenId, tokenKey, allowedGroup, "subscription_only")
+
+	session, apiErr := NewBillingSession(ctx, relayInfo, quota)
+
+	require.Nil(t, session)
+	require.NotNil(t, apiErr)
+	assert.Equal(t, "订阅额度不足", apiErr.Error())
+	assert.Equal(t, types.ErrorCodeInsufficientUserQuota, apiErr.GetErrorCode())
+	assert.Equal(t, 1000, getWalletQuotaForBillingGroupTest(t, userId))
+	assert.Equal(t, int64(0), getSubscriptionUsedForBillingGroupTest(t, subId))
+	assert.Equal(t, 1000, getTokenRemainForBillingGroupTest(t, tokenId))
 }
 
 func TestNewBillingSession_GroupMatchReportsWalletInsufficientWhenSubscriptionAndWalletInsufficient(t *testing.T) {
