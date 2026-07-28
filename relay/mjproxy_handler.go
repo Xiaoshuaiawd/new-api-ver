@@ -533,7 +533,9 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		}
 	}
 
+	attempt := service.BeginChannelRuntimeAttempt(c.GetInt("channel_id"))
 	midjResponseWithStatus, responseBody, err := service.DoMidjourneyHttpRequest(c, time.Second*60, fullRequestURL)
+	attempt.Done()
 	if err != nil {
 		return &midjResponseWithStatus.Response
 	}

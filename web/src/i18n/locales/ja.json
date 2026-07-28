@@ -936,6 +936,7 @@
     "Compliance confirmed": "コンプライアンス確認済み",
     "Compliance confirmed successfully": "コンプライアンス確認が完了しました",
     "Concatenate channel system prompt with user&apos;s prompt": "チャネルのシステムプロンプトをユーザーのプロンプトと連結する",
+    "Concurrency / RPM": "同時実行数 / RPM",
     "Condition Path": "条件パス",
     "Condition Settings": "条件設定",
     "Condition Value": "条件値",

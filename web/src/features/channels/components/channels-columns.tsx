@@ -35,10 +35,7 @@ import { ConfirmDialog } from '@/components/confirm-dialog'
 import { BadgeListCell } from '@/components/data-table'
 import { GroupBadge } from '@/components/group-badge'
 import { ProviderBadge } from '@/components/provider-badge'
-import {
-  StatusBadge,
-  type StatusBadgeProps,
-} from '@/components/status-badge'
+import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
 import { TruncatedText } from '@/components/truncated-text'
 import { Button } from '@/components/ui/button'
@@ -79,8 +76,8 @@ import {
   type TagRow,
 } from '../lib'
 import { parseUpstreamUpdateMeta } from '../lib/upstream-update-utils'
-import { ChannelRowActionsLayoutContext } from './channel-row-actions-context'
 import type { Channel } from '../types'
+import { ChannelRowActionsLayoutContext } from './channel-row-actions-context'
 import { useChannels } from './channels-provider'
 import { DataTableRowActions } from './data-table-row-actions'
 import { DataTableTagRowActions } from './data-table-tag-row-actions'
@@ -1088,6 +1085,26 @@ export function useChannelsColumns(
         meta: { mobileHidden: true },
         cell: ({ row }) => <WeightCell channel={row.original} />,
         size: 90,
+        enableSorting: false,
+      },
+
+      // Current concurrency and requests started during the latest 60 seconds
+      {
+        accessorKey: 'runtime_metrics',
+        header: t('Concurrency / RPM'),
+        meta: { mobileHidden: true },
+        cell: ({ row }) => {
+          const metrics = row.original.runtime_metrics
+          return (
+            <span
+              className='font-mono text-xs whitespace-nowrap tabular-nums'
+              aria-label={`${t('Concurrency / RPM')}: ${metrics.concurrency} / ${metrics.rpm}`}
+            >
+              {metrics.concurrency} / {metrics.rpm}
+            </span>
+          )
+        },
+        size: 120,
         enableSorting: false,
       },
 

@@ -658,6 +658,7 @@ export function aggregateChannelsByTag(
         created_time: 0,
         balance_updated_time: 0,
         models: '',
+        runtime_metrics: { concurrency: 0, rpm: 0 },
         children: [],
       } as TagRow
       tagMap.set(tag, tagRow)
@@ -675,6 +676,11 @@ export function aggregateChannelsByTag(
 
     // Aggregate used_quota (sum)
     tagRow.used_quota += channel.used_quota
+
+    // Aggregate current runtime metrics (sum)
+    tagRow.runtime_metrics.concurrency +=
+      channel.runtime_metrics?.concurrency ?? 0
+    tagRow.runtime_metrics.rpm += channel.runtime_metrics?.rpm ?? 0
 
     // Aggregate response_time (average)
     tagRow.response_time =

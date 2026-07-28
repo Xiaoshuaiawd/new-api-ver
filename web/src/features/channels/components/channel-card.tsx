@@ -61,6 +61,7 @@ function ChannelCardComponent({
 
   const fieldLabels: Record<string, string> = {
     balance: t('Used / Remaining'),
+    runtime_metrics: t('Concurrency / RPM'),
     response_time: t('Response'),
     test_time: t('Last Tested'),
   }
@@ -74,6 +75,7 @@ function ChannelCardComponent({
   const actionsCell = renderCell('actions')
   const priorityCell = renderCell('priority')
   const weightCell = renderCell('weight')
+  const runtimeMetricsCell = renderCell('runtime_metrics')
   const balanceCell = renderCell('balance')
   const responseCell = renderCell('response_time')
   const testCell = renderCell('test_time')
@@ -152,6 +154,14 @@ function ChannelCardComponent({
             </div>
             <div className='overflow-hidden text-sm'>
               {testCell ?? <span className='text-muted-foreground'>-</span>}
+            </div>
+            <span className={cn('col-span-2 mt-2', labelClass)}>
+              {fieldLabels.runtime_metrics}
+            </span>
+            <div className='col-span-2 overflow-hidden text-sm'>
+              {runtimeMetricsCell ?? (
+                <span className='text-muted-foreground'>0 / 0</span>
+              )}
             </div>
           </div>
         </div>

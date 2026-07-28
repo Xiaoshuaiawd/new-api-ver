@@ -71,6 +71,23 @@ func clearChannelInfo(channel *model.Channel) {
 	}
 }
 
+func attachChannelRuntimeMetrics(channels []*model.Channel) {
+	channelIDs := make([]int, 0, len(channels))
+	for _, channel := range channels {
+		if channel != nil {
+			channelIDs = append(channelIDs, channel.Id)
+		}
+	}
+	metrics := service.GetChannelRuntimeMetrics(channelIDs)
+	for _, channel := range channels {
+		if channel == nil {
+			continue
+		}
+		current := metrics[channel.Id]
+		channel.RuntimeMetrics = &current
+	}
+}
+
 func applyChannelStatusFilter(query *gorm.DB, statusFilter int) *gorm.DB {
 	if statusFilter == common.ChannelStatusEnabled {
 		return query.Where("status = ?", common.ChannelStatusEnabled)
@@ -168,6 +185,7 @@ func GetAllChannels(c *gin.Context) {
 	for _, datum := range channelData {
 		clearChannelInfo(datum)
 	}
+	attachChannelRuntimeMetrics(channelData)
 
 	countQuery := buildChannelListQuery(groupFilter, statusFilter, -1)
 	var results []struct {
@@ -381,6 +399,7 @@ func SearchChannels(c *gin.Context) {
 	for _, datum := range pagedData {
 		clearChannelInfo(datum)
 	}
+	attachChannelRuntimeMetrics(pagedData)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -407,6 +426,7 @@ func GetChannel(c *gin.Context) {
 	}
 	if channel != nil {
 		clearChannelInfo(channel)
+		attachChannelRuntimeMetrics([]*model.Channel{channel})
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

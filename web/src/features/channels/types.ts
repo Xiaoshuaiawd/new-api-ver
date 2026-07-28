@@ -34,6 +34,13 @@ export const channelInfoSchema = z.object({
 
 export type ChannelInfo = z.infer<typeof channelInfoSchema>
 
+export const channelRuntimeMetricsSchema = z.object({
+  concurrency: z.number().int().nonnegative().default(0),
+  rpm: z.number().int().nonnegative().default(0),
+})
+
+export type ChannelRuntimeMetrics = z.infer<typeof channelRuntimeMetricsSchema>
+
 export const channelSchema = z.object({
   id: z.number(),
   type: z.number(),
@@ -69,6 +76,10 @@ export const channelSchema = z.object({
     multi_key_size: 0,
     multi_key_polling_index: 0,
     multi_key_mode: 'random',
+  }),
+  runtime_metrics: channelRuntimeMetricsSchema.default({
+    concurrency: 0,
+    rpm: 0,
   }),
   settings: z.string().default('{}'), // other_settings JSON
 })

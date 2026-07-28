@@ -211,6 +211,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
+		attempt := service.BeginChannelRuntimeAttempt(channel.Id)
 
 		switch relayFormat {
 		case types.RelayFormatOpenAIRealtime:
@@ -222,6 +223,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		default:
 			newAPIError = relayHandler(c, relayInfo)
 		}
+		attempt.Done()
 
 		if newAPIError == nil {
 			relayInfo.LastError = nil
@@ -550,7 +552,9 @@ func RelayTask(c *gin.Context) {
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
 
+		attempt := service.BeginChannelRuntimeAttempt(channel.Id)
 		result, taskErr = relay.RelayTaskSubmit(c, relayInfo)
+		attempt.Done()
 		if taskErr == nil {
 			break
 		}

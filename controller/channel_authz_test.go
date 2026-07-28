@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -106,6 +107,7 @@ func TestClearChannelReadOnlyFields(t *testing.T) {
 		UsedQuota:          66,
 		Models:             "gpt-4o",
 		Group:              "default",
+		RuntimeMetrics:     &dto.ChannelRuntimeMetrics{Concurrency: 3, RPM: 120},
 	}}
 
 	clearChannelReadOnlyFields(&channel, map[string]any{
@@ -115,6 +117,7 @@ func TestClearChannelReadOnlyFields(t *testing.T) {
 		"balance":              channel.Balance,
 		"balance_updated_time": channel.BalanceUpdatedTime,
 		"used_quota":           channel.UsedQuota,
+		"runtime_metrics":      channel.RuntimeMetrics,
 		"models":               channel.Models,
 		"group":                channel.Group,
 	})
@@ -125,6 +128,7 @@ func TestClearChannelReadOnlyFields(t *testing.T) {
 	assert.Zero(t, channel.Balance)
 	assert.Zero(t, channel.BalanceUpdatedTime)
 	assert.Zero(t, channel.UsedQuota)
+	assert.Nil(t, channel.RuntimeMetrics)
 	assert.Equal(t, "gpt-4o", channel.Models)
 	assert.Equal(t, "default", channel.Group)
 }
