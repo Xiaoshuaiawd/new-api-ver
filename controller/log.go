@@ -133,6 +133,12 @@ func GetLogsStat(c *gin.Context) {
 			return
 		}
 		data["today_revenue"] = todayRevenue
+		actualQuota, err := model.SumActualQuota(startTimestamp, endTimestamp, modelName, username, tokenName, channel, group)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		data["actual_quota"] = actualQuota
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

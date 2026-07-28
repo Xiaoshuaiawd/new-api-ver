@@ -153,6 +153,7 @@
     "Actual Amount": "Фактическая сумма",
     "Actual Model": "Фактическая модель",
     "Actual Model:": "Фактическая модель:",
+    "Actual Quota Consumption": "Фактический расход квоты",
     "Adapt `-thinking` suffix requests to Anthropic native thinking behavior while keeping billing predictable.": "Адаптировать запросы с суффиксом `-thinking` к собственному режиму размышления Anthropic, сохраняя предсказуемость биллинга.",
     "Add": "Добавить",
     "Add \"{{value}}\"": "Добавить \"{{value}}\"",

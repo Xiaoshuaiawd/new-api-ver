@@ -391,6 +391,7 @@ export const STATIC_I18N_KEYS = [
   'Plan Subtitle',
   'e.g. Suitable for light usage',
   'Actual Amount',
+  'Actual Quota Consumption',
   'Plan Price',
   'Amount the user pays to purchase this plan; the actual currency depends on the payment gateway.',
   'Plan Quota',

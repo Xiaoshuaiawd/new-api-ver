@@ -153,6 +153,7 @@
     "Actual Amount": "Montant réel",
     "Actual Model": "Modèle réel",
     "Actual Model:": "Modèle réel :",
+    "Actual Quota Consumption": "Consommation réelle du quota",
     "Adapt `-thinking` suffix requests to Anthropic native thinking behavior while keeping billing predictable.": "Adapter les requêtes avec le suffixe `-thinking` au comportement de pensée natif d’Anthropic tout en gardant une facturation prévisible.",
     "Add": "Ajouter",
     "Add \"{{value}}\"": "Ajouter \"{{value}}\"",

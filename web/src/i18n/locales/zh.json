@@ -153,6 +153,7 @@
     "Actual Amount": "实付金额",
     "Actual Model": "实际模型",
     "Actual Model:": "实际模型：",
+    "Actual Quota Consumption": "实际额度消耗",
     "Adapt `-thinking` suffix requests to Anthropic native thinking behavior while keeping billing predictable.": "将带 `-thinking` 后缀的请求适配为 Anthropic 原生思考请求，并保持计费可预测。",
     "Add": "添加",
     "Add \"{{value}}\"": "添加 \"{{value}}\"",

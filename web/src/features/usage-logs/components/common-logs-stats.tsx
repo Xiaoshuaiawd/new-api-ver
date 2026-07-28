@@ -19,15 +19,21 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { useAuthStore } from '@/stores/auth-store'
-import { formatLocalCurrencyAmount } from '@/lib/currency'
+
+import { Skeleton } from '@/components/ui/skeleton'
+import {
+  formatLocalCurrencyAmount,
+  formatQuotaWithCurrency,
+} from '@/lib/currency'
 import { formatLogQuota } from '@/lib/format'
 import { ROLE } from '@/lib/roles'
 import { cn } from '@/lib/utils'
-import { Skeleton } from '@/components/ui/skeleton'
+import { useAuthStore } from '@/stores/auth-store'
+
 import { getLogStats, getUserLogStats } from '../api'
 import { DEFAULT_LOG_STATS } from '../constants'
 import { buildApiParams } from '../lib/utils'
+import type { LogStatistics } from '../types'
 import { useLogsViewScope, useUsageLogsContext } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
@@ -48,11 +54,75 @@ function StatBadge(props: {
   )
 }
 
-export function CommonLogsStats() {
+export function CommonLogsStatsView(props: {
+  stats: LogStatistics
+  isRoot: boolean
+  sensitiveVisible: boolean
+}) {
   const { t } = useTranslation()
+
+  return (
+    <div className='flex flex-wrap items-center gap-2'>
+      <StatBadge
+        label={t('Usage')}
+        value={
+          props.sensitiveVisible ? formatLogQuota(props.stats.quota) : '••••'
+        }
+        accent='bg-sky-500/70'
+      />
+      <StatBadge
+        label={t('RPM')}
+        value={props.stats.rpm}
+        accent='bg-rose-500/65'
+      />
+      <StatBadge
+        label={t('TPM')}
+        value={props.stats.tpm}
+        accent='bg-slate-400/70'
+      />
+      {props.isRoot ? (
+        <StatBadge
+          label={t('Period Revenue')}
+          value={formatLocalCurrencyAmount(props.stats.today_revenue ?? 0, {
+            digitsLarge: 2,
+            digitsSmall: 2,
+            abbreviate: false,
+          })}
+          accent='bg-emerald-500/70'
+        />
+      ) : null}
+      {props.isRoot ? (
+        <StatBadge
+          label={t('Actual Quota Consumption')}
+          value={formatQuotaWithCurrency(props.stats.actual_quota ?? 0, {
+            digitsLarge: 2,
+            digitsSmall: 2,
+            abbreviate: false,
+          })}
+          accent='bg-amber-500/70'
+        />
+      ) : null}
+    </div>
+  )
+}
+
+export function CommonLogsStatsSkeleton(props: { isRoot: boolean }) {
+  return (
+    <div className='flex items-center gap-2'>
+      <Skeleton className='h-7 w-[150px] rounded-md' />
+      <Skeleton className='h-7 w-[100px] rounded-md' />
+      <Skeleton className='h-7 w-[120px] rounded-md' />
+      {props.isRoot ? <Skeleton className='h-7 w-[130px] rounded-md' /> : null}
+      {props.isRoot ? <Skeleton className='h-7 w-[160px] rounded-md' /> : null}
+    </div>
+  )
+}
+
+export function CommonLogsStats() {
   const userRole = useAuthStore((state) => state.auth.user?.role ?? 0)
   const isRoot = userRole >= ROLE.SUPER_ADMIN
   const { isAdminView: isAdmin } = useLogsViewScope()
+  const canViewRootStats = isRoot && isAdmin
   const searchParams = route.useSearch()
   const { sensitiveVisible } = useUsageLogsContext()
 
@@ -79,44 +149,14 @@ export function CommonLogsStats() {
   })
 
   if (isLoading) {
-    return (
-      <div className='flex items-center gap-2'>
-        <Skeleton className='h-7 w-[150px] rounded-md' />
-        <Skeleton className='h-7 w-[100px] rounded-md' />
-        <Skeleton className='h-7 w-[120px] rounded-md' />
-        {isRoot ? <Skeleton className='h-7 w-[130px] rounded-md' /> : null}
-      </div>
-    )
+    return <CommonLogsStatsSkeleton isRoot={canViewRootStats} />
   }
 
   return (
-    <div className='flex flex-wrap items-center gap-2'>
-      <StatBadge
-        label={t('Usage')}
-        value={sensitiveVisible ? formatLogQuota(stats?.quota || 0) : '••••'}
-        accent='bg-sky-500/70'
-      />
-      <StatBadge
-        label={t('RPM')}
-        value={stats?.rpm || 0}
-        accent='bg-rose-500/65'
-      />
-      <StatBadge
-        label={t('TPM')}
-        value={stats?.tpm || 0}
-        accent='bg-slate-400/70'
-      />
-      {isRoot ? (
-        <StatBadge
-          label={t('Period Revenue')}
-          value={formatLocalCurrencyAmount(stats?.today_revenue || 0, {
-            digitsLarge: 2,
-            digitsSmall: 2,
-            abbreviate: false,
-          })}
-          accent='bg-emerald-500/70'
-        />
-      ) : null}
-    </div>
+    <CommonLogsStatsView
+      stats={stats ?? DEFAULT_LOG_STATS}
+      isRoot={canViewRootStats}
+      sensitiveVisible={sensitiveVisible}
+    />
   )
 }

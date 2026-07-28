@@ -2,8 +2,10 @@ package model
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -712,6 +714,69 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	}
 
 	return stat, nil
+}
+
+func SumActualQuota(startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (float64, error) {
+	tx := LOG_DB.Table("logs").Select("quota, other")
+
+	var err error
+	if tx, err = applyExplicitLogTextFilter(tx, "username", username); err != nil {
+		return 0, err
+	}
+	if tokenName != "" {
+		tx = tx.Where("token_name = ?", tokenName)
+	}
+	if startTimestamp != 0 {
+		tx = tx.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		tx = tx.Where("created_at <= ?", endTimestamp)
+	}
+	if tx, err = applyExplicitLogTextFilter(tx, "model_name", modelName); err != nil {
+		return 0, err
+	}
+	if channel != 0 {
+		tx = tx.Where("channel_id = ?", channel)
+	}
+	if group != "" {
+		tx = tx.Where(logGroupCol+" = ?", group)
+	}
+	tx = tx.Where("type = ?", LogTypeConsume)
+
+	rows, err := tx.Rows()
+	if err != nil {
+		common.SysError("failed to query actual quota stat: " + err.Error())
+		return 0, errors.New("查询统计数据失败")
+	}
+	defer rows.Close()
+
+	var total float64
+	for rows.Next() {
+		var quota sql.NullInt64
+		var other sql.NullString
+		if err := rows.Scan(&quota, &other); err != nil {
+			common.SysError("failed to scan actual quota stat: " + err.Error())
+			return 0, errors.New("查询统计数据失败")
+		}
+
+		groupRatio := 1.0
+		var info struct {
+			GroupRatio *float64 `json:"group_ratio"`
+		}
+		if common.UnmarshalJsonStr(other.String, &info) == nil && info.GroupRatio != nil && *info.GroupRatio > 0 {
+			groupRatio = *info.GroupRatio
+		}
+		actualQuota := float64(quota.Int64) / groupRatio
+		if math.IsNaN(actualQuota) || math.IsInf(actualQuota, 0) {
+			actualQuota = float64(quota.Int64)
+		}
+		total += actualQuota
+	}
+	if err := rows.Err(); err != nil {
+		common.SysError("failed to iterate actual quota stat: " + err.Error())
+		return 0, errors.New("查询统计数据失败")
+	}
+	return total, nil
 }
 
 func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string) (token int) {

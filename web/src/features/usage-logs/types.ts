@@ -251,6 +251,7 @@ export interface LogStatistics {
   rpm: number
   tpm: number
   today_revenue?: number
+  actual_quota?: number
 }
 
 // ============================================================================
