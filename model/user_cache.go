@@ -43,6 +43,7 @@ func (user *UserBase) GetSetting() dto.UserSetting {
 			common.SysLog("failed to unmarshal setting: " + err.Error())
 		}
 	}
+	setting.EnforceRequiredSettings()
 	return setting
 }
 
