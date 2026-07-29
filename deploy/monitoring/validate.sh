@@ -154,8 +154,8 @@ ruby -e '
   alerts = YAML.safe_load(File.read(ARGV.fetch(1)), aliases: true)
   recording_count = recording.fetch("groups").sum { |group| group.fetch("rules").length }
   alert_count = alerts.fetch("groups").sum { |group| group.fetch("rules").length }
-  abort "expected 33 recording rules, got #{recording_count}" unless recording_count == 33
-  abort "expected 24 alert rules, got #{alert_count}" unless alert_count == 24
+  abort "expected 34 recording rules, got #{recording_count}" unless recording_count == 34
+  abort "expected 26 alert rules, got #{alert_count}" unless alert_count == 26
 ' "$monitoring_dir/recording-rules.yml" "$monitoring_dir/alert-rules.yml"
 if command -v "$amtool_bin" >/dev/null 2>&1 || [ -x "$amtool_bin" ]; then
 	"$amtool_bin" check-config "$monitoring_dir/alertmanager.yml.example"

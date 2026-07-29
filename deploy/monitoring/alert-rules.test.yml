@@ -1,0 +1,681 @@
+rule_files:
+  - recording-rules.yml
+  - alert-rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: service ratio alert requires sufficient traffic
+    interval: 1m
+    input_series:
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",error_type="none"}'
+        values: '0+18x20'
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="failure",error_type="upstream_5xx"}'
+        values: '0+2x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: NewAPIServiceSuccessRateLow
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: new-api service success ratio is below 95%
+              description: Investigate upstream health and error_type metrics for cluster test job new-api.
+      - eval_time: 16m
+        alertname: NewAPIServiceSuccessRateCritical
+        exp_alerts: []
+
+  - name: low traffic does not trigger service ratio alerts
+    interval: 1m
+    input_series:
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",error_type="none"}'
+        values: '0+1x20'
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="failure",error_type="upstream_5xx"}'
+        values: '0+1x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: NewAPIServiceSuccessRateLow
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: NewAPIServiceSuccessRateCritical
+        exp_alerts: []
+
+  - name: critical service ratio alert uses shorter duration
+    interval: 1m
+    input_series:
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",error_type="none"}'
+        values: '0+14x15'
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="failure",error_type="upstream_5xx"}'
+        values: '0+6x15'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: NewAPIServiceSuccessRateCritical
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              job: new-api
+              severity: critical
+            exp_annotations:
+              summary: new-api service success ratio is below 80%
+              description: Immediate investigation is required for cluster test job new-api.
+
+  - name: channel failure retry and no-success alerts
+    interval: 1m
+    input_series:
+      - series: 'newapi_channel_attempts_total{cluster="test",job="new-api",instance="app-1",channel_id="7",channel_type="1",stream="false",result="success",error_type="none"}'
+        values: '0+7x20'
+      - series: 'newapi_channel_attempts_total{cluster="test",job="new-api",instance="app-1",channel_id="7",channel_type="1",stream="false",result="failure",error_type="upstream_5xx"}'
+        values: '0+3x20'
+      - series: 'newapi_channel_retries_total{cluster="test",job="new-api",instance="app-1",channel_id="7",channel_type="1",reason="upstream_5xx"}'
+        values: '0+3x20'
+      - series: 'newapi_channel_attempts_total{cluster="test",job="new-api",instance="app-1",channel_id="8",channel_type="1",stream="false",result="failure",error_type="upstream_5xx"}'
+        values: '0+4x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: NewAPIChannelFailureRateHigh
+        exp_alerts:
+          - exp_labels:
+              channel_id: "7"
+              cluster: test
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: new-api channel failure ratio is above 20%
+              description: Inspect channel 7 upstream errors and availability in cluster test.
+      - eval_time: 16m
+        alertname: NewAPIChannelRetryRatioHigh
+        exp_alerts:
+          - exp_labels:
+              channel_id: "7"
+              cluster: test
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: new-api channel retry ratio is above 20%
+              description: Inspect routing and upstream stability for channel 7 in cluster test.
+      - eval_time: 11m
+        alertname: NewAPIChannelNoSuccess
+        exp_alerts:
+          - exp_labels:
+              channel_id: "8"
+              cluster: test
+              job: new-api
+              severity: critical
+            exp_annotations:
+              summary: new-api channel has no successful attempts
+              description: Channel 8 had at least 20 attempts and no success in the last 5 minutes.
+
+  - name: database utilization excludes unlimited pools and separates severity
+    interval: 1m
+    input_series:
+      - series: 'newapi_db_connections{cluster="test",job="new-api",instance="app-warning",database="main",state="in_use"}'
+        values: '85x20'
+      - series: 'newapi_db_max_open_connections{cluster="test",job="new-api",instance="app-warning",database="main"}'
+        values: '100x20'
+      - series: 'newapi_db_connections{cluster="test",job="new-api",instance="app-critical",database="main",state="in_use"}'
+        values: '97x20'
+      - series: 'newapi_db_max_open_connections{cluster="test",job="new-api",instance="app-critical",database="main"}'
+        values: '100x20'
+      - series: 'newapi_db_connections{cluster="test",job="new-api",instance="app-unlimited",database="main",state="in_use"}'
+        values: '50x20'
+      - series: 'newapi_db_max_open_connections{cluster="test",job="new-api",instance="app-unlimited",database="main"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: NewAPIDBPoolUtilizationHigh
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              database: main
+              instance: app-critical
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: new-api database pool utilization is above 80%
+              description: Check database latency and pool sizing for app-critical database main.
+          - exp_labels:
+              cluster: test
+              database: main
+              instance: app-warning
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: new-api database pool utilization is above 80%
+              description: Check database latency and pool sizing for app-warning database main.
+      - eval_time: 12m
+        alertname: NewAPIDBPoolUtilizationCritical
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              database: main
+              instance: app-critical
+              job: new-api
+              severity: critical
+            exp_annotations:
+              summary: new-api database pool utilization is above 95%
+              description: Database pool exhaustion is imminent on app-critical database main.
+
+  - name: database waits require sustained count and average duration
+    interval: 1m
+    input_series:
+      - series: 'newapi_db_wait_total{cluster="test",job="new-api",instance="app-high",database="main"}'
+        values: '0+10x20'
+      - series: 'newapi_db_wait_duration_seconds_total{cluster="test",job="new-api",instance="app-high",database="main"}'
+        values: '0+2x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: NewAPIDBConnectionWaitHigh
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              database: main
+              instance: app-high
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: new-api database connection waits are sustained
+              description: Check pool sizing, slow SQL or transactions, and database response time for app-high database main.
+
+  - name: mature instance with sustained runtime growth alerts
+    interval: 1m
+    input_series:
+      - series: 'go_goroutines{cluster="test",job="new-api",instance="app-high"}'
+        values: '600+30x50'
+      - series: 'go_memstats_heap_alloc_bytes{cluster="test",job="new-api",instance="app-high"}'
+        values: '629145600+20971520x50'
+      - series: 'process_start_time_seconds{cluster="test",job="new-api",instance="app-high"}'
+        values: '0x51'
+    alert_rule_test:
+      - eval_time: 46m
+        alertname: NewAPIGoroutinesGrowing
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              instance: app-high
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: new-api goroutine count is growing continuously
+              description: Instance app-high has at least 500 goroutines and a 30-minute growth rate above 0.05 goroutines/s. Check stuck streams, retries, polling loops, and goroutine profiles.
+      - eval_time: 46m
+        alertname: NewAPIGoHeapGrowing
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              instance: app-high
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: new-api Go heap is growing continuously
+              description: Instance app-high has at least 512 MiB heap allocation and a 30-minute growth rate above 128 KiB/s. Check heap profiles, retained request data, caches, and task state.
+
+  - name: stable high runtime values do not alert
+    interval: 1m
+    input_series:
+      - series: 'go_goroutines{cluster="test",job="new-api",instance="app-stable"}'
+        values: '800x51'
+      - series: 'go_memstats_heap_alloc_bytes{cluster="test",job="new-api",instance="app-stable"}'
+        values: '734003200x51'
+      - series: 'process_start_time_seconds{cluster="test",job="new-api",instance="app-stable"}'
+        values: '0x51'
+    alert_rule_test:
+      - eval_time: 46m
+        alertname: NewAPIGoroutinesGrowing
+        exp_alerts: []
+      - eval_time: 46m
+        alertname: NewAPIGoHeapGrowing
+        exp_alerts: []
+
+  - name: runtime growth below absolute floors does not alert
+    interval: 1m
+    input_series:
+      - series: 'go_goroutines{cluster="test",job="new-api",instance="app-small"}'
+        values: '100+1x50'
+      - series: 'go_memstats_heap_alloc_bytes{cluster="test",job="new-api",instance="app-small"}'
+        values: '104857600+1048576x50'
+      - series: 'process_start_time_seconds{cluster="test",job="new-api",instance="app-small"}'
+        values: '0x51'
+    alert_rule_test:
+      - eval_time: 46m
+        alertname: NewAPIGoroutinesGrowing
+        exp_alerts: []
+      - eval_time: 46m
+        alertname: NewAPIGoHeapGrowing
+        exp_alerts: []
+
+  - name: young growing instance does not alert before baseline window
+    interval: 1m
+    input_series:
+      - series: 'go_goroutines{cluster="test",job="new-api",instance="app-young"}'
+        values: '600+30x50'
+      - series: 'go_memstats_heap_alloc_bytes{cluster="test",job="new-api",instance="app-young"}'
+        values: '629145600+20971520x50'
+      - series: 'process_start_time_seconds{cluster="test",job="new-api",instance="app-young"}'
+        values: '1200x51'
+    alert_rule_test:
+      - eval_time: 46m
+        alertname: NewAPIGoroutinesGrowing
+        exp_alerts: []
+      - eval_time: 46m
+        alertname: NewAPIGoHeapGrowing
+        exp_alerts: []
+
+  - name: frequent but fast database waits do not alert
+    interval: 1m
+    input_series:
+      - series: 'newapi_db_wait_total{cluster="test",job="new-api",instance="app-fast",database="main"}'
+        values: '0+10x20'
+      - series: 'newapi_db_wait_duration_seconds_total{cluster="test",job="new-api",instance="app-fast",database="main"}'
+        values: '0+0.1x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: NewAPIDBConnectionWaitHigh
+        exp_alerts: []
+
+  - name: sparse but slow database waits do not alert
+    interval: 1m
+    input_series:
+      - series: 'newapi_db_wait_total{cluster="test",job="new-api",instance="app-sparse",database="main"}'
+        values: '0+2x20'
+      - series: 'newapi_db_wait_duration_seconds_total{cluster="test",job="new-api",instance="app-sparse",database="main"}'
+        values: '0+1x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: NewAPIDBConnectionWaitHigh
+        exp_alerts: []
+
+  - name: target down and master collector absent alerts
+    interval: 1m
+    input_series:
+      - series: 'up{cluster="test",job="new-api",instance="app-1"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: NewAPIInstanceDown
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              instance: app-1
+              job: new-api
+              severity: critical
+            exp_annotations:
+              summary: new-api instance is down
+              description: Prometheus cannot scrape instance app-1 in cluster test.
+      - eval_time: 6m
+        alertname: NewAPIMasterCollectorAbsent
+        exp_alerts:
+          - exp_labels:
+              cluster: default
+              collector: channel_state
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: new-api Master channel collector is absent
+              description: Verify that one Master instance exports channel_state for cluster default.
+
+  - name: redis errors and degradations require sustained event volume
+    interval: 1m
+    input_series:
+      - series: 'newapi_redis_operations_total{cluster="test",job="new-api",instance="app-high",command="get",operation_type="command",result="error"}'
+        values: '0+2x20'
+      - series: 'newapi_redis_operations_total{cluster="test",job="new-api",instance="app-low",command="get",operation_type="command",result="error"}'
+        values: '0+0.2x20'
+      - series: 'newapi_redis_degradations_total{cluster="test",job="new-api",instance="app-high",reason="rate_limit_fallback"}'
+        values: '0+2x20'
+      - series: 'newapi_redis_degradations_total{cluster="test",job="new-api",instance="app-low",reason="rate_limit_fallback"}'
+        values: '0+0.2x20'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: NewAPIRedisOperationErrorsHigh
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              instance: app-high
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: new-api Redis operation errors are sustained
+              description: Check Redis connectivity and latency for instance app-high in cluster test.
+      - eval_time: 11m
+        alertname: NewAPIRedisDegradationsHigh
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              instance: app-high
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: new-api Redis degradations are sustained
+              description: Check fallback behavior and Redis health for instance app-high in cluster test.
+
+  - name: billing alerts require sustained minimum event volume
+    interval: 1m
+    input_series:
+      - series: 'newapi_billing_operations_total{cluster="test",job="new-api",instance="app-1",operation="settle",billing_source="wallet",result="success"}'
+        values: '0+8x25'
+      - series: 'newapi_billing_operations_total{cluster="test",job="new-api",instance="app-1",operation="settle",billing_source="wallet",result="error"}'
+        values: '0+2x25'
+      - series: 'newapi_billing_failures_total{cluster="test",job="new-api",instance="app-1",operation="settle",billing_source="wallet",reason="database"}'
+        values: '0+2x25'
+      - series: 'newapi_subscription_rejections_total{cluster="test",job="new-api",instance="app-1",reason="insufficient_quota"}'
+        values: '0+1x25'
+      - series: 'newapi_quota_saturation_total{cluster="test",job="new-api",instance="app-1",kind="overflow",operation="pre_consume"}'
+        values: '0+1x25'
+    alert_rule_test:
+      - eval_time: 21m
+        alertname: NewAPIBillingFailuresHigh
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: new-api billing failure ratio is elevated
+              description: Inspect billing operation, source, and fixed failure reason metrics for cluster test job new-api.
+      - eval_time: 21m
+        alertname: NewAPISubscriptionRejectionsHigh
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: new-api subscription rejections are sustained
+              description: Inspect subscription availability, expiry, and quota for cluster test job new-api.
+      - eval_time: 21m
+        alertname: NewAPIQuotaSaturationDetected
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              job: new-api
+              severity: critical
+            exp_annotations:
+              summary: new-api quota saturation events were detected
+              description: Investigate quota conversion audit logs before processing further billing traffic in cluster test job new-api.
+
+  - name: isolated billing events do not trigger alerts
+    interval: 1m
+    input_series:
+      - series: 'newapi_billing_operations_total{cluster="test",job="new-api",instance="app-low",operation="settle",billing_source="wallet",result="success"}'
+        values: '0+0.5x25'
+      - series: 'newapi_billing_operations_total{cluster="test",job="new-api",instance="app-low",operation="settle",billing_source="wallet",result="error"}'
+        values: '0+0.1x25'
+      - series: 'newapi_billing_failures_total{cluster="test",job="new-api",instance="app-low",operation="settle",billing_source="wallet",reason="database"}'
+        values: '0+0.1x25'
+      - series: 'newapi_subscription_rejections_total{cluster="test",job="new-api",instance="app-low",reason="expired"}'
+        values: '0+0.2x25'
+      - series: 'newapi_quota_saturation_total{cluster="test",job="new-api",instance="app-low",kind="overflow",operation="pre_consume"}'
+        values: '0+0.05x25'
+    alert_rule_test:
+      - eval_time: 21m
+        alertname: NewAPIBillingFailuresHigh
+        exp_alerts: []
+      - eval_time: 21m
+        alertname: NewAPISubscriptionRejectionsHigh
+        exp_alerts: []
+      - eval_time: 21m
+        alertname: NewAPIQuotaSaturationDetected
+        exp_alerts: []
+
+  - name: task queue backlog and collector health alerts
+    interval: 1m
+    input_series:
+      - series: 'newapi_task_queue_size{cluster="test",job="new-api",instance="master-1",platform="video",state="waiting"}'
+        values: '80x25'
+      - series: 'newapi_task_queue_size{cluster="test",job="new-api",instance="master-1",platform="video",state="running"}'
+        values: '30x25'
+      - series: 'newapi_task_queue_size{cluster="test",job="new-api",instance="master-1",platform="video",state="unknown"}'
+        values: '0x25'
+      - series: 'newapi_shared_collector_up{cluster="test",job="new-api",instance="master-1",collector="task_queue"}'
+        values: '0x25'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: NewAPITaskQueueBacklogHigh
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              job: new-api
+              platform: video
+              severity: warning
+            exp_annotations:
+              summary: new-api asynchronous task backlog is above the candidate threshold
+              description: Platform video has more than 100 unfinished tasks for 15 minutes in cluster test; calibrate this threshold with production traffic.
+      - eval_time: 6m
+        alertname: NewAPITaskQueueCollectorDown
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              collector: task_queue
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: new-api task queue collector is failing
+              description: Check the Master database connection and grouped task queue queries for cluster test.
+      - eval_time: 6m
+        alertname: NewAPITaskQueueCollectorAbsent
+        exp_alerts:
+          - exp_labels:
+              cluster: default
+              collector: task_queue
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: new-api Master task queue collector is absent
+              description: Verify that one Master instance exports task_queue for cluster default.
+
+  - name: task queue at candidate boundary does not alert
+    interval: 1m
+    input_series:
+      - series: 'newapi_task_queue_size{cluster="test",job="new-api",instance="master-1",platform="video",state="waiting"}'
+        values: '70x25'
+      - series: 'newapi_task_queue_size{cluster="test",job="new-api",instance="master-1",platform="video",state="running"}'
+        values: '30x25'
+      - series: 'newapi_task_queue_size{cluster="test",job="new-api",instance="master-1",platform="video",state="unknown"}'
+        values: '0x25'
+    alert_rule_test:
+      - eval_time: 21m
+        alertname: NewAPITaskQueueBacklogHigh
+        exp_alerts: []
+
+  - name: relay rate limit upstream 5xx timeout and local rejection alerts
+    interval: 1m
+    input_series:
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",error_type="none"}'
+        values: '0+72x25'
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="failure",error_type="rate_limit"}'
+        values: '0+12x25'
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="failure",error_type="upstream_5xx"}'
+        values: '0+8x25'
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="failure",error_type="timeout"}'
+        values: '0+6x25'
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="failure",error_type="invalid_request"}'
+        values: '0+2x25'
+      - series: 'newapi_rate_limit_rejections_total{cluster="test",job="new-api",instance="app-1",scope="global",reason="request_count"}'
+        values: '0+5x25'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: NewAPIRelayRateLimitErrorsHigh
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              error_type: rate_limit
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: new-api relay rate-limit errors are elevated
+              description: Inspect upstream 429 responses and channel routing for cluster test job new-api.
+      - eval_time: 16m
+        alertname: NewAPIUpstream5xxErrorsHigh
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              error_type: upstream_5xx
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: new-api upstream 5xx errors are elevated
+              description: Inspect upstream availability and channel error distribution for cluster test job new-api.
+      - eval_time: 16m
+        alertname: NewAPIRelayTimeoutsHigh
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              error_type: timeout
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: new-api relay timeouts are elevated
+              description: Inspect upstream latency, network connectivity, and timeout settings for cluster test job new-api.
+      - eval_time: 16m
+        alertname: NewAPILocalRateLimitRejectionsHigh
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: new-api local rate-limit rejections are sustained
+              description: Inspect rejection scope and reason metrics for cluster test job new-api before changing rate limits.
+
+  - name: low error and rejection volume does not trigger anomaly alerts
+    interval: 1m
+    input_series:
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-low",relay_format="openai",stream="false",result="success",error_type="none"}'
+        values: '0+14x25'
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-low",relay_format="openai",stream="false",result="failure",error_type="rate_limit"}'
+        values: '0+1x25'
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-low",relay_format="openai",stream="false",result="failure",error_type="upstream_5xx"}'
+        values: '0+1x25'
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-low",relay_format="openai",stream="false",result="failure",error_type="timeout"}'
+        values: '0+0.5x25'
+      - series: 'newapi_rate_limit_rejections_total{cluster="test",job="new-api",instance="app-low",scope="user",reason="request_count"}'
+        values: '0+1x25'
+    alert_rule_test:
+      - eval_time: 21m
+        alertname: NewAPIRelayRateLimitErrorsHigh
+        exp_alerts: []
+      - eval_time: 21m
+        alertname: NewAPIUpstream5xxErrorsHigh
+        exp_alerts: []
+      - eval_time: 21m
+        alertname: NewAPIRelayTimeoutsHigh
+        exp_alerts: []
+      - eval_time: 21m
+        alertname: NewAPILocalRateLimitRejectionsHigh
+        exp_alerts: []
+
+  - name: configured P95 latency threshold requires sufficient traffic
+    interval: 1m
+    input_series:
+      - series: 'newapi_relay_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",le="5"}'
+        values: '0+10x20'
+      - series: 'newapi_relay_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",le="10"}'
+        values: '0+100x20'
+      - series: 'newapi_relay_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",le="+Inf"}'
+        values: '0+100x20'
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",error_type="none"}'
+        values: '0+20x20'
+      - series: 'newapi_relay_latency_threshold_seconds{cluster="test",job="new-api",relay_format="openai",quantile="p95"}'
+        values: '8x21'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: NewAPIRelayP95LatencyHigh
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              job: new-api
+              relay_format: openai
+              severity: warning
+            exp_annotations:
+              summary: new-api Relay P95 latency exceeds the configured threshold
+              description: Relay format openai P95 latency is above its calibrated threshold in cluster test job new-api. Check upstream latency, retries, and format-specific load.
+
+  - name: configured P99 latency threshold requires sufficient traffic
+    interval: 1m
+    input_series:
+      - series: 'newapi_relay_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",relay_format="openai_image",stream="false",result="success",le="5"}'
+        values: '0+10x20'
+      - series: 'newapi_relay_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",relay_format="openai_image",stream="false",result="success",le="10"}'
+        values: '0+100x20'
+      - series: 'newapi_relay_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",relay_format="openai_image",stream="false",result="success",le="+Inf"}'
+        values: '0+100x20'
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai_image",stream="false",result="success",error_type="none"}'
+        values: '0+25x20'
+      - series: 'newapi_relay_latency_threshold_seconds{cluster="test",job="new-api",relay_format="openai_image",quantile="p99"}'
+        values: '9.5x21'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: NewAPIRelayP99LatencyHigh
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              job: new-api
+              relay_format: openai_image
+              severity: critical
+            exp_annotations:
+              summary: new-api Relay P99 latency exceeds the configured threshold
+              description: Relay format openai_image P99 latency is above its calibrated threshold in cluster test job new-api. Investigate upstream saturation, network latency, and long-running requests.
+
+  - name: missing latency threshold keeps alerts dormant
+    interval: 1m
+    input_series:
+      - series: 'newapi_relay_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",le="10"}'
+        values: '0+100x20'
+      - series: 'newapi_relay_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",le="+Inf"}'
+        values: '0+100x20'
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",error_type="none"}'
+        values: '0+25x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: NewAPIRelayP95LatencyHigh
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: NewAPIRelayP99LatencyHigh
+        exp_alerts: []
+
+  - name: low traffic does not trigger configured latency alerts
+    interval: 1m
+    input_series:
+      - series: 'newapi_relay_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",le="5"}'
+        values: '0+10x20'
+      - series: 'newapi_relay_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",le="10"}'
+        values: '0+100x20'
+      - series: 'newapi_relay_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",le="+Inf"}'
+        values: '0+100x20'
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",error_type="none"}'
+        values: '0+5x20'
+      - series: 'newapi_relay_latency_threshold_seconds{cluster="test",job="new-api",relay_format="openai",quantile="p95"}'
+        values: '8x21'
+      - series: 'newapi_relay_latency_threshold_seconds{cluster="test",job="new-api",relay_format="openai",quantile="p99"}'
+        values: '9.5x21'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: NewAPIRelayP95LatencyHigh
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: NewAPIRelayP99LatencyHigh
+        exp_alerts: []
+
+  - name: latency thresholds do not cross cluster job or relay format labels
+    interval: 1m
+    input_series:
+      - series: 'newapi_relay_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",le="5"}'
+        values: '0+10x20'
+      - series: 'newapi_relay_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",le="10"}'
+        values: '0+100x20'
+      - series: 'newapi_relay_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",le="+Inf"}'
+        values: '0+100x20'
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",error_type="none"}'
+        values: '0+25x20'
+      - series: 'newapi_relay_latency_threshold_seconds{cluster="other",job="new-api",relay_format="openai",quantile="p95"}'
+        values: '8x21'
+      - series: 'newapi_relay_latency_threshold_seconds{cluster="test",job="other-api",relay_format="openai",quantile="p95"}'
+        values: '8x21'
+      - series: 'newapi_relay_latency_threshold_seconds{cluster="test",job="new-api",relay_format="openai_image",quantile="p95"}'
+        values: '8x21'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: NewAPIRelayP95LatencyHigh
+        exp_alerts: []

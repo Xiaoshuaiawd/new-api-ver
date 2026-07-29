@@ -1,0 +1,317 @@
+rule_files:
+  - recording-rules.yml
+
+evaluation_interval: 1m
+fuzzy_compare: true
+
+tests:
+  - name: relay channel histogram and database aggregations
+    interval: 1m
+    input_series:
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",error_type="none"}'
+        values: '0+10x6'
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-2",relay_format="openai",stream="false",result="failure",error_type="upstream_5xx"}'
+        values: '0+2x6'
+      - series: 'newapi_channel_attempts_total{cluster="test",job="new-api",instance="app-1",channel_id="7",channel_type="1",stream="false",result="success",error_type="none"}'
+        values: '0+8x6'
+      - series: 'newapi_channel_attempts_total{cluster="test",job="new-api",instance="app-2",channel_id="7",channel_type="1",stream="false",result="failure",error_type="upstream_5xx"}'
+        values: '0+2x6'
+      - series: 'newapi_channel_retries_total{cluster="test",job="new-api",instance="app-2",channel_id="7",channel_type="1",reason="upstream_5xx"}'
+        values: '0+1x6'
+      - series: 'newapi_relay_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",le="1"}'
+        values: '0+30x6'
+      - series: 'newapi_relay_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",le="+Inf"}'
+        values: '0+30x6'
+      - series: 'newapi_relay_duration_seconds_bucket{cluster="test",job="new-api",instance="app-2",relay_format="openai",stream="false",result="success",le="1"}'
+        values: '0+30x6'
+      - series: 'newapi_relay_duration_seconds_bucket{cluster="test",job="new-api",instance="app-2",relay_format="openai",stream="false",result="success",le="+Inf"}'
+        values: '0+30x6'
+      - series: 'newapi_db_connections{cluster="test",job="new-api",instance="app-1",database="main",state="in_use"}'
+        values: '10x7'
+      - series: 'newapi_db_max_open_connections{cluster="test",job="new-api",instance="app-1",database="main"}'
+        values: '20x7'
+      - series: 'newapi_db_connections{cluster="test",job="new-api",instance="app-2",database="main",state="in_use"}'
+        values: '5x7'
+      - series: 'newapi_db_max_open_connections{cluster="test",job="new-api",instance="app-2",database="main"}'
+        values: '0x7'
+    promql_expr_test:
+      - expr: newapi:relay_request_rate:5m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:relay_request_rate:5m",cluster="test",job="new-api"}'
+            value: 0.2
+      - expr: newapi:relay_request_increase:5m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:relay_request_increase:5m",cluster="test",job="new-api"}'
+            value: 60
+      - expr: newapi:relay_success_ratio:5m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:relay_success_ratio:5m",cluster="test",job="new-api"}'
+            value: 0.8333333333333334
+      - expr: newapi:channel_success_rpm:5m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_success_rpm:5m",channel_id="7",cluster="test",job="new-api"}'
+            value: 8
+      - expr: newapi:channel_attempt_rpm:5m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_attempt_rpm:5m",channel_id="7",cluster="test",job="new-api"}'
+            value: 10
+      - expr: newapi:channel_attempt_increase:5m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_attempt_increase:5m",channel_id="7",cluster="test",job="new-api"}'
+            value: 50
+      - expr: newapi:channel_success_increase:5m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_success_increase:5m",channel_id="7",cluster="test",job="new-api"}'
+            value: 40
+      - expr: newapi:channel_failure_ratio:5m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_failure_ratio:5m",channel_id="7",cluster="test",job="new-api"}'
+            value: 0.2
+      - expr: newapi:channel_retry_ratio:5m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_retry_ratio:5m",channel_id="7",cluster="test",job="new-api"}'
+            value: 0.1
+      - expr: newapi:relay_duration_seconds:p95_5m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:relay_duration_seconds:p95_5m",cluster="test",job="new-api",relay_format="openai"}'
+            value: 0.95
+      - expr: newapi:relay_duration_seconds:p99_5m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:relay_duration_seconds:p99_5m",cluster="test",job="new-api",relay_format="openai"}'
+            value: 0.99
+      - expr: newapi:db_pool_utilization:instance
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:db_pool_utilization:instance",cluster="test",database="main",instance="app-1",job="new-api"}'
+            value: 0.5
+
+  - name: billing operation failure rejection and saturation aggregations
+    interval: 1m
+    input_series:
+      - series: 'newapi_billing_operations_total{cluster="test",job="new-api",instance="app-1",operation="settle",billing_source="wallet",result="success"}'
+        values: '0+8x16'
+      - series: 'newapi_billing_operations_total{cluster="test",job="new-api",instance="app-2",operation="settle",billing_source="wallet",result="error"}'
+        values: '0+2x16'
+      - series: 'newapi_billing_failures_total{cluster="test",job="new-api",instance="app-2",operation="settle",billing_source="wallet",reason="database"}'
+        values: '0+2x16'
+      - series: 'newapi_subscription_rejections_total{cluster="test",job="new-api",instance="app-1",reason="expired"}'
+        values: '0+1x16'
+      - series: 'newapi_quota_saturation_total{cluster="test",job="new-api",instance="app-1",kind="overflow",operation="pre_consume"}'
+        values: '0+1x16'
+    promql_expr_test:
+      - expr: newapi:billing_operation_increase:15m
+        eval_time: 16m
+        exp_samples:
+          - labels: '{__name__="newapi:billing_operation_increase:15m",billing_source="wallet",cluster="test",job="new-api",operation="settle",result="error"}'
+            value: 30
+          - labels: '{__name__="newapi:billing_operation_increase:15m",billing_source="wallet",cluster="test",job="new-api",operation="settle",result="success"}'
+            value: 120
+      - expr: newapi:billing_operation_total_increase:15m
+        eval_time: 16m
+        exp_samples:
+          - labels: '{__name__="newapi:billing_operation_total_increase:15m",cluster="test",job="new-api"}'
+            value: 150
+      - expr: newapi:billing_failure_increase:15m
+        eval_time: 16m
+        exp_samples:
+          - labels: '{__name__="newapi:billing_failure_increase:15m",billing_source="wallet",cluster="test",job="new-api",operation="settle",reason="database"}'
+            value: 30
+      - expr: newapi:billing_failure_ratio:15m
+        eval_time: 16m
+        exp_samples:
+          - labels: '{__name__="newapi:billing_failure_ratio:15m",cluster="test",job="new-api"}'
+            value: 0.2
+      - expr: newapi:subscription_rejection_increase:15m
+        eval_time: 16m
+        exp_samples:
+          - labels: '{__name__="newapi:subscription_rejection_increase:15m",cluster="test",job="new-api",reason="expired"}'
+            value: 15
+      - expr: newapi:quota_saturation_increase:15m
+        eval_time: 16m
+        exp_samples:
+          - labels: '{__name__="newapi:quota_saturation_increase:15m",cluster="test",job="new-api",kind="overflow",operation="pre_consume"}'
+            value: 15
+
+  - name: asynchronous task rates duration and queue aggregations
+    interval: 1m
+    input_series:
+      - series: 'newapi_task_submissions_total{cluster="test",job="new-api",instance="app-1",platform="video",result="success"}'
+        values: '0+4x16'
+      - series: 'newapi_task_submissions_total{cluster="test",job="new-api",instance="app-2",platform="video",result="failure"}'
+        values: '0+1x16'
+      - series: 'newapi_task_completions_total{cluster="test",job="new-api",instance="app-1",platform="video",result="success"}'
+        values: '0+3x16'
+      - series: 'newapi_task_completions_total{cluster="test",job="new-api",instance="app-2",platform="video",result="failure"}'
+        values: '0+1x16'
+      - series: 'newapi_task_poll_total{cluster="test",job="new-api",instance="app-1",platform="video",result="success"}'
+        values: '0+8x16'
+      - series: 'newapi_task_poll_total{cluster="test",job="new-api",instance="app-2",platform="video",result="error"}'
+        values: '0+2x16'
+      - series: 'newapi_task_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",platform="video",result="success",le="60"}'
+        values: '0+10x16'
+      - series: 'newapi_task_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",platform="video",result="success",le="+Inf"}'
+        values: '0+10x16'
+      - series: 'newapi_task_queue_size{cluster="test",job="new-api",instance="master-1",platform="video",state="waiting"}'
+        values: '80x17'
+      - series: 'newapi_task_queue_size{cluster="test",job="new-api",instance="master-1",platform="video",state="running"}'
+        values: '30x17'
+      - series: 'newapi_task_queue_size{cluster="test",job="new-api",instance="master-1",platform="video",state="unknown"}'
+        values: '0x17'
+    promql_expr_test:
+      - expr: newapi:task_submission_rate:5m
+        eval_time: 16m
+        exp_samples:
+          - labels: '{__name__="newapi:task_submission_rate:5m",cluster="test",job="new-api",platform="video",result="failure"}'
+            value: 0.016666666666666666
+          - labels: '{__name__="newapi:task_submission_rate:5m",cluster="test",job="new-api",platform="video",result="success"}'
+            value: 0.06666666666666667
+      - expr: newapi:task_completion_increase:15m
+        eval_time: 16m
+        exp_samples:
+          - labels: '{__name__="newapi:task_completion_increase:15m",cluster="test",job="new-api",platform="video",result="failure"}'
+            value: 15
+          - labels: '{__name__="newapi:task_completion_increase:15m",cluster="test",job="new-api",platform="video",result="success"}'
+            value: 45
+      - expr: newapi:task_completion_success_ratio:15m
+        eval_time: 16m
+        exp_samples:
+          - labels: '{__name__="newapi:task_completion_success_ratio:15m",cluster="test",job="new-api",platform="video"}'
+            value: 0.75
+      - expr: newapi:task_poll_error_ratio:5m
+        eval_time: 16m
+        exp_samples:
+          - labels: '{__name__="newapi:task_poll_error_ratio:5m",cluster="test",job="new-api",platform="video"}'
+            value: 0.2
+      - expr: newapi:task_duration_seconds:p50_15m
+        eval_time: 16m
+        exp_samples:
+          - labels: '{__name__="newapi:task_duration_seconds:p50_15m",cluster="test",job="new-api",platform="video",result="success"}'
+            value: 30
+      - expr: newapi:task_duration_seconds:p95_15m
+        eval_time: 16m
+        exp_samples:
+          - labels: '{__name__="newapi:task_duration_seconds:p95_15m",cluster="test",job="new-api",platform="video",result="success"}'
+            value: 57
+      - expr: newapi:task_queue_size:state
+        eval_time: 16m
+        exp_samples:
+          - labels: '{__name__="newapi:task_queue_size:state",cluster="test",job="new-api",platform="video",state="running"}'
+            value: 30
+          - labels: '{__name__="newapi:task_queue_size:state",cluster="test",job="new-api",platform="video",state="unknown"}'
+            value: 0
+          - labels: '{__name__="newapi:task_queue_size:state",cluster="test",job="new-api",platform="video",state="waiting"}'
+            value: 80
+      - expr: newapi:task_queue_total:platform
+        eval_time: 16m
+        exp_samples:
+          - labels: '{__name__="newapi:task_queue_total:platform",cluster="test",job="new-api",platform="video"}'
+            value: 110
+
+  - name: relay fixed error type increases and ratios
+    interval: 1m
+    input_series:
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",error_type="none"}'
+        values: '0+72x16'
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="failure",error_type="rate_limit"}'
+        values: '0+12x16'
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="failure",error_type="upstream_5xx"}'
+        values: '0+8x16'
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="failure",error_type="timeout"}'
+        values: '0+6x16'
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="failure",error_type="invalid_request"}'
+        values: '0+2x16'
+    promql_expr_test:
+      - expr: newapi:relay_error_increase:5m
+        eval_time: 16m
+        exp_samples:
+          - labels: '{__name__="newapi:relay_error_increase:5m",cluster="test",error_type="invalid_request",job="new-api"}'
+            value: 10
+          - labels: '{__name__="newapi:relay_error_increase:5m",cluster="test",error_type="rate_limit",job="new-api"}'
+            value: 60
+          - labels: '{__name__="newapi:relay_error_increase:5m",cluster="test",error_type="timeout",job="new-api"}'
+            value: 30
+          - labels: '{__name__="newapi:relay_error_increase:5m",cluster="test",error_type="upstream_5xx",job="new-api"}'
+            value: 40
+      - expr: newapi:relay_error_ratio:5m
+        eval_time: 16m
+        exp_samples:
+          - labels: '{__name__="newapi:relay_error_ratio:5m",cluster="test",error_type="invalid_request",job="new-api"}'
+            value: 0.02
+          - labels: '{__name__="newapi:relay_error_ratio:5m",cluster="test",error_type="rate_limit",job="new-api"}'
+            value: 0.12
+          - labels: '{__name__="newapi:relay_error_ratio:5m",cluster="test",error_type="timeout",job="new-api"}'
+            value: 0.06
+          - labels: '{__name__="newapi:relay_error_ratio:5m",cluster="test",error_type="upstream_5xx",job="new-api"}'
+            value: 0.08
+
+  - name: database wait count duration and average preserve instance labels
+    interval: 1m
+    input_series:
+      - series: 'newapi_db_wait_total{cluster="test",job="new-api",instance="app-1",database="main"}'
+        values: '0+10x6'
+      - series: 'newapi_db_wait_duration_seconds_total{cluster="test",job="new-api",instance="app-1",database="main"}'
+        values: '0+2x6'
+    promql_expr_test:
+      - expr: newapi:db_wait_increase:5m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:db_wait_increase:5m",cluster="test",database="main",instance="app-1",job="new-api"}'
+            value: 50
+      - expr: newapi:db_wait_duration_seconds_increase:5m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:db_wait_duration_seconds_increase:5m",cluster="test",database="main",instance="app-1",job="new-api"}'
+            value: 10
+      - expr: newapi:db_wait_average_seconds:5m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:db_wait_average_seconds:5m",cluster="test",database="main",instance="app-1",job="new-api"}'
+            value: 0.2
+
+  - name: runtime growth rates preserve deployment and instance labels
+    interval: 1m
+    input_series:
+      - series: 'go_goroutines{cluster="test",job="new-api",instance="app-1"}'
+        values: '600+30x31'
+      - series: 'go_memstats_heap_alloc_bytes{cluster="test",job="new-api",instance="app-1"}'
+        values: '629145600+20971520x31'
+    promql_expr_test:
+      - expr: newapi:go_goroutines_growth_per_second:30m
+        eval_time: 31m
+        exp_samples:
+          - labels: '{__name__="newapi:go_goroutines_growth_per_second:30m",cluster="test",instance="app-1",job="new-api"}'
+            value: 0.5
+      - expr: newapi:go_heap_alloc_bytes_growth_per_second:30m
+        eval_time: 31m
+        exp_samples:
+          - labels: '{__name__="newapi:go_heap_alloc_bytes_growth_per_second:30m",cluster="test",instance="app-1",job="new-api"}'
+            value: 349525.3333333333
+
+  - name: relay request volume preserves relay format
+    interval: 1m
+    input_series:
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false",result="success",error_type="none"}'
+        values: '0+12x6'
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-2",relay_format="openai",stream="true",result="failure",error_type="timeout"}'
+        values: '0+8x6'
+      - series: 'newapi_relay_requests_total{cluster="test",job="new-api",instance="app-1",relay_format="openai_image",stream="false",result="success",error_type="none"}'
+        values: '0+4x6'
+    promql_expr_test:
+      - expr: newapi:relay_request_increase_by_format:5m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:relay_request_increase_by_format:5m",cluster="test",job="new-api",relay_format="openai"}'
+            value: 100
+          - labels: '{__name__="newapi:relay_request_increase_by_format:5m",cluster="test",job="new-api",relay_format="openai_image"}'
+            value: 20
