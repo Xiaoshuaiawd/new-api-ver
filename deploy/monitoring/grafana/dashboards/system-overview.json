@@ -1171,6 +1171,82 @@
       ],
       "title": "Redis failures and degradations",
       "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "按 Relay 格式展示集群实际 inflight 与已校准的 warning/critical 阈值。阈值默认不存在，因此对应阈值线显示 No data；阈值不受 Instance 筛选影响，warning 需持续 10 分钟、critical 需持续 5 分钟。多实例 Gauge 求和反映抓取时刻的趋势，并非严格同时快照。",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "inflight requests",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" }
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": "/warning threshold/" },
+            "properties": [
+              { "id": "custom.fillOpacity", "value": 0 },
+              { "id": "custom.lineStyle", "value": { "dash": [10, 10], "fill": "dash" } },
+              { "id": "custom.lineWidth", "value": 2 }
+            ]
+          },
+          {
+            "matcher": { "id": "byRegexp", "options": "/critical threshold/" },
+            "properties": [
+              { "id": "custom.fillOpacity", "value": 0 },
+              { "id": "custom.lineStyle", "value": { "dash": [3, 6], "fill": "dash" } },
+              { "id": "custom.lineWidth", "value": 3 }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 75 },
+      "id": 26,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "editorMode": "code",
+          "expr": "newapi:relay_inflight_by_format{cluster=\"$cluster\",job=\"new-api\",relay_format=~\"$relay_format\"}",
+          "legendFormat": "{{relay_format}} actual inflight",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "editorMode": "code",
+          "expr": "max by (relay_format) (newapi_relay_inflight_threshold{cluster=\"$cluster\",job=\"new-api\",relay_format=~\"$relay_format\",severity=\"warning\"})",
+          "legendFormat": "{{relay_format}} warning threshold",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "editorMode": "code",
+          "expr": "max by (relay_format) (newapi_relay_inflight_threshold{cluster=\"$cluster\",job=\"new-api\",relay_format=~\"$relay_format\",severity=\"critical\"})",
+          "legendFormat": "{{relay_format}} critical threshold",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Relay inflight by format",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",

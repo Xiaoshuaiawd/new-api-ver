@@ -309,6 +309,12 @@ ruby -e '
       rule.fetch("equal").sort == %w[cluster job relay_format].sort
   end
   abort "missing Relay latency inhibition" unless matched
+  matched = config.fetch("inhibit_rules").any? do |rule|
+    rule.fetch("source_matchers").include?(%q{alertname="NewAPIRelayInflightCritical"}) &&
+      rule.fetch("target_matchers").include?(%q{alertname="NewAPIRelayInflightHigh"}) &&
+      rule.fetch("equal").sort == %w[cluster job relay_format].sort
+  end
+  abort "missing Relay inflight inhibition" unless matched
 ' "$monitoring_dir/alertmanager.yml.example"
 
 rg -q '^  scrape_interval: 15s$' "$monitoring_dir/prometheus.yml"
@@ -398,7 +404,7 @@ validate_dashboard() {
 validate_dashboard \
 	"$monitoring_dir/grafana/dashboards/system-overview.json" \
 	"newapi-system-overview" \
-	12 \
+	13 \
 	cluster instance relay_format
 
 jq -e '
@@ -424,6 +430,30 @@ jq -e '
     $panels[0].fieldConfig.overrides[]
     | select(.matcher.id == "byRegexp" and .matcher.options == "/threshold/")
   ] | length) == 1
+' "$monitoring_dir/grafana/dashboards/system-overview.json" >/dev/null
+
+jq -e '
+  [.panels[] | select(.id == 26)] as $panels |
+  ($panels | length) == 1 and
+  ([$panels[0].targets[] | select(.expr | contains("newapi:relay_inflight_by_format"))] | length) == 1 and
+  ([$panels[0].targets[] | select(
+    (.expr | contains("newapi_relay_inflight_threshold")) and
+    (.expr | contains("severity=\"warning\"")) and
+    (.legendFormat | contains("warning threshold"))
+  )] | length) == 1 and
+  ([$panels[0].targets[] | select(
+    (.expr | contains("newapi_relay_inflight_threshold")) and
+    (.expr | contains("severity=\"critical\"")) and
+    (.legendFormat | contains("critical threshold"))
+  )] | length) == 1 and
+  ([$panels[0].targets[] | select(.expr | contains("$instance"))] | length) == 0 and
+  ([$panels[0].targets[].legendFormat] | unique | length) == 3 and
+  ([$panels[0].fieldConfig.overrides[] | select(
+    .matcher.id == "byRegexp" and .matcher.options == "/warning threshold/"
+  )] | length) == 1 and
+  ([$panels[0].fieldConfig.overrides[] | select(
+    .matcher.id == "byRegexp" and .matcher.options == "/critical threshold/"
+  )] | length) == 1
 ' "$monitoring_dir/grafana/dashboards/system-overview.json" >/dev/null
 
 validate_dashboard \
@@ -479,8 +509,8 @@ jq -s '
 	>"$tmp_dir/dashboard-rules.json"
 
 dashboard_query_count=$(jq '.groups[0].rules | length' "$tmp_dir/dashboard-rules.json")
-if [ "$dashboard_query_count" -ne 72 ]; then
-	echo "expected 72 dashboard PromQL expressions, got $dashboard_query_count" >&2
+if [ "$dashboard_query_count" -ne 75 ]; then
+	echo "expected 75 dashboard PromQL expressions, got $dashboard_query_count" >&2
 	exit 1
 fi
 

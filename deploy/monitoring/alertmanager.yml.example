@@ -55,6 +55,16 @@ inhibit_rules:
       - cluster
       - job
       - relay_format
+  - source_matchers:
+      - alertname="NewAPIRelayInflightCritical"
+      - severity="critical"
+    target_matchers:
+      - alertname="NewAPIRelayInflightHigh"
+      - severity="warning"
+    equal:
+      - cluster
+      - job
+      - relay_format
 
 receivers:
   - name: new-api-webhook-warning
