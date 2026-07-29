@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+
 	"github.com/glebarez/sqlite"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
@@ -52,6 +54,26 @@ func TestNewRuntimeCanBeConstructedMoreThanOnce(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NotSame(t, first.registry, second.registry)
+}
+
+func TestNewRuntimeRegistersSharedCollectorsTogether(t *testing.T) {
+	previousMaster := common.IsMasterNode
+	common.IsMasterNode = true
+	t.Cleanup(func() { common.IsMasterNode = previousMaster })
+
+	runtime, err := NewRuntime(
+		Config{Enabled: true, AllowPublic: true},
+		"v-test",
+		nil,
+		nil,
+		WithChannelStateSource(func() ([]ChannelState, error) { return nil, nil }),
+		WithTaskQueueSource(func() ([]TaskQueueRecord, error) { return nil, nil }),
+	)
+	require.NoError(t, err)
+
+	output := scrapeMetrics(t, runtime)
+	assert.Contains(t, output, "newapi_shared_collector_up{collector=\"channel_state\"} 1")
+	assert.Contains(t, output, "newapi_shared_collector_up{collector=\"task_queue\"} 1")
 }
 
 func TestNewRuntimeDisabledDoesNotCreateMetricsHandler(t *testing.T) {

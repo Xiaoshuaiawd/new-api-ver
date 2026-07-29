@@ -47,8 +47,8 @@ func newTaskQueueCollector(source TaskQueueSource, collectorErrors *prometheus.C
 		up: prometheus.NewDesc(
 			"newapi_shared_collector_up",
 			"Whether a shared database collector completed successfully.",
-			[]string{"collector"},
 			nil,
+			prometheus.Labels{"collector": "task_queue"},
 		),
 	}
 }
@@ -65,7 +65,7 @@ func (c *taskQueueCollector) Collect(ch chan<- prometheus.Metric) {
 			c.collectorErrors.WithLabelValues("task_queue").Inc()
 		}
 		c.logCollectionError(err)
-		ch <- prometheus.MustNewConstMetric(c.up, prometheus.GaugeValue, 0, "task_queue")
+		ch <- prometheus.MustNewConstMetric(c.up, prometheus.GaugeValue, 0)
 		return
 	}
 
@@ -85,7 +85,7 @@ func (c *taskQueueCollector) Collect(ch chan<- prometheus.Metric) {
 		counts[platform][state] += record.Count
 	}
 
-	ch <- prometheus.MustNewConstMetric(c.up, prometheus.GaugeValue, 1, "task_queue")
+	ch <- prometheus.MustNewConstMetric(c.up, prometheus.GaugeValue, 1)
 	for _, platform := range []string{"midjourney", "other", "suno", "video"} {
 		for _, state := range []string{"running", "unknown", "waiting"} {
 			ch <- prometheus.MustNewConstMetric(c.queueSize, prometheus.GaugeValue, float64(counts[platform][state]), platform, state)

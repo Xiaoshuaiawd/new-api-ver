@@ -54,8 +54,8 @@ func newChannelStateCollector(
 		up: prometheus.NewDesc(
 			"newapi_shared_collector_up",
 			"Whether a shared database collector completed successfully.",
-			[]string{"collector"},
 			nil,
+			prometheus.Labels{"collector": "channel_state"},
 		),
 	}
 }
@@ -72,11 +72,11 @@ func (c *channelStateCollector) Collect(ch chan<- prometheus.Metric) {
 			c.collectorErrors.WithLabelValues("channel_state").Inc()
 		}
 		c.logCollectionError(err)
-		ch <- prometheus.MustNewConstMetric(c.up, prometheus.GaugeValue, 0, "channel_state")
+		ch <- prometheus.MustNewConstMetric(c.up, prometheus.GaugeValue, 0)
 		return
 	}
 
-	ch <- prometheus.MustNewConstMetric(c.up, prometheus.GaugeValue, 1, "channel_state")
+	ch <- prometheus.MustNewConstMetric(c.up, prometheus.GaugeValue, 1)
 	for _, state := range states {
 		enabled := 0.0
 		if state.Status == common.ChannelStatusEnabled {
