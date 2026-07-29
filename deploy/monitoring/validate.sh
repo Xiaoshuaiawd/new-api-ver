@@ -15,6 +15,7 @@ $monitoring_dir/recording-rules.test.yml
 $monitoring_dir/alert-rules.yml
 $monitoring_dir/alert-rules.test.yml
 $monitoring_dir/relay-latency-thresholds.yml
+$monitoring_dir/relay-concurrency-thresholds.yml
 $monitoring_dir/alertmanager.yml.example
 $monitoring_dir/grafana/provisioning/datasources/prometheus.yml
 $monitoring_dir/grafana/provisioning/dashboards/default.yml
@@ -45,6 +46,7 @@ sed \
 	-e "s#/etc/prometheus/rules/recording-rules.yml#$monitoring_dir/recording-rules.yml#" \
 	-e "s#/etc/prometheus/rules/alert-rules.yml#$monitoring_dir/alert-rules.yml#" \
 	-e "s#/etc/prometheus/rules/relay-latency-thresholds.yml#$monitoring_dir/relay-latency-thresholds.yml#" \
+	-e "s#/etc/prometheus/rules/relay-concurrency-thresholds.yml#$monitoring_dir/relay-concurrency-thresholds.yml#" \
 	-e "s#/etc/prometheus/secrets/new-api-bearer-token#$monitoring_dir/secrets/new-api-bearer-token.example#" \
 	"$monitoring_dir/prometheus.yml" >"$tmp_dir/prometheus.yml"
 
@@ -52,7 +54,8 @@ sed \
 "$promtool_bin" check rules --lint=all --lint-fatal \
 	"$monitoring_dir/recording-rules.yml" \
 	"$monitoring_dir/alert-rules.yml" \
-	"$monitoring_dir/relay-latency-thresholds.yml"
+	"$monitoring_dir/relay-latency-thresholds.yml" \
+	"$monitoring_dir/relay-concurrency-thresholds.yml"
 ruby -e '
   require "tmpdir"
   require "yaml"
@@ -145,6 +148,130 @@ ruby -e '
     end
   end
 ' "$monitoring_dir/relay-latency-thresholds.yml"
+ruby -e '
+  require "tmpdir"
+  require "yaml"
+
+  allowed_formats = %w[
+    openai claude gemini openai_responses openai_responses_compaction
+    openai_alpha_search openai_audio openai_image openai_realtime rerank
+    embedding task mj_proxy other
+  ].freeze
+  allowed_severities = %w[warning critical].freeze
+  expected_keys = %w[cluster job relay_format severity].freeze
+
+  validate = lambda do |document|
+    rules = document.fetch("groups").flat_map { |group| group.fetch("rules") }
+    seen = {}
+    thresholds = Hash.new { |hash, key| hash[key] = {} }
+
+    rules.each do |rule|
+      raise ArgumentError, "concurrency threshold record name is invalid" unless rule.fetch("record") == "newapi_relay_inflight_threshold"
+      labels = rule.fetch("labels")
+      raise ArgumentError, "concurrency threshold labels are invalid" unless labels.keys.sort == expected_keys.sort
+      if labels.fetch("cluster").to_s.empty? || labels.fetch("job").to_s.empty?
+        raise ArgumentError, "concurrency threshold cluster/job must be non-empty"
+      end
+      raise ArgumentError, "concurrency threshold relay_format is invalid" unless allowed_formats.include?(labels.fetch("relay_format"))
+      raise ArgumentError, "concurrency threshold severity is invalid" unless allowed_severities.include?(labels.fetch("severity"))
+
+      match = /\Avector\(([1-9][0-9]*)\)\z/.match(rule.fetch("expr").to_s.strip)
+      raise ArgumentError, "concurrency threshold must use vector(<positive integer>)" unless match
+      value = Integer(match[1], 10)
+
+      key = expected_keys.map { |name| labels.fetch(name) }
+      raise ArgumentError, "duplicate concurrency threshold #{key.join("/")}" if seen[key]
+      seen[key] = true
+      format_key = %w[cluster job relay_format].map { |name| labels.fetch(name) }
+      thresholds[format_key][labels.fetch("severity")] = value
+    end
+
+    thresholds.each do |key, values|
+      next unless values.key?("warning") && values.key?("critical")
+      unless values.fetch("critical") > values.fetch("warning")
+        raise ArgumentError, "critical concurrency threshold must exceed warning for #{key.join("/")}"
+      end
+    end
+  end
+
+  document = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
+  begin
+    validate.call(document)
+  rescue KeyError, ArgumentError => error
+    abort error.message
+  end
+
+  base_rule = {
+    "record" => "newapi_relay_inflight_threshold",
+    "expr" => "vector(10)",
+    "labels" => {
+      "cluster" => "default",
+      "job" => "new-api",
+      "relay_format" => "openai",
+      "severity" => "warning"
+    }
+  }
+  fixture = lambda do |rules|
+    { "groups" => [{ "name" => "test", "rules" => rules }] }
+  end
+  changed_rule = lambda do |path, value|
+    rule = Marshal.load(Marshal.dump(base_rule))
+    target = path.reduce(rule) { |current, key| current.fetch(key) }
+    target.replace(value)
+    rule
+  end
+  invalid_cases = {
+    "unknown-format" => ["concurrency threshold relay_format is invalid", changed_rule.call(%w[labels relay_format], "unknown")],
+    "unknown-severity" => ["concurrency threshold severity is invalid", changed_rule.call(%w[labels severity], "notice")],
+    "zero" => ["concurrency threshold must use vector(<positive integer>)", changed_rule.call(%w[expr], "vector(0)")],
+    "negative" => ["concurrency threshold must use vector(<positive integer>)", changed_rule.call(%w[expr], "vector(-1)")],
+    "decimal" => ["concurrency threshold must use vector(<positive integer>)", changed_rule.call(%w[expr], "vector(1.5)")],
+    "nan" => ["concurrency threshold must use vector(<positive integer>)", changed_rule.call(%w[expr], "vector(NaN)")],
+    "non-constant" => ["concurrency threshold must use vector(<positive integer>)", changed_rule.call(%w[expr], "scalar(1)")]
+  }
+  extra_label = Marshal.load(Marshal.dump(base_rule))
+  extra_label.fetch("labels")["instance"] = "app-1"
+  invalid_cases["extra-label"] = ["concurrency threshold labels are invalid", extra_label]
+  invalid_cases["duplicate"] = ["duplicate concurrency threshold default/new-api/openai/warning", [base_rule, base_rule]]
+
+  warning_rule = Marshal.load(Marshal.dump(base_rule))
+  critical_rule = Marshal.load(Marshal.dump(base_rule))
+  critical_rule.fetch("labels")["severity"] = "critical"
+  invalid_cases["equal"] = [
+    "critical concurrency threshold must exceed warning for default/new-api/openai",
+    [warning_rule, critical_rule]
+  ]
+  critical_below_warning = Marshal.load(Marshal.dump(critical_rule))
+  critical_below_warning["expr"] = "vector(9)"
+  invalid_cases["critical-below-warning"] = [
+    "critical concurrency threshold must exceed warning for default/new-api/openai",
+    [warning_rule, critical_below_warning]
+  ]
+
+  Dir.mktmpdir("newapi-relay-concurrency-thresholds") do |directory|
+    invalid_cases.each do |name, (expected_error, rule_or_rules)|
+      rules = rule_or_rules.is_a?(Array) ? rule_or_rules : [rule_or_rules]
+      path = File.join(directory, "#{name}.yml")
+      File.write(path, YAML.dump(fixture.call(rules)))
+      begin
+        validate.call(YAML.safe_load(File.read(path), aliases: true))
+        abort "invalid concurrency threshold fixture #{name} was accepted"
+      rescue KeyError, ArgumentError => error
+        unless error.message == expected_error
+          abort "invalid concurrency threshold fixture #{name} returned #{error.message.inspect}, expected #{expected_error.inspect}"
+        end
+      end
+    end
+
+    warning_only_path = File.join(directory, "warning-only.yml")
+    File.write(warning_only_path, YAML.dump(fixture.call([warning_rule])))
+    validate.call(YAML.safe_load(File.read(warning_only_path), aliases: true))
+
+    critical_only_path = File.join(directory, "critical-only.yml")
+    File.write(critical_only_path, YAML.dump(fixture.call([critical_rule])))
+    validate.call(YAML.safe_load(File.read(critical_only_path), aliases: true))
+  end
+' "$monitoring_dir/relay-concurrency-thresholds.yml"
 "$promtool_bin" test rules "$monitoring_dir/recording-rules.test.yml"
 "$promtool_bin" test rules "$monitoring_dir/alert-rules.test.yml"
 ruby -e '
@@ -190,6 +317,7 @@ rg -q '^    cluster: default$' "$monitoring_dir/prometheus.yml"
 rg -q '^  - job_name: new-api$' "$monitoring_dir/prometheus.yml"
 rg -q '^      credentials_file: /etc/prometheus/secrets/new-api-bearer-token$' "$monitoring_dir/prometheus.yml"
 rg -q 'relay-latency-thresholds.yml:/etc/prometheus/rules/relay-latency-thresholds.yml:ro' "$repo_dir/docker-compose.monitoring.yml"
+rg -q 'relay-concurrency-thresholds.yml:/etc/prometheus/rules/relay-concurrency-thresholds.yml:ro' "$repo_dir/docker-compose.monitoring.yml"
 rg -q '^inhibit_rules:$' "$monitoring_dir/alertmanager.yml.example"
 rg -q '^        send_resolved: true$' "$monitoring_dir/alertmanager.yml.example"
 rg -q '^!\*\.example$' "$monitoring_dir/secrets/.gitignore"

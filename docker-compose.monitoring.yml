@@ -16,6 +16,7 @@ services:
       - ./deploy/monitoring/recording-rules.yml:/etc/prometheus/rules/recording-rules.yml:ro
       - ./deploy/monitoring/alert-rules.yml:/etc/prometheus/rules/alert-rules.yml:ro
       - ./deploy/monitoring/relay-latency-thresholds.yml:/etc/prometheus/rules/relay-latency-thresholds.yml:ro
+      - ./deploy/monitoring/relay-concurrency-thresholds.yml:/etc/prometheus/rules/relay-concurrency-thresholds.yml:ro
       - "${PROMETHEUS_BEARER_TOKEN_FILE:?set PROMETHEUS_BEARER_TOKEN_FILE}:/etc/prometheus/secrets/new-api-bearer-token:ro"
       - prometheus_data:/prometheus
     extra_hosts:

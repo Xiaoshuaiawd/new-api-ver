@@ -9,6 +9,7 @@ rule_files:
   - /etc/prometheus/rules/recording-rules.yml
   - /etc/prometheus/rules/alert-rules.yml
   - /etc/prometheus/rules/relay-latency-thresholds.yml
+  - /etc/prometheus/rules/relay-concurrency-thresholds.yml
 
 alerting:
   alertmanagers:
