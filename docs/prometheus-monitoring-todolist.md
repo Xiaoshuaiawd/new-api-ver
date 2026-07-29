@@ -1343,7 +1343,7 @@ git diff --check
 - [x] D11-2：TTFT 按当前渠道 attempt 独立计时，重试后的新渠道不包含前一失败渠道耗时；Cloudflare/Cohere 等路径统一使用 `SetFirstResponseTime()`。
 - [x] D11-3：Token 只在最终结算点记录，文本使用 `billingUsage`，音频使用归一化 `Usage`；不在预扣费、失败路径或重试中间态重复记录。
 - [x] D11-4：新增 11 条渠道 Recording Rules，提供 1 分钟 attempt/失败/重试 RPM、成功率/超时率，以及 5 分钟 P90/P95、TTFT P95、上游首字节 P95、`cache_read / input` 上游缓存率和 Token 每分钟吞吐。
-- [x] D11-5：监控 Compose 新增固定版本 Node Exporter、PostgreSQL Exporter、MySQL Exporter 和 Redis Exporter；Exporter 不发布公网端口，通过外部业务 Docker 网络和运行时 Secret 连接，MySQL target 默认为空。
+- [x] D11-5：监控 Compose 新增固定版本 Node Exporter、PostgreSQL Exporter、MySQL Exporter 和 Redis Exporter；Exporter 不发布公网端口，通过外部业务 Docker 网络和运行时 Secret 连接，MySQL target 默认为空。Redis Secret 使用官方要求的地址到密码 JSON 映射，校验脚本拒绝原始密码文本。
 - [x] D11-6：Grafana 重构为 `new-api 监控` 下的主机/程序/中间件/渠道总览，以及 `new-api 扩展监控` 下的计费/任务总览；6 页标题、行、面板和说明均为中文，刷新周期统一为 15 秒。
 - [x] D11-7：Grafana 12.1 临时容器已真实验证双文件夹和 6 个 dashboard provisioning；108 条 Dashboard PromQL 已通过 Prometheus 语法校验。
 - [x] D11-8：当前静态验收口径为 46 条 Recording Rules、28 条告警、108 条 Dashboard PromQL；Go 定向测试覆盖指标注册、渠道 attempt 归因、RelayInfo 与最终结算路径。

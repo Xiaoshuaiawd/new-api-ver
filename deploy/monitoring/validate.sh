@@ -41,6 +41,16 @@ for required_file in $required_files; do
 	fi
 done
 
+ruby -e '
+  require "json"
+
+  passwords = JSON.parse(File.read(ARGV.fetch(0)))
+  valid = passwords.is_a?(Hash) && !passwords.empty? && passwords.all? do |address, password|
+    (address.start_with?("redis://") || address.start_with?("rediss://")) && password.is_a?(String)
+  end
+  abort "Redis exporter password file example must be a non-empty redis URI to password JSON object" unless valid
+' "$monitoring_dir/secrets/redis-exporter-password.example"
+
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
 	PROMETHEUS_BEARER_TOKEN_FILE="$monitoring_dir/secrets/new-api-bearer-token.example" \
 	GRAFANA_ADMIN_PASSWORD_FILE="$monitoring_dir/secrets/grafana-admin-password.example" \

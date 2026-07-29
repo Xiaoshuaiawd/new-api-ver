@@ -98,7 +98,7 @@ authorization:
 | `GRAFANA_ADMIN_PASSWORD_FILE` | Grafana 管理员强密码 |
 | `ALERTMANAGER_WEBHOOK_URL_FILE` | 接收 Alertmanager webhook 的完整 HTTPS URL |
 | `POSTGRES_EXPORTER_PASSWORD_FILE` | PostgreSQL Exporter 只读监控账号密码 |
-| `REDIS_EXPORTER_PASSWORD_FILE` | Redis 密码；Redis 无密码时使用空文件 |
+| `REDIS_EXPORTER_PASSWORD_FILE` | Redis 地址到密码的 JSON 映射；键必须与 `REDIS_EXPORTER_ADDR` 一致并包含 `redis://` 或 `rediss://`，无密码时值使用空字符串 |
 | `MYSQL_EXPORTER_CONFIG_FILE` | MySQL Exporter 的 `[client]` 配置；仅启用 MySQL profile 时使用 |
 
 示例环境变量只保存文件路径，不保存 secret 本身：
@@ -112,7 +112,15 @@ export REDIS_EXPORTER_PASSWORD_FILE=/opt/new-api-monitoring/secrets/redis-export
 export MYSQL_EXPORTER_CONFIG_FILE=/opt/new-api-monitoring/secrets/mysql-exporter.cnf
 ```
 
-建议设置文件权限为仅部署账号可读，并定期轮换。轮换 Bearer Token 时应先同步更新应用和 Prometheus 文件，再重载两端，避免产生抓取空窗。
+Redis Exporter 密码文件示例：
+
+```json
+{
+  "redis://redis:6379": "replace-with-the-redis-password"
+}
+```
+
+建议 Secret 使用 `0600` 权限，并确保固定镜像的运行用户能读取。当前 PostgreSQL Exporter `v0.17.1` 使用 UID/GID `65534:65534`，Redis Exporter `v1.67.0` 使用 `59000:59000`；若宿主机 Secret 保持 root 所有且 `0600`，Exporter 会因 `permission denied` 退出。轮换 Bearer Token 时应先同步更新应用和 Prometheus 文件，再重载两端，避免产生抓取空窗。
 
 ## 三、配置抓取目标
 
