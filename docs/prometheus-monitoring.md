@@ -8,7 +8,11 @@
 | --- | --- | --- | --- |
 | new-api `/metrics` | `http://应用地址/metrics` | 导出运行时、HTTP、Relay、渠道、计费、异步任务、Redis/缓存和数据库连接池指标 | 否 |
 | Prometheus | `http://localhost:9090` | 抓取、保存时间序列、执行 Recording/告警规则 | 否 |
-| Grafana | `http://localhost:3001` | 展示系统、渠道、计费和异步任务监控面板 | 否 |
+| Node Exporter | Docker 内网 `node-exporter:9100` | 导出整台主机 CPU、内存、文件系统和磁盘 I/O | 否 |
+| PostgreSQL Exporter | Docker 内网 `postgres-exporter:9187` | 导出 PostgreSQL 连接、事务、缓存、锁和容量 | 否 |
+| MySQL Exporter | Docker 内网 `mysqld-exporter:9104` | 可选导出 MySQL 连接、查询、InnoDB 和容量 | 否 |
+| Redis Exporter | Docker 内网 `redis-exporter:9121` | 导出 Redis 内存、客户端、命令、Keyspace 和 Key 生命周期 | 否 |
+| Grafana | `http://localhost:3001` | 展示主机、程序、中间件、渠道及扩展监控面板 | 否 |
 | Alertmanager | `http://localhost:9093` | 告警分组、通知、恢复通知、静默和抑制 | 否 |
 
 精确用量、账务、用户/Token/IP 明细仍以数据库消费日志和审计日志为准。Prometheus Counter 用于趋势和告警，不替代账单。
@@ -20,6 +24,10 @@
 - Prometheus `v3.5.0`
 - Alertmanager `v0.28.1`
 - Grafana `12.1.0`
+- Node Exporter `v1.9.1`
+- PostgreSQL Exporter `v0.17.1`
+- MySQL Exporter `v0.17.2`
+- Redis Exporter `v1.67.0`
 
 主要文件：
 
@@ -32,10 +40,21 @@ deploy/monitoring/
   relay-latency-thresholds.yml
   relay-concurrency-thresholds.yml
   alertmanager.yml.example
+  targets/
+    postgres-exporter.yml
+    mysql-exporter.yml
   validate.sh
   grafana/
     provisioning/
     dashboards/
+      core/
+        host-overview.json
+        application-overview.json
+        middleware-overview.json
+        channel-overview.json
+      extended/
+        billing-overview.json
+        task-overview.json
   secrets/
     *.example
 ```
@@ -66,18 +85,21 @@ authorization:
 
 其他配置：
 
-- `PROMETHEUS_DISABLE_CHANNEL_HISTOGRAM=true`：关闭渠道 attempt 总耗时和 transport 首字节 Histogram，保留 attempt、retry 和 inflight。渠道数 `N >= 300` 或预算试算超过 `45,000` 条自定义序列时必须启用。
+- `PROMETHEUS_DISABLE_CHANNEL_HISTOGRAM=true`：关闭渠道 attempt 总耗时、渠道 TTFT 和 transport 首字节 Histogram，保留 attempt、retry、inflight 和 Token Counter。渠道数 `N >= 300` 或预算试算超过 `45,000` 条自定义序列时必须启用。
 - `NODE_NAME`：用于应用日志识别节点；Prometheus 的 `instance` 标签由 target 配置决定，两者不会自动映射，多实例部署时都应保持稳定且唯一。
 
 ## 二、准备 Secret
 
-仓库中的 `.example` 文件只是格式示例，不能直接用于生产。请在仓库外创建三个仅部署用户可读的文件：
+仓库中的 `.example` 文件只是格式示例，不能直接用于生产。请在仓库外创建以下仅部署用户可读的文件：
 
 | 环境变量 | 文件内容 |
 | --- | --- |
 | `PROMETHEUS_BEARER_TOKEN_FILE` | 与应用 `PROMETHEUS_BEARER_TOKEN` 完全相同的随机值 |
 | `GRAFANA_ADMIN_PASSWORD_FILE` | Grafana 管理员强密码 |
 | `ALERTMANAGER_WEBHOOK_URL_FILE` | 接收 Alertmanager webhook 的完整 HTTPS URL |
+| `POSTGRES_EXPORTER_PASSWORD_FILE` | PostgreSQL Exporter 只读监控账号密码 |
+| `REDIS_EXPORTER_PASSWORD_FILE` | Redis 密码；Redis 无密码时使用空文件 |
+| `MYSQL_EXPORTER_CONFIG_FILE` | MySQL Exporter 的 `[client]` 配置；仅启用 MySQL profile 时使用 |
 
 示例环境变量只保存文件路径，不保存 secret 本身：
 
@@ -85,11 +107,41 @@ authorization:
 export PROMETHEUS_BEARER_TOKEN_FILE=/opt/new-api-monitoring/secrets/new-api-bearer-token
 export GRAFANA_ADMIN_PASSWORD_FILE=/opt/new-api-monitoring/secrets/grafana-admin-password
 export ALERTMANAGER_WEBHOOK_URL_FILE=/opt/new-api-monitoring/secrets/alertmanager-webhook-url
+export POSTGRES_EXPORTER_PASSWORD_FILE=/opt/new-api-monitoring/secrets/postgres-exporter-password
+export REDIS_EXPORTER_PASSWORD_FILE=/opt/new-api-monitoring/secrets/redis-exporter-password
+export MYSQL_EXPORTER_CONFIG_FILE=/opt/new-api-monitoring/secrets/mysql-exporter.cnf
 ```
 
 建议设置文件权限为仅部署账号可读，并定期轮换。轮换 Bearer Token 时应先同步更新应用和 Prometheus 文件，再重载两端，避免产生抓取空窗。
 
 ## 三、配置抓取目标
+
+### 业务网络与 Exporter
+
+监控 Compose 通过外部网络连接 PostgreSQL、MySQL 和 Redis。先确认业务容器所在网络：
+
+```bash
+docker network ls
+export NEW_API_DOCKER_NETWORK=new-api-ver_new-api-network
+```
+
+不要填写容器临时 IP。`NEW_API_DOCKER_NETWORK` 必须是实际 Docker 网络名，Exporter 本身不发布宿主机端口。
+
+当前 PostgreSQL 部署需要：
+
+```bash
+export POSTGRES_EXPORTER_URI='postgres:5432/new-api?sslmode=disable'
+export POSTGRES_EXPORTER_USER=exporter
+export REDIS_EXPORTER_ADDR='redis://redis:6379'
+```
+
+PostgreSQL target 位于 `deploy/monitoring/targets/postgres-exporter.yml`。MySQL target 文件默认是空列表，因此未启用 MySQL 时 Prometheus 不会产生一个永久 DOWN 的假 target。
+
+MySQL 切换步骤：
+
+1. 为 MySQL 创建最小权限监控账号并填写运行时 `MYSQL_EXPORTER_CONFIG_FILE`。
+2. 将 `deploy/monitoring/targets/mysql-exporter.yml` 改为包含 `mysqld-exporter:9104`、固定 `cluster` 和可读 `instance` 标签。
+3. 使用 `--profile mysql` 启动；PostgreSQL 部署使用 `--profile postgres`，两者不要求同时启用。
 
 ### 单实例
 
@@ -165,11 +217,11 @@ deploy/monitoring/validate.sh
 
 校验内容包括：
 
-- Prometheus 配置、35 条基础 Recording Rules、28 条告警规则，以及默认 0 条 Relay 延迟阈值规则和 0 条 Relay 并发阈值规则。
+- Prometheus 配置、46 条基础 Recording Rules、28 条告警规则，以及默认 0 条 Relay 延迟阈值规则和 0 条 Relay 并发阈值规则。
 - Recording/告警固定输入测试。
 - Alertmanager route、恢复通知和 warning/critical 抑制配置。
-- Compose 服务、固定镜像版本、持久化卷和健康检查。
-- Grafana datasource、dashboard provisioning、dashboard JSON、变量、面板 ID 和 PromQL 非空检查。
+- PostgreSQL/MySQL 两种 Compose profile、固定镜像版本、外部业务网络、Exporter 内网端口和运行时 Secret。
+- Grafana 双文件夹 provisioning、6 个中文 dashboard JSON、变量、面板 ID、渠道维度保留和 108 条 PromQL 语法检查。
 
 也可以单独执行：
 
@@ -183,15 +235,16 @@ promtool check rules --lint=all --lint-fatal \
 promtool test rules deploy/monitoring/recording-rules.test.yml
 promtool test rules deploy/monitoring/alert-rules.test.yml
 amtool check-config deploy/monitoring/alertmanager.yml.example
-docker compose -f docker-compose.monitoring.yml config
+docker compose -f docker-compose.monitoring.yml --profile postgres config
+docker compose -f docker-compose.monitoring.yml --profile mysql config
 ```
 
 ## 五、启动与检查
 
-确认应用已启用 `/metrics` 且三个 secret 路径环境变量已设置后：
+确认应用已启用 `/metrics`、Secret 路径、业务网络和 PostgreSQL/Redis 连接参数已设置后：
 
 ```bash
-docker compose -f docker-compose.monitoring.yml up -d
+docker compose -f docker-compose.monitoring.yml --profile postgres up -d
 docker compose -f docker-compose.monitoring.yml ps
 ```
 
@@ -205,36 +258,42 @@ curl -fsS http://localhost:9093/-/ready
 
 然后检查：
 
-1. Prometheus `Status → Targets` 中 `new-api` target 为 `UP`。
+1. Prometheus `Status → Targets` 中 `new-api`、`node-exporter`、`postgres-exporter` 和 `redis-exporter` target 为 `UP`。
 2. Prometheus `Status → Rules` 中 Recording/Alert Rules 加载成功。
-3. Grafana `new-api Monitoring` 文件夹中自动出现：
-   - `new-api / System Overview`
-   - `new-api / Channel Overview`
-   - `new-api / Billing Overview`
-   - `new-api / Task Overview`
+3. Grafana 自动出现两个文件夹：
+   - `new-api 监控`：`new-api / 主机总览`、`new-api / 程序总览`、`new-api / 中间件总览`、`new-api / 渠道总览`
+   - `new-api 扩展监控`：`new-api / 计费总览`、`new-api / 任务总览`
 4. Alertmanager `Status` 页面能看到当前配置和运行状态。
 
 Grafana provisioning 设置为不可直接保存 UI 修改。需要改面板时修改仓库中的 JSON，等待最多 30 秒自动重新加载。
 
 ## 六、Dashboard 口径
 
-### System Overview
+### 主机总览
 
-包含最终请求 RPM、服务成功率、P50/P95/P99、按 Relay 格式配置的 P95/P99 延迟阈值线、按格式聚合的实际 inflight 与 warning/critical 并发阈值线、Relay inflight、流式 inflight、固定错误类型、限流拒绝 RPM、实例健康、Go Runtime、进程 CPU、数据库连接池、单实例数据库连接等待次数/平均时长、Master collector，以及 Redis 启用状态、操作 RPM、P95 耗时、缓存命中率和错误/降级趋势。
+展示 Node Exporter 采集的整机 CPU 使用率、系统负载、内存/Swap、文件系统空间、磁盘读写吞吐和 I/O 耗时。这一页只反映宿主机资源，不把容器或 new-api 进程数据混入主机口径。
 
-数据库等待使用 `sql.DB.Stats()` 的累计 `WaitCount` 和 `WaitDuration`。Recording Rules 先按 `cluster/job/instance/database` 计算 5 分钟增量，再用同一实例的累计等待时长除以等待次数；不先跨实例汇总再求平均。面板中 `0` 表示窗口内没有等待，`No data` 表示对应 DB 指标缺失。初始 warning 同时要求 5 分钟等待次数 `>= 20`、平均等待 `> 0.1s`，并持续 `10m`；该阈值需在生产观察期校准。
+变量为 `cluster`、`instance` 和 `device`。文件系统面板排除 tmpfs、overlay 等临时文件系统；容量剩余 `0` 表示已采集且无剩余空间，`No data` 表示 Node Exporter target 或对应设备序列缺失。
 
-Goroutine 和 Go heap 增长使用 `deriv(...[30m])` 按单实例计算每秒线性增长率。Goroutine warning 同时要求当前值 `>= 500`、增长率 `> 0.05/s`；heap warning 同时要求当前分配 `>= 512 MiB`、增长率 `> 128 KiB/s`。两者都要求进程运行至少 30 分钟且条件持续 15 分钟，避免启动期与低基数波动误报。这些数值是初始候选阈值，上线后应结合实例规格、业务负载和 Go profile 校准。
+### 程序总览
 
-变量：
+展示 new-api 实例健康、进程 CPU/常驻内存、Go 堆分配、Goroutine、GC 和运行时趋势，同时保留最终 Relay RPM、成功率、P50/P95/P99、按 Relay 格式配置的延迟阈值线、inflight/流式 inflight、并发阈值线、限流和固定错误类型。
 
-- `cluster`：部署边界。
-- `instance`：支持 All 或按实例下钻。
-- `relay_format`：支持 All 或按固定 Relay 格式过滤。
+Goroutine 和 Go heap 增长使用 `deriv(...[30m])` 按单实例计算每秒线性增长率。Goroutine warning 同时要求当前值 `>= 500`、增长率 `> 0.05/s`；heap warning 同时要求当前分配 `>= 512 MiB`、增长率 `> 128 KiB/s`。两者都要求进程运行至少 30 分钟且条件持续 15 分钟。这些是初始候选阈值，上线后应结合实例规格、业务负载和 Go profile 校准。
 
-### Channel Overview
+变量为 `cluster`、`instance` 和 `relay_format`。
 
-包含成功 RPM、attempt RPM、retry RPM、attempt 成功率、失败/重试比例、渠道总耗时、HTTP/AWS/WebSocket transport 响应头首字节 P50/P95、inflight、错误类型、重试原因和启用状态。
+### 中间件总览
+
+展示 PostgreSQL、可选 MySQL 和 Redis 的状态与容量。PostgreSQL 包含连接、事务、缓存命中、锁和数据库容量；MySQL 包含连接、查询、InnoDB 和表容量；Redis 包含内存、客户端、命令、Keyspace、命中/过期和业务缓存/降级趋势。未启动的数据库 profile 对应区域显示“暂无数据”，不应解释为故障。
+
+应用内部数据库等待使用 `sql.DB.Stats()` 的累计 `WaitCount` 和 `WaitDuration`。Recording Rules 先按 `cluster/job/instance/database` 计算 5 分钟增量，再用同一实例的等待时长除以等待次数。面板中 `0` 表示窗口内没有等待，`No data` 表示指标缺失。初始 warning 同时要求 5 分钟等待次数 `>= 20`、平均等待 `> 0.1s`，并持续 `10m`；需在生产观察期校准。
+
+变量为 `cluster`、`instance`、`database` 和 `redis_instance`。
+
+### 渠道总览
+
+渠道实时口径使用 1 分钟窗口：attempt RPM、失败 RPM、重试 RPM、成功率和超时率。性能与缓存口径使用 5 分钟窗口：P90/P95 渠道 attempt 总耗时、P95 TTFT、P95 上游响应头首字节、上游缓存命中率和 Token 每分钟吞吐。页面还展示渠道 inflight、启用状态、固定错误分类和重试原因，可在多个 `channel_id` 之间对比。
 
 变量：
 
@@ -242,9 +301,11 @@ Goroutine 和 Go heap 增长使用 `deriv(...[30m])` 按单实例计算每秒线
 - `instance`
 - `channel_id`
 
-渠道 Histogram 被关闭时，总耗时和首字节面板显示 `No data`，这是配置行为，不代表渠道没有请求。attempt、retry、inflight 和成功率面板仍然可用。首字节指标使用 `httptrace.GetConn` → `GotFirstResponseByte` 口径，覆盖经 `relay/channel.doRequest` 发送的共享 HTTP 路径、AWS Bedrock 原生 SDK，以及 OpenAI/AdvancedCustom Realtime、讯飞和火山 TTS WebSocket Upgrade。Gorilla WebSocket 在解析 HTTP 101 响应前原生触发首字节回调，因此这里记录的不是完整握手或第一条应用消息。鉴权、文件上传、模型管理、任务轮询等辅助请求不混入。
+上游缓存命中率定义为 `cache_read Token / input Token`，不是 Redis 命中率，也不是按请求条数统计。TTFT 从当前渠道 attempt 开始计时，只记录该渠道到第一个可交付内容的时间，不包含前一个失败渠道的耗时。Provider 没有返回 Usage 时，缓存命中率和 Token 吞吐面板显示“暂无数据”，不伪造为 `0`。
 
-### Billing Overview
+渠道 Histogram 被关闭时，P90/P95、TTFT 和上游首字节面板显示 `No data`；attempt、retry、inflight、成功率和 Token Counter 仍然可用。上游首字节指标使用 `httptrace.GetConn` → `GotFirstResponseByte` 口径，覆盖共享 HTTP、AWS Bedrock 原生 SDK 和已接入的 WebSocket Upgrade 路径；它不是完整握手或第一条应用消息耗时。鉴权、文件上传、模型管理和任务轮询等辅助请求不混入。
+
+### 计费总览（扩展监控）
 
 包含 Token 用量、内部 quota 扣除/退款/净额度、按冻结分组倍率还原的实际额度、计费操作成功/失败、固定失败原因、订阅拒绝和 quota saturation。所有 Counter 面板使用 `rate` 或净速率表达，不用于财务对账。
 
@@ -256,7 +317,7 @@ Goroutine 和 Go heap 增长使用 `deriv(...[30m])` 按单实例计算每秒线
 
 消费日志开关关闭时，consume 的 quota/Token 面板可为 `No data`；refund 和计费操作面板仍按实际事件展示。Prometheus 指标只用于趋势和告警，使用日志才是精确对账数据源。
 
-### Task Overview
+### 任务总览（扩展监控）
 
 包含任务提交 RPM、completion 成功比例、poll 错误比例、成功/失败终态 RPM、P50/P95 端到端耗时、按 platform/state 的当前积压和 `task_queue` collector 健康状态。
 
@@ -272,7 +333,7 @@ Goroutine 和 Go heap 增长使用 `deriv(...[30m])` 按单实例计算每秒线
 
 ## 七、常用 PromQL
 
-以下示例默认 `cluster="default", job="new-api"`。
+以下应用示例默认 `cluster="default", job="new-api"`；Exporter 示例显式使用各自的 `job`。
 
 ```promql
 # 最终请求 RPM
@@ -295,25 +356,37 @@ newapi:relay_error_increase:5m{cluster="default",job="new-api",error_type=~"rate
 newapi:relay_inflight_by_format{cluster="default",job="new-api",relay_format="openai"}
 newapi_relay_inflight_threshold{cluster="default",job="new-api",relay_format="openai",severity=~"warning|critical"}
 
-# 渠道成功 RPM
-newapi:channel_success_rpm:5m{cluster="default",job="new-api"}
+# 宿主机 CPU 使用率、可用内存比例和根文件系统剩余比例
+100 * (1 - avg by (cluster, instance) (rate(node_cpu_seconds_total{cluster="default",job="node-exporter",mode="idle"}[5m])))
+100 * node_memory_MemAvailable_bytes{cluster="default",job="node-exporter"} / node_memory_MemTotal_bytes{cluster="default",job="node-exporter"}
+100 * node_filesystem_avail_bytes{cluster="default",job="node-exporter",mountpoint="/"} / node_filesystem_size_bytes{cluster="default",job="node-exporter",mountpoint="/"}
 
-# 渠道 attempt RPM
-newapi:channel_attempt_rpm:5m{cluster="default",job="new-api"}
+# PostgreSQL 当前连接和缓存命中率
+sum by (cluster, instance, datname) (pg_stat_database_numbackends{cluster="default",job="postgres-exporter"})
+100 * sum by (cluster, instance, datname) (rate(pg_stat_database_blks_hit{cluster="default",job="postgres-exporter"}[5m]))
+/
+clamp_min(sum by (cluster, instance, datname) (rate(pg_stat_database_blks_hit{cluster="default",job="postgres-exporter"}[5m]) + rate(pg_stat_database_blks_read{cluster="default",job="postgres-exporter"}[5m])), 1)
 
-# 渠道失败比例
-newapi:channel_failure_ratio:5m{cluster="default",job="new-api"}
+# Redis 内存使用和连接客户端
+redis_memory_used_bytes{cluster="default",job="redis-exporter"}
+redis_connected_clients{cluster="default",job="redis-exporter"}
 
-# 渠道重试比例
-newapi:channel_retry_ratio:5m{cluster="default",job="new-api"}
+# 渠道 1 分钟实时流量、成功率和超时率
+newapi:channel_attempt_rpm:1m{cluster="default",job="new-api"}
+newapi:channel_failure_rpm:1m{cluster="default",job="new-api"}
+newapi:channel_retry_rpm:1m{cluster="default",job="new-api"}
+newapi:channel_success_ratio:1m{cluster="default",job="new-api"}
+newapi:channel_timeout_ratio:1m{cluster="default",job="new-api"}
 
-# HTTP/AWS/WebSocket transport 渠道 P95 响应头首字节耗时
-histogram_quantile(
-  0.95,
-  sum by (channel_id, le) (
-    rate(newapi_channel_first_byte_seconds_bucket{cluster="default",job="new-api"}[5m])
-  )
-)
+# 渠道 5 分钟 P90/P95、TTFT P95 和上游响应头首字节 P95
+newapi:channel_duration_seconds:p90_5m{cluster="default",job="new-api"}
+newapi:channel_duration_seconds:p95_5m{cluster="default",job="new-api"}
+newapi:channel_ttft_seconds:p95_5m{cluster="default",job="new-api"}
+newapi:channel_first_byte_seconds:p95_5m{cluster="default",job="new-api"}
+
+# 渠道上游缓存命中率与 Token 每分钟吞吐
+newapi:channel_cache_hit_ratio:5m{cluster="default",job="new-api"}
+newapi:channel_tokens_per_minute:5m{cluster="default",job="new-api"}
 
 # 计费操作失败比例（告警额外要求 15 分钟最小事件量）
 newapi:billing_failure_ratio:15m{cluster="default",job="new-api"}
@@ -675,6 +748,6 @@ docker compose -f docker-compose.monitoring.yml up -d
 docker compose -f docker-compose.monitoring.yml ps
 ```
 
-7. 验证三个健康端点、Prometheus target/rules、Grafana 四个 dashboard 和一次测试告警恢复链路。
+7. 验证三个健康端点、Prometheus target/rules、Grafana 六个 dashboard 和一次测试告警恢复链路。
 
 出现兼容问题时使用上一个固定镜像版本回滚，并恢复对应数据卷快照；不要用删除数据卷作为常规回滚方式。

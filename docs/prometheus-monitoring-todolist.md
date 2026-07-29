@@ -21,7 +21,7 @@
 
 ---
 
-> 状态（2026-07-29）：P0-A、P0-B 已完成；P0-C 的规则、Alertmanager 示例、Grafana provisioning/dashboard、Prometheus 配置、独立 Compose 和部署文档已完成静态实现与本地联调，发布验收仍保留生产基数校准、活动 Relay inflight 多实例下钻等环境项。P1 D1-D10 的限流、Redis/缓存、计费、异步任务、transport 首字节、Relay 固定错误告警、数据库连接等待、Go Runtime 增长、Relay 延迟告警与 Relay 并发告警基础设施已完成代码/规则、Dashboard 说明、固定输入测试和本地验证。当前共 35 条基础 Recording Rules、28 条告警、0 条默认延迟阈值规则、0 条默认并发阈值规则和 75 条 Dashboard PromQL。DB 等待、Goroutine/heap 增长、任务积压、Relay 延迟与并发阈值都需要生产校准，生产证据完成前不视为最终值。
+> 状态（2026-07-29）：P0-A、P0-B 已完成；P0-C 的规则、Alertmanager 示例、Grafana provisioning/dashboard、Prometheus 配置、独立 Compose 和部署文档已完成静态实现与本地联调，发布验收仍保留生产基数校准、活动 Relay inflight 多实例下钻等环境项。P1 D1-D10 能力保留；D11 已将默认展示重构为主机、程序、中间件、渠道四层中文监控，新增 Node/PostgreSQL/MySQL/Redis Exporter、渠道 TTFT/Token 指标和 1 分钟/5 分钟实时聚合规则。当前共 46 条基础 Recording Rules、28 条告警、0 条默认延迟阈值规则、0 条默认并发阈值规则和 108 条 Dashboard PromQL。DB 等待、Goroutine/heap 增长、任务积压、Relay 延迟与并发阈值都需要生产校准，生产证据完成前不视为最终值。
 >
 > 勾选规则：只有代码、测试、配置或文档已经落地并通过对应验收时，才允许把条目标记为 `[x]`。仅完成设计、创建空文件或本地手工观察不算完成。
 
@@ -31,8 +31,8 @@
 | --- | --- | --- | --- |
 | P0-A 基础接入 | 代码与自动测试已完成 | 独立 Registry、安全 `/metrics`、Go/Process/Build Info、DB 连接池 | 部署环境手工抓取纳入 P0-C 联调 |
 | P0-B 流量与渠道 | 代码与自动测试已完成 | HTTP、Relay、流式、渠道 attempt/retry/inflight/duration、固定错误分类及 `ErrorType` 兜底、Master-only `channel_enabled`/collector 健康状态、渠道 Histogram 关闭开关、客户端取消与 deadline 传播、异常流失败、clean EOF 成功回归、Prometheus/性能看板统一最终成功判定、Midjourney controller 成功边界 | 生产 `R/N` 基数验收归 P0-C 发布联调 |
-| P0-C 可视化与告警 | 进行中 | Recording/告警规则、Prometheus/Alertmanager 配置、Grafana provisioning 与四个 dashboard、独立 Compose、静态验证脚本、部署文档和本地运行联调 | 生产基数校准、活动 Relay inflight 的多实例下钻、新增 dashboard 的发布环境容器加载和完整发布验收 |
-| P1 业务监控 | 进行中 | 限流拒绝；Redis 启用状态、命令/pipeline、耗时、缓存命中、限流失败、降级、Dashboard 和告警；D3 计费全链路；D4 异步任务全链路；D5 transport 首字节；D6 429/5xx/timeout 异常告警；D7 数据库连接等待；D8 Goroutine/Go heap 持续增长；D9 Relay P95/P99 可配置延迟告警；D10 Relay 按格式可配置并发告警 | 发布环境加载验收与生产阈值校准 |
+| P0-C 可视化与告警 | 进行中 | Recording/告警规则、Prometheus/Alertmanager 配置、Grafana 双文件夹 provisioning 与 6 个中文 dashboard、独立 Compose、静态验证脚本、部署文档和本地运行联调 | 生产基数校准、活动 Relay inflight 的多实例下钻、四层 dashboard 的发布环境容器加载和完整发布验收 |
+| P1 业务监控 | 进行中 | D1-D10 限流、Redis/缓存、计费、异步任务、transport 首字节、固定错误、DB 等待、Runtime 增长和 Relay 阈值基础设施；D11 渠道 TTFT、Token 吞吐、上游缓存率、1 分钟实时渠道口径和四层中文看板 | 发布环境加载验收与生产阈值校准 |
 
 注：本文中“口径已确定”与“代码已实现”是两种状态。规范性条目可因文档决策已落地而勾选；指标、collector 和验收条目必须有对应代码与测试依据。
 
@@ -64,7 +64,7 @@
 | 计费、Token 与实际额度 | `pkg/prometheus_metrics/billing.go`、`model/log.go`、`service/billing.go`、`service/billing_session.go`、`service/task_billing.go` | `pkg/prometheus_metrics/billing_test.go`、`service/billing_metrics_test.go`、`service/task_billing_test.go` 及对应计费会话测试 |
 | 异步任务提交、poll、首次终态与队列 | `pkg/prometheus_metrics/task.go`、`task_queue_collector.go`、`controller/relay.go`、`service/task_polling.go`、`controller/midjourney.go`、`relay/relay_task.go`、`relay/mjproxy_handler.go` | `task_test.go`、`task_queue_collector_test.go`、`controller/relay_metrics_test.go`、`service/task_polling_test.go`、`controller/midjourney_metrics_test.go`、`relay/relay_task_metrics_test.go`、`relay/mjproxy_handler_test.go`、`model/task_cas_test.go` |
 | Recording/Alert Rules | `deploy/monitoring/recording-rules.yml`、`alert-rules.yml` | `recording-rules.test.yml`、`alert-rules.test.yml` |
-| P0-C/P1 静态部署产物 | `docker-compose.monitoring.yml`、`deploy/monitoring/prometheus.yml`、Alertmanager/Grafana 配置、四个 dashboard、`docs/prometheus-monitoring.md` | `deploy/monitoring/validate.sh`：Prometheus/rules、Compose、YAML/JSON、35 条基础 Recording Rules、28 条告警、0 条默认延迟阈值规则、0 条默认并发阈值规则和 75 条 dashboard PromQL 静态校验 |
+| P0-C/P1 静态部署产物 | `docker-compose.monitoring.yml`、`deploy/monitoring/prometheus.yml`、Exporter、Alertmanager/Grafana 配置、`core/` 四层 dashboard、`extended/` 计费/任务 dashboard、`docs/prometheus-monitoring.md` | `deploy/monitoring/validate.sh`：Prometheus/rules、PostgreSQL/MySQL profile、Compose、YAML/JSON、46 条基础 Recording Rules、28 条告警、0 条默认延迟阈值规则、0 条默认并发阈值规则和 108 条 dashboard PromQL 静态校验 |
 
 证据索引只说明“在哪里验证”，不替代对应批次的验收命令。测试名称或文件调整时必须同步更新本表，避免文档中的完成状态失去来源。
 
@@ -72,8 +72,8 @@
 
 1. 在发布环境使用受信任的镜像仓库或离线导入相同固定版本镜像，复现本地已通过的启动、抓取和告警联调。
 2. 在测试环境代入实际路由数 `R`、渠道数 `N`，完成基数、安全抓取和多实例聚合验收。
-3. 在发布环境验证 Billing/Task dashboard 容器自动加载、Master-only 队列面板和任务告警 firing/resolved 生命周期。
-4. 在发布环境分别产生共享 HTTP、AWS Bedrock、OpenAI/AdvancedCustom Realtime、讯飞和火山 TTS 流量，确认首字节 Histogram 各路径都有真实样本，并保存 channel ID/type 与实例维度的查询证据。
+3. 在发布环境验证 Node、PostgreSQL、Redis Exporter 与 new-api target 全部 `UP`，MySQL profile 未启用时不产生假 `DOWN` target。
+4. 验证 Grafana 两个中文文件夹和 6 个 dashboard 自动加载，并用真实多渠道流量确认 RPM、P90/P95、TTFT、上游首字节、缓存率和 Token 吞吐按 `channel_id` 分开。
 5. 上线后使用真实积压、完成率、poll 错误率以及按 `relay_format` 的 P95/P99 耗时和 inflight 分布校准候选阈值；生产积压、Relay 延迟与并发阈值保持未校准状态，不能仅凭本地样本宣称完成。
 
 ### 运行验收状态记录（2026-07-28）
@@ -100,7 +100,7 @@
 | 应用 | `git rev-parse HEAD`、`NODE_NAME`、`NODE_TYPE`、`PROMETHEUS_*` 安全模式；无 Token 返回 403，正确 Bearer 返回 200 |
 | Compose | `docker compose ... ps` 中 Prometheus/Grafana/Alertmanager 均 healthy；镜像完整版本号 |
 | Prometheus | `/-/ready`、`up{job="new-api"}`、`/api/v1/rules` 中规则组状态、`newapi_build_info` 和 DB/collector 指标 |
-| Grafana | `/api/health`、四个 dashboard UID：`newapi-system-overview`、`newapi-channel-overview`、`newapi-billing-overview`、`newapi-task-overview`；变量可查询且核心面板不是意外 No data |
+| Grafana | `/api/health`、6 个 dashboard UID：`newapi-host-overview`、`newapi-application-overview`、`newapi-middleware-overview`、`newapi-channel-overview`、`newapi-billing-overview`、`newapi-task-overview`；两个中文文件夹、变量可查询且核心面板不是意外 No data |
 | Alertmanager | `/-/ready`、`/api/v2/status`；告警 firing → resolved，warning/critical 抑制结果和接收端响应 |
 | 基数 | `prometheus_tsdb_head_series`、按 `__name__` 聚合的 series 数、活跃路由 `R`、渠道数 `N`、是否启用渠道 Histogram |
 | 多实例 | 每个 target 的 `job/cluster/instance`、Counter `sum(rate())`、inflight 按 instance 下钻、Master-only collector 只有一份 |
@@ -743,18 +743,18 @@ completion 与计费生命周期必须保持解耦：终态 CAS 获胜就记录�
 
 ### Grafana 面板
 
-- [x] 系统总览 dashboard JSON：最终请求 RPM、成功率、P50/P95/P99、并发和流式连接。
-- [x] 渠道监控 dashboard JSON：成功 RPM、尝试 RPM、重试 RPM、成功率、attempt 总耗时、HTTP/AWS/WebSocket transport 首字节 P50/P95、并发和启用状态。
+- [x] 四层核心 dashboard JSON：主机总览、程序总览、中间件总览、渠道总览；全部使用中文标题、行分组、面板和说明。
+- [x] 渠道总览：1 分钟 attempt/失败/重试 RPM、成功率、超时率；5 分钟 P90/P95、TTFT P95、上游首字节 P95、上游缓存率和 Token 吞吐；同时保留并发、启用状态、错误与重试诊断。
 - [x] 错误分析静态面板：固定错误类型、HTTP `status_class` 和渠道失败排行。
 - [x] 计费额度：Token、收费、退款、净额度、实际额度、生命周期、订阅拒绝和饱和事件。
 - [x] 异步任务：Task Dashboard 已展示提交 RPM、完成成功率、poll 错误率、结果趋势、P50/P95 处理时长、按状态积压和 Master collector 健康状态。
-- [x] P0 基础设施静态面板：Go Runtime、进程 CPU/内存和数据库连接池。
+- [x] P0 基础设施面板：Node Exporter 主机 CPU/内存/磁盘，Go Runtime/进程 CPU，PostgreSQL/MySQL/Redis 中间件和应用数据库连接池。
 - [x] P1 限流面板：按固定 `scope/reason` 展示限流拒绝 RPM，图例使用文本区分，No data 明确表示当前范围内没有拒绝。
 - [x] P1 Redis 面板：按实例展示启用状态，并提供操作 RPM、P95 耗时、缓存命中率和错误/限流失败/降级趋势；未产生操作或异常时 No data 不等同于 Redis 未启用。
 - [x] P1 DB 等待面板：System Overview 展示单实例/单数据库的 5 分钟等待次数和平均等待时长；`0` 表示窗口内无等待，No data 表示原始 DB 指标缺失。
 - [x] P1 Relay 延迟阈值线：System Overview 在原有 P50/P95/P99 上叠加按 `cluster/job/relay_format` 配置的 P95/P99 虚线；默认阈值文件为空时显示 No data，不解释为 0 秒。
-- [x] 四个 dashboard 均提供 `cluster` 与 `instance` 变量，并按场景提供 `relay_format`、`channel_id`、`billing_source` 或 `platform`。Task Dashboard 的 Master-only 队列面板故意忽略 `instance` 变量，避免选中 Slave 时把无数据误解为零积压。
-- [x] Grafana 容器已验证原有两个 dashboard 的 provisioning 和变量；新增 billing/task dashboard 已通过 JSON、变量、面板 ID 和 PromQL 静态验证，发布环境仍需复现容器加载。
+- [x] 6 个 dashboard 均提供 `cluster` 与各自所需的 `instance`、`device`、`database`、`relay_format`、`channel_id`、`billing_source` 或 `platform` 变量。Task Dashboard 的 Master-only 队列面板故意忽略 `instance` 变量。
+- [x] Grafana 12.1 临时容器已真实验证 6 个 dashboard provisioning，4 个核心页进入 `new-api 监控`，计费/任务进入 `new-api 扩展监控`；生产环境仍需复现加载。
 
 ### Recording Rules
 
@@ -762,7 +762,7 @@ completion 与计费生命周期必须保持解耦：终态 CAS 获胜就记录�
 - [x] 基于时间窗口的 Recording Rule 名称包含窗口，例如 `newapi:relay_success_ratio:5m`；瞬时 DB 利用率使用 `:instance` 后缀。
 - [x] 比率查询使用 `clamp_min` 避免除零；比例告警另加独立事件量门槛，不把 `clamp_min` 当作低流量保护。
 - [x] 名称严格区分 `rpm`、每秒 `rate` 和无单位 `ratio`；重试数与 attempt 数之比命名为 `retry_ratio`。
-- [x] D3 新增 6 条 15 分钟计费规则；D4 新增 8 条任务规则；D6 新增 2 条固定 `error_type` 规则；D7 新增 3 条单实例 DB 等待规则；D8 新增 2 条单实例 Runtime 增长规则；D9 新增 1 条按 `relay_format` 保留维度的 5 分钟最终请求量规则；D10 新增 1 条按格式汇总 inflight 的规则，当前基础 Recording Rules 为 35 条。
+- [x] D3-D10 累计形成 35 条基础规则；D11 新增 11 条渠道实时/性能/缓存/Token 聚合规则，当前基础 Recording Rules 为 46 条。
 
 P0 已提供以下规则。当前默认配置同时保留 `cluster` 和 `job` 作为部署边界；完整可执行版本以 `deploy/monitoring/recording-rules.yml` 为准：
 
@@ -902,7 +902,7 @@ groups:
 - [ ] 扩大到全部 `relay/helper` 测试的 race 验收尚未通过：现有大量 `t.Parallel()` 用例会触发 `logger/logger.go` 全局状态竞态；该问题与本批取消传播及流式成功判定无关，需单独修复后重跑。
 - [ ] 扩大到全部 `service` 测试的 race 验收尚未通过：当前被 `service/task_polling_test.go` 触发的既有 logger 全局状态和异步 Task 对象竞态阻塞，需单独修复后重跑。
 - [x] 使用 `promtool check rules --lint=all --lint-fatal` 和 `promtool test rules` 校验 Recording/告警规则。
-- [x] `deploy/monitoring/validate.sh` 使用临时宿主机路径映射执行 `promtool check config`，并校验 35 条基础 Recording Rules、28 条告警、0 条默认延迟阈值规则、0 条默认并发阈值规则、Compose、YAML/JSON 与四个 dashboard 的 75 条 PromQL。
+- [x] `deploy/monitoring/validate.sh` 校验 Prometheus 配置、46 条基础 Recording Rules、28 条告警、0 条默认延迟阈值规则、0 条默认并发阈值规则、PostgreSQL/MySQL 两种 Compose profile、Exporter target/Secret、YAML/JSON 与 6 个 dashboard 的 108 条 PromQL。
 - [x] 已在本地测试环境启动应用、Prometheus、Grafana、Alertmanager，验证安全抓取、规则加载、dashboard provisioning、告警通知与恢复链路。
 - [x] 已补充指标口径、部署决策表、抓取示例、常用 PromQL、排障、基数、备份和升级文档。
 
@@ -1332,6 +1332,28 @@ git diff --check
 ```bash
 PROMTOOL_BIN=/tmp/newapi-promtool-bin/promtool deploy/monitoring/validate.sh
 go test ./... -count=1
+git diff --check
+```
+
+### 批次 D11：四层中文监控重构
+
+**文件：** `pkg/prometheus_metrics/channel.go`、`service/channel_runtime_metrics.go`、`relay/common/relay_info.go`、各渠道 Usage/TTFT 结算接入点、`docker-compose.monitoring.yml`、`deploy/monitoring/prometheus.yml`、`deploy/monitoring/targets/`、`deploy/monitoring/recording-rules.yml`、`deploy/monitoring/grafana/dashboards/core/`、`deploy/monitoring/grafana/dashboards/extended/`、`deploy/monitoring/validate.sh`、`docs/prometheus-monitoring.md` 和本 TODO。
+
+- [x] D11-1：渠道指标新增 `newapi_channel_ttft_seconds` 与 `newapi_channel_tokens_total`；Token 类型只允许 `input` / `output` / `cache_read`，不增加模型、用户、Token ID、请求 ID 或原始错误等高基数标签。
+- [x] D11-2：TTFT 按当前渠道 attempt 独立计时，重试后的新渠道不包含前一失败渠道耗时；Cloudflare/Cohere 等路径统一使用 `SetFirstResponseTime()`。
+- [x] D11-3：Token 只在最终结算点记录，文本使用 `billingUsage`，音频使用归一化 `Usage`；不在预扣费、失败路径或重试中间态重复记录。
+- [x] D11-4：新增 11 条渠道 Recording Rules，提供 1 分钟 attempt/失败/重试 RPM、成功率/超时率，以及 5 分钟 P90/P95、TTFT P95、上游首字节 P95、`cache_read / input` 上游缓存率和 Token 每分钟吞吐。
+- [x] D11-5：监控 Compose 新增固定版本 Node Exporter、PostgreSQL Exporter、MySQL Exporter 和 Redis Exporter；Exporter 不发布公网端口，通过外部业务 Docker 网络和运行时 Secret 连接，MySQL target 默认为空。
+- [x] D11-6：Grafana 重构为 `new-api 监控` 下的主机/程序/中间件/渠道总览，以及 `new-api 扩展监控` 下的计费/任务总览；6 页标题、行、面板和说明均为中文，刷新周期统一为 15 秒。
+- [x] D11-7：Grafana 12.1 临时容器已真实验证双文件夹和 6 个 dashboard provisioning；108 条 Dashboard PromQL 已通过 Prometheus 语法校验。
+- [x] D11-8：当前静态验收口径为 46 条 Recording Rules、28 条告警、108 条 Dashboard PromQL；Go 定向测试覆盖指标注册、渠道 attempt 归因、RelayInfo 与最终结算路径。
+- [ ] D11-9：生产 PostgreSQL profile 已启动，new-api、Node、PostgreSQL、Redis target 均为 `UP`，且未破坏现有数据卷。
+- [ ] D11-10：生产 Grafana 已验证 6 个中文 dashboard 与双文件夹；真实多渠道流量已产生至少两个 `channel_id` 的 RPM/P95/TTFT/缓存率/Token 证据。Provider 无 Usage 的面板允许显示“暂无数据”。
+
+```bash
+go test ./pkg/prometheus_metrics ./service ./controller ./relay/common ./relay -count=1
+PROMTOOL_BIN=/path/to/promtool deploy/monitoring/validate.sh
+jq empty deploy/monitoring/grafana/dashboards/core/*.json deploy/monitoring/grafana/dashboards/extended/*.json
 git diff --check
 ```
 
