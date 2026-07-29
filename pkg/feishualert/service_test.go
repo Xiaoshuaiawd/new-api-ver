@@ -85,6 +85,33 @@ func TestServiceDeliversCriticalAlertAndPublishesMetrics(t *testing.T) {
 	assert.NotContains(t, metrics, "channel_id")
 }
 
+func TestServiceDeliversFiringAndResolvedCards(t *testing.T) {
+	var delivered []CardMessage
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		var card CardMessage
+		require.NoError(t, common.DecodeJson(request.Body, &card))
+		delivered = append(delivered, card)
+		return jsonResponse(http.StatusOK, `{"code":0,"msg":"success"}`), nil
+	})
+	service := newTestService(t, transport, nil)
+
+	for _, status := range []string{"firing", "resolved"} {
+		response := httptest.NewRecorder()
+		service.Handler().ServeHTTP(response, alertRequest(t, validWebhookMessage(status, "critical")))
+		require.Equal(t, http.StatusNoContent, response.Code)
+	}
+
+	require.Len(t, delivered, 2)
+	assert.Equal(t, "red", delivered[0].Card.Header.Template)
+	assert.Contains(t, delivered[0].Card.Body.Elements[0].Content, "<at id=all></at>")
+	assert.Equal(t, "green", delivered[1].Card.Header.Template)
+	assert.NotContains(t, delivered[1].Card.Body.Elements[0].Content, "<at id=all></at>")
+
+	metrics := scrapeServiceMetrics(t, service)
+	assert.Contains(t, metrics, `newapi_feishu_alert_deliveries_total{result="success",severity="critical",status="firing"} 1`)
+	assert.Contains(t, metrics, `newapi_feishu_alert_deliveries_total{result="success",severity="critical",status="resolved"} 1`)
+}
+
 func TestServiceRejectsInvalidAlertmanagerRequests(t *testing.T) {
 	var calls atomic.Int32
 	transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
