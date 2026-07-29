@@ -276,6 +276,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			RetryIndex:  relayInfo.RetryIndex,
 			RetryReason: retryReason,
 		}, func() service.ChannelAttemptOutcome {
+			relayInfo.BeginChannelAttempt()
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				newAPIError = relay.WssHelper(c, relayInfo)
@@ -288,11 +289,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			}
 			relayOutcome := relayMetricsOutcome(c, newAPIError, relayInfo)
 			return service.ChannelAttemptOutcome{
-				Success:    relayOutcome.Success,
-				Err:        relayOutcome.Error.Err,
-				ErrorType:  relayOutcome.Error.ErrorType,
-				ErrorCode:  relayOutcome.Error.ErrorCode,
-				StatusCode: relayOutcome.Error.StatusCode,
+				Success: relayOutcome.Success,
+				Error:   relayOutcome.Error,
+				TTFT:    relayInfo.ChannelAttemptTTFT(),
 			}
 		})
 
@@ -709,9 +708,11 @@ func RelayTask(c *gin.Context) {
 				return service.ChannelAttemptOutcome{Success: true}
 			}
 			return service.ChannelAttemptOutcome{
-				Err:        taskErr.Error,
-				ErrorCode:  types.ErrorCode(taskErr.Code),
-				StatusCode: taskErr.StatusCode,
+				Error: prometheusmetrics.ErrorDetails{
+					Err:        taskErr.Error,
+					ErrorCode:  types.ErrorCode(taskErr.Code),
+					StatusCode: taskErr.StatusCode,
+				},
 			}
 		})
 		if taskErr == nil {

@@ -8,7 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/dto"
 	prometheusmetrics "github.com/QuantumNous/new-api/pkg/prometheus_metrics"
-	"github.com/QuantumNous/new-api/types"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 )
 
 const channelRuntimeWindowSeconds int64 = 60
@@ -42,14 +42,7 @@ type ChannelRuntimeAttempt struct {
 }
 
 type ChannelAttemptMeta = prometheusmetrics.ChannelAttemptMeta
-
-type ChannelAttemptOutcome struct {
-	Success    bool
-	Err        error
-	ErrorType  types.ErrorType
-	ErrorCode  types.ErrorCode
-	StatusCode int
-}
+type ChannelAttemptOutcome = prometheusmetrics.ChannelAttemptOutcome
 
 var defaultChannelRuntimeTracker = newChannelRuntimeTracker(time.Now)
 
@@ -199,6 +192,34 @@ func ObserveChannelFirstByte(channelID, channelType int, duration time.Duration)
 	prometheusmetrics.ObserveChannelFirstByte(channelID, channelType, duration)
 }
 
+func recordChannelTokenMetrics(relayInfo *relaycommon.RelayInfo, usage *dto.Usage) {
+	if relayInfo == nil || relayInfo.ChannelMeta == nil || usage == nil {
+		return
+	}
+
+	input := usage.InputTokens
+	if input <= 0 {
+		input = usage.PromptTokens
+	}
+	output := usage.OutputTokens
+	if output <= 0 {
+		output = usage.CompletionTokens
+	}
+	cacheRead := usage.PromptTokensDetails.CachedTokens
+	if cacheRead <= 0 && usage.InputTokensDetails != nil {
+		cacheRead = usage.InputTokensDetails.CachedTokens
+	}
+	if cacheRead <= 0 {
+		cacheRead = usage.PromptCacheHitTokens
+	}
+
+	prometheusmetrics.RecordChannelTokens(relayInfo.ChannelId, relayInfo.ChannelType, prometheusmetrics.ChannelTokenUsage{
+		Input:     input,
+		Output:    output,
+		CacheRead: cacheRead,
+	})
+}
+
 func WithChannelFirstByteTrace(ctx context.Context, channelID, channelType int) context.Context {
 	if ctx == nil || channelID <= 0 {
 		return ctx
@@ -237,16 +258,11 @@ func TrackChannelAttempt(meta ChannelAttemptMeta, operation func() ChannelAttemp
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			runtimeAttempt.Done(false)
-			prometheusAttempt.Done(false, prometheusmetrics.ErrorDetails{})
+			prometheusAttempt.Done(prometheusmetrics.ChannelAttemptOutcome{})
 			panic(recovered)
 		}
 		runtimeAttempt.Done(outcome.Success)
-		prometheusAttempt.Done(outcome.Success, prometheusmetrics.ErrorDetails{
-			Err:        outcome.Err,
-			ErrorType:  outcome.ErrorType,
-			ErrorCode:  outcome.ErrorCode,
-			StatusCode: outcome.StatusCode,
-		})
+		prometheusAttempt.Done(outcome)
 	}()
 	outcome = operation()
 }

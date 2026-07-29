@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/dto"
 	prometheusmetrics "github.com/QuantumNous/new-api/pkg/prometheus_metrics"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -139,7 +141,7 @@ func TestTrackChannelAttemptUpdatesRuntimeAndPrometheusFromOneLifecycle(t *testi
 		RetryReason: prometheusmetrics.ErrorTypeTimeout,
 	}, func() ChannelAttemptOutcome {
 		assert.Equal(t, 1, GetChannelRuntimeMetrics([]int{channelID})[channelID].Concurrency)
-		return ChannelAttemptOutcome{StatusCode: http.StatusTooManyRequests}
+		return ChannelAttemptOutcome{Error: prometheusmetrics.ErrorDetails{StatusCode: http.StatusTooManyRequests}}
 	})
 
 	assert.Equal(t, channelRuntimeMetrics{}, GetChannelRuntimeMetrics([]int{channelID})[channelID])
@@ -147,6 +149,60 @@ func TestTrackChannelAttemptUpdatesRuntimeAndPrometheusFromOneLifecycle(t *testi
 	assert.Contains(t, output, "newapi_channel_attempts_total{channel_id=\"920000001\",channel_type=\"8\",error_type=\"rate_limit\",result=\"failure\",stream=\"true\"} 1")
 	assert.Contains(t, output, "newapi_channel_retries_total{channel_id=\"920000001\",channel_type=\"8\",reason=\"timeout\"} 1")
 	assert.Contains(t, output, "newapi_channel_inflight{channel_id=\"920000001\",channel_type=\"8\"} 0")
+}
+
+func TestRecordChannelTokenMetricsUsesNormalizedUsageFields(t *testing.T) {
+	runtime, err := prometheusmetrics.NewRuntime(
+		prometheusmetrics.Config{Enabled: true, AllowPublic: true},
+		"v-test",
+		nil,
+		nil,
+	)
+	require.NoError(t, err)
+	prometheusmetrics.SetDefaultRuntime(runtime)
+	t.Cleanup(func() { prometheusmetrics.SetDefaultRuntime(nil) })
+
+	recordChannelTokenMetrics(&relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
+		ChannelId:   920_000_003,
+		ChannelType: 6,
+	}}, &dto.Usage{
+		InputTokens:  120,
+		OutputTokens: 30,
+		InputTokensDetails: &dto.InputTokenDetails{
+			CachedTokens: 45,
+		},
+	})
+
+	output := scrapePrometheusRuntime(t, runtime)
+	assert.Contains(t, output, `newapi_channel_tokens_total{channel_id="920000003",channel_type="6",token_type="input"} 120`)
+	assert.Contains(t, output, `newapi_channel_tokens_total{channel_id="920000003",channel_type="6",token_type="output"} 30`)
+	assert.Contains(t, output, `newapi_channel_tokens_total{channel_id="920000003",channel_type="6",token_type="cache_read"} 45`)
+}
+
+func TestRecordChannelTokenMetricsFallsBackToPromptUsage(t *testing.T) {
+	runtime, err := prometheusmetrics.NewRuntime(
+		prometheusmetrics.Config{Enabled: true, AllowPublic: true},
+		"v-test",
+		nil,
+		nil,
+	)
+	require.NoError(t, err)
+	prometheusmetrics.SetDefaultRuntime(runtime)
+	t.Cleanup(func() { prometheusmetrics.SetDefaultRuntime(nil) })
+
+	recordChannelTokenMetrics(&relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
+		ChannelId:   920_000_004,
+		ChannelType: 7,
+	}}, &dto.Usage{
+		PromptTokens:         80,
+		CompletionTokens:     20,
+		PromptCacheHitTokens: 15,
+	})
+
+	output := scrapePrometheusRuntime(t, runtime)
+	assert.Contains(t, output, `newapi_channel_tokens_total{channel_id="920000004",channel_type="7",token_type="input"} 80`)
+	assert.Contains(t, output, `newapi_channel_tokens_total{channel_id="920000004",channel_type="7",token_type="output"} 20`)
+	assert.Contains(t, output, `newapi_channel_tokens_total{channel_id="920000004",channel_type="7",token_type="cache_read"} 15`)
 }
 
 func TestTrackChannelAttemptReturnsBothInflightCountersAfterPanic(t *testing.T) {

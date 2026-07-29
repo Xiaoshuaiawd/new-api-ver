@@ -259,12 +259,12 @@ func doTrackedMidjourneyHttpRequest(
 		if upstreamSucceeded {
 			return service.ChannelAttemptOutcome{Success: true}
 		}
-		outcome := service.ChannelAttemptOutcome{Err: err}
+		outcome := service.ChannelAttemptOutcome{Error: prometheusmetrics.ErrorDetails{Err: err}}
 		if err != nil {
-			outcome.ErrorCode = types.ErrorCodeDoRequestFailed
+			outcome.Error.ErrorCode = types.ErrorCodeDoRequestFailed
 		}
 		if response != nil {
-			outcome.StatusCode = response.StatusCode
+			outcome.Error.StatusCode = response.StatusCode
 		}
 		return outcome
 	})

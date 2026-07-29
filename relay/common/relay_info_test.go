@@ -3,11 +3,49 @@ package common
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestChannelAttemptTimingResetsWithoutChangingRelayFirstResponse(t *testing.T) {
+	relayStarted := time.Unix(1_700_000_000, 0)
+	firstAttemptStarted := relayStarted.Add(100 * time.Millisecond)
+	firstAttemptResponse := relayStarted.Add(400 * time.Millisecond)
+	secondAttemptStarted := relayStarted.Add(2 * time.Second)
+	secondAttemptResponse := relayStarted.Add(2250 * time.Millisecond)
+	info := &RelayInfo{
+		StartTime:         relayStarted,
+		FirstResponseTime: relayStarted.Add(-time.Second),
+		isFirstResponse:   true,
+	}
+
+	info.beginChannelAttempt(firstAttemptStarted)
+	info.setFirstResponseTime(firstAttemptResponse)
+	require.Equal(t, 300*time.Millisecond, info.ChannelAttemptTTFT())
+	require.Equal(t, firstAttemptResponse, info.FirstResponseTime)
+
+	info.beginChannelAttempt(secondAttemptStarted)
+	assert.Zero(t, info.ChannelAttemptTTFT())
+	info.setFirstResponseTime(secondAttemptResponse)
+
+	assert.Equal(t, 250*time.Millisecond, info.ChannelAttemptTTFT())
+	assert.Equal(t, firstAttemptResponse, info.FirstResponseTime)
+}
+
+func TestChannelAttemptTimingKeepsFirstResponseWithinAttempt(t *testing.T) {
+	started := time.Unix(1_700_000_000, 0)
+	info := &RelayInfo{StartTime: started, FirstResponseTime: started.Add(-time.Second), isFirstResponse: true}
+
+	info.beginChannelAttempt(started)
+	info.setFirstResponseTime(started.Add(200 * time.Millisecond))
+	info.setFirstResponseTime(started.Add(500 * time.Millisecond))
+
+	assert.Equal(t, 200*time.Millisecond, info.ChannelAttemptTTFT())
+	assert.Equal(t, started.Add(200*time.Millisecond), info.FirstResponseTime)
+}
 
 func TestRelayInfoFinalSuccess(t *testing.T) {
 	tests := []struct {

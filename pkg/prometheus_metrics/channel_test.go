@@ -24,8 +24,8 @@ func TestChannelAttemptRecordsRetryInflightFailureAndDurationOnce(t *testing.T) 
 	assert.Contains(t, active, "newapi_channel_inflight{channel_id=\"7\",channel_type=\"1\"} 1")
 	assert.Contains(t, active, "newapi_channel_retries_total{channel_id=\"7\",channel_type=\"1\",reason=\"timeout\"} 1")
 
-	attempt.Done(false, ErrorDetails{StatusCode: http.StatusTooManyRequests})
-	attempt.Done(true, ErrorDetails{})
+	attempt.Done(ChannelAttemptOutcome{Success: false, Error: ErrorDetails{StatusCode: http.StatusTooManyRequests}})
+	attempt.Done(ChannelAttemptOutcome{Success: true})
 
 	finished := scrapeMetrics(t, runtime)
 	assert.Contains(t, finished, "newapi_channel_inflight{channel_id=\"7\",channel_type=\"1\"} 0")
@@ -36,7 +36,7 @@ func TestChannelAttemptRecordsRetryInflightFailureAndDurationOnce(t *testing.T) 
 func TestChannelAttemptSuccessAlwaysUsesNoneErrorType(t *testing.T) {
 	runtime := activateMetricsTestRuntime(t)
 	attempt := BeginChannelAttempt(ChannelAttemptMeta{ChannelID: 8, ChannelType: 2})
-	attempt.Done(true, ErrorDetails{StatusCode: http.StatusInternalServerError})
+	attempt.Done(ChannelAttemptOutcome{Success: true, Error: ErrorDetails{StatusCode: http.StatusInternalServerError}})
 
 	metrics := scrapeMetrics(t, runtime)
 	assert.Contains(t, metrics, "newapi_channel_attempts_total{channel_id=\"8\",channel_type=\"2\",error_type=\"none\",result=\"success\",stream=\"false\"} 1")
@@ -45,7 +45,7 @@ func TestChannelAttemptSuccessAlwaysUsesNoneErrorType(t *testing.T) {
 func TestChannelAttemptFailureWithoutDetailsUsesInternal(t *testing.T) {
 	runtime := activateMetricsTestRuntime(t)
 	attempt := BeginChannelAttempt(ChannelAttemptMeta{ChannelID: 9, ChannelType: 3})
-	attempt.Done(false, ErrorDetails{})
+	attempt.Done(ChannelAttemptOutcome{})
 
 	metrics := scrapeMetrics(t, runtime)
 	assert.Contains(t, metrics, "newapi_channel_attempts_total{channel_id=\"9\",channel_type=\"3\",error_type=\"internal\",result=\"failure\",stream=\"false\"} 1")
@@ -55,7 +55,7 @@ func TestChannelAttemptWithoutActiveRuntimeIsNoop(t *testing.T) {
 	SetDefaultRuntime(nil)
 	attempt := BeginChannelAttempt(ChannelAttemptMeta{ChannelID: 7, ChannelType: 1})
 	require.NotNil(t, attempt)
-	assert.NotPanics(t, func() { attempt.Done(false, ErrorDetails{}) })
+	assert.NotPanics(t, func() { attempt.Done(ChannelAttemptOutcome{}) })
 }
 
 func TestChannelDurationHistogramCanBeDisabled(t *testing.T) {
@@ -69,12 +69,13 @@ func TestChannelDurationHistogramCanBeDisabled(t *testing.T) {
 	t.Cleanup(func() { SetDefaultRuntime(nil) })
 
 	attempt := BeginChannelAttempt(ChannelAttemptMeta{ChannelID: 10, ChannelType: 4})
-	attempt.Done(true, ErrorDetails{})
+	attempt.Done(ChannelAttemptOutcome{Success: true})
 
 	metrics := scrapeMetrics(t, runtime)
 	assert.Contains(t, metrics, "newapi_channel_attempts_total{channel_id=\"10\",channel_type=\"4\",error_type=\"none\",result=\"success\",stream=\"false\"} 1")
 	assert.NotContains(t, metrics, "newapi_channel_duration_seconds")
 	assert.NotContains(t, metrics, "newapi_channel_first_byte_seconds")
+	assert.NotContains(t, metrics, "newapi_channel_ttft_seconds")
 }
 
 func TestObserveChannelFirstByteRecordsOnlyValidSamples(t *testing.T) {
@@ -86,6 +87,40 @@ func TestObserveChannelFirstByteRecordsOnlyValidSamples(t *testing.T) {
 
 	metrics := scrapeMetrics(t, runtime)
 	assert.Contains(t, metrics, "newapi_channel_first_byte_seconds_count{channel_id=\"12\",channel_type=\"5\"} 1")
+}
+
+func TestChannelAttemptRecordsSuccessfulStreamTTFT(t *testing.T) {
+	runtime := activateMetricsTestRuntime(t)
+	attempt := BeginChannelAttempt(ChannelAttemptMeta{ChannelID: 12, ChannelType: 5, Stream: true})
+	attempt.Done(ChannelAttemptOutcome{Success: true, TTFT: 750 * time.Millisecond})
+
+	metrics := scrapeMetrics(t, runtime)
+	assert.Contains(t, metrics, `newapi_channel_ttft_seconds_count{channel_id="12",channel_type="5"} 1`)
+}
+
+func TestChannelAttemptDoesNotRecordTTFTForFailureOrNonStream(t *testing.T) {
+	runtime := activateMetricsTestRuntime(t)
+
+	failed := BeginChannelAttempt(ChannelAttemptMeta{ChannelID: 12, ChannelType: 5, Stream: true})
+	failed.Done(ChannelAttemptOutcome{TTFT: 250 * time.Millisecond})
+	nonStream := BeginChannelAttempt(ChannelAttemptMeta{ChannelID: 12, ChannelType: 5})
+	nonStream.Done(ChannelAttemptOutcome{Success: true, TTFT: 250 * time.Millisecond})
+
+	metrics := scrapeMetrics(t, runtime)
+	assert.NotContains(t, metrics, `newapi_channel_ttft_seconds_count{channel_id="12",channel_type="5"}`)
+}
+
+func TestRecordChannelTokensUsesFixedTokenTypesAndIgnoresInvalidValues(t *testing.T) {
+	runtime := activateMetricsTestRuntime(t)
+	RecordChannelTokens(12, 5, ChannelTokenUsage{Input: 100, Output: 40, CacheRead: 25})
+	RecordChannelTokens(0, 5, ChannelTokenUsage{Input: 999})
+	RecordChannelTokens(12, 5, ChannelTokenUsage{Input: -1, Output: -1, CacheRead: -1})
+
+	metrics := scrapeMetrics(t, runtime)
+	assert.Contains(t, metrics, `newapi_channel_tokens_total{channel_id="12",channel_type="5",token_type="input"} 100`)
+	assert.Contains(t, metrics, `newapi_channel_tokens_total{channel_id="12",channel_type="5",token_type="output"} 40`)
+	assert.Contains(t, metrics, `newapi_channel_tokens_total{channel_id="12",channel_type="5",token_type="cache_read"} 25`)
+	assert.NotContains(t, metrics, ` 999`)
 }
 
 func activateMetricsTestRuntime(t *testing.T) *Runtime {
