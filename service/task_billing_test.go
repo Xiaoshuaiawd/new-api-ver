@@ -311,6 +311,7 @@ func countLogs(t *testing.T) int64 {
 
 func TestRefundTaskQuota_Wallet(t *testing.T) {
 	truncate(t)
+	runtime := useBillingMetricsRuntime(t)
 	ctx := context.Background()
 
 	const userID, tokenID, channelID = 1, 1, 1
@@ -341,6 +342,7 @@ func TestRefundTaskQuota_Wallet(t *testing.T) {
 	assert.Equal(t, "test-model", log.ModelName)
 	assert.Zero(t, task.Quota)
 	assert.Zero(t, getTaskQuota(t, task.ID))
+	assert.Contains(t, billingMetricsOutput(runtime), `newapi_billing_operations_total{billing_source="wallet",operation="refund",result="success"} 1`)
 }
 
 func TestRefundTaskQuota_Subscription(t *testing.T) {
@@ -419,6 +421,7 @@ func TestRefundTaskQuota_NoToken(t *testing.T) {
 
 func TestRefundTaskQuota_FundingFailureKeepsPendingMarker(t *testing.T) {
 	truncate(t)
+	runtime := useBillingMetricsRuntime(t)
 	ctx := context.Background()
 
 	const userID, preConsumed = 5, 1200
@@ -431,6 +434,9 @@ func TestRefundTaskQuota_FundingFailureKeepsPendingMarker(t *testing.T) {
 	assert.Equal(t, preConsumed, task.Quota)
 	assert.Equal(t, preConsumed, getTaskQuota(t, task.ID))
 	assert.Equal(t, int64(0), countLogs(t))
+	output := billingMetricsOutput(runtime)
+	assert.Contains(t, output, `newapi_billing_operations_total{billing_source="subscription",operation="refund",result="error"} 1`)
+	assert.Contains(t, output, `newapi_billing_failures_total{billing_source="subscription",operation="refund",reason="database"} 1`)
 }
 
 // ===========================================================================
@@ -439,6 +445,7 @@ func TestRefundTaskQuota_FundingFailureKeepsPendingMarker(t *testing.T) {
 
 func TestRecalculate_PositiveDelta(t *testing.T) {
 	truncate(t)
+	runtime := useBillingMetricsRuntime(t)
 	ctx := context.Background()
 
 	const userID, tokenID, channelID = 10, 10, 10
@@ -451,6 +458,7 @@ func TestRecalculate_PositiveDelta(t *testing.T) {
 	seedChannel(t, channelID)
 
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	require.NoError(t, model.DB.Create(task).Error)
 
 	RecalculateTaskQuota(ctx, task, actualQuota, "adaptor adjustment")
 
@@ -468,10 +476,12 @@ func TestRecalculate_PositiveDelta(t *testing.T) {
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeConsume, log.Type)
 	assert.Equal(t, actualQuota-preConsumed, log.Quota)
+	assert.Contains(t, billingMetricsOutput(runtime), `newapi_billing_operations_total{billing_source="wallet",operation="task_recalculate",result="success"} 1`)
 }
 
 func TestRecalculate_NegativeDelta(t *testing.T) {
 	truncate(t)
+	runtime := useBillingMetricsRuntime(t)
 	ctx := context.Background()
 
 	const userID, tokenID, channelID = 11, 11, 11
@@ -484,6 +494,7 @@ func TestRecalculate_NegativeDelta(t *testing.T) {
 	seedChannel(t, channelID)
 
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	require.NoError(t, model.DB.Create(task).Error)
 
 	RecalculateTaskQuota(ctx, task, actualQuota, "adaptor adjustment")
 
@@ -501,6 +512,7 @@ func TestRecalculate_NegativeDelta(t *testing.T) {
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeRefund, log.Type)
 	assert.Equal(t, preConsumed-actualQuota, log.Quota)
+	assert.Contains(t, billingMetricsOutput(runtime), `newapi_billing_operations_total{billing_source="wallet",operation="task_recalculate",result="success"} 1`)
 }
 
 func TestRecalculate_ZeroDelta(t *testing.T) {

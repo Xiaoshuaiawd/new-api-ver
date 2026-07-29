@@ -1,0 +1,108 @@
+package prometheusmetrics
+
+import (
+	"fmt"
+	"strconv"
+	"sync"
+	"time"
+
+	"github.com/QuantumNous/new-api/common"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+const channelStateErrorLogInterval = time.Minute
+
+type ChannelState struct {
+	ID     int
+	Type   int
+	Status int
+}
+
+type ChannelStateSource func() ([]ChannelState, error)
+
+type channelStateCollector struct {
+	source          ChannelStateSource
+	collectorErrors *prometheus.CounterVec
+	now             func() time.Time
+	logError        func(string)
+
+	enabled *prometheus.Desc
+	up      *prometheus.Desc
+
+	logMu        sync.Mutex
+	lastErrorLog time.Time
+}
+
+func newChannelStateCollector(
+	source ChannelStateSource,
+	collectorErrors *prometheus.CounterVec,
+	now func() time.Time,
+	logError func(string),
+) prometheus.Collector {
+	return &channelStateCollector{
+		source:          source,
+		collectorErrors: collectorErrors,
+		now:             now,
+		logError:        logError,
+		enabled: prometheus.NewDesc(
+			"newapi_channel_enabled",
+			"Whether the channel is enabled in the shared database.",
+			[]string{"channel_id", "channel_type"},
+			nil,
+		),
+		up: prometheus.NewDesc(
+			"newapi_shared_collector_up",
+			"Whether a shared database collector completed successfully.",
+			[]string{"collector"},
+			nil,
+		),
+	}
+}
+
+func (c *channelStateCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- c.enabled
+	ch <- c.up
+}
+
+func (c *channelStateCollector) Collect(ch chan<- prometheus.Metric) {
+	states, err := c.source()
+	if err != nil {
+		if c.collectorErrors != nil {
+			c.collectorErrors.WithLabelValues("channel_state").Inc()
+		}
+		c.logCollectionError(err)
+		ch <- prometheus.MustNewConstMetric(c.up, prometheus.GaugeValue, 0, "channel_state")
+		return
+	}
+
+	ch <- prometheus.MustNewConstMetric(c.up, prometheus.GaugeValue, 1, "channel_state")
+	for _, state := range states {
+		enabled := 0.0
+		if state.Status == common.ChannelStatusEnabled {
+			enabled = 1
+		}
+		ch <- prometheus.MustNewConstMetric(
+			c.enabled,
+			prometheus.GaugeValue,
+			enabled,
+			strconv.Itoa(state.ID),
+			strconv.Itoa(state.Type),
+		)
+	}
+}
+
+func (c *channelStateCollector) logCollectionError(err error) {
+	if c.logError == nil {
+		return
+	}
+	now := c.now()
+	c.logMu.Lock()
+	if !c.lastErrorLog.IsZero() && now.Sub(c.lastErrorLog) < channelStateErrorLogInterval {
+		c.logMu.Unlock()
+		return
+	}
+	c.lastErrorLog = now
+	c.logMu.Unlock()
+	c.logError(fmt.Sprintf("prometheus channel state collector error: %v", err))
+}

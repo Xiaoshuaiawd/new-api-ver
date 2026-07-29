@@ -11,15 +11,62 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	prometheusmetrics "github.com/QuantumNous/new-api/pkg/prometheus_metrics"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service/relayconvert"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAdaptorRealtimeRecordsWebSocketFirstResponseByte(t *testing.T) {
+	runtime, err := prometheusmetrics.NewRuntime(prometheusmetrics.Config{
+		Enabled:     true,
+		AllowPublic: true,
+	}, "v-test", nil, nil)
+	require.NoError(t, err)
+	prometheusmetrics.SetDefaultRuntime(runtime)
+	t.Cleanup(func() { prometheusmetrics.SetDefaultRuntime(nil) })
+
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, upgradeErr := upgrader.Upgrade(w, r, nil)
+		require.NoError(t, upgradeErr)
+		require.NoError(t, conn.Close())
+	}))
+	t.Cleanup(upstream.Close)
+
+	adaptor := &Adaptor{}
+	info := advancedCustomRelayInfo(&dto.AdvancedCustomConfig{
+		Routes: []dto.AdvancedCustomRoute{
+			{
+				IncomingPath: "/v1/realtime",
+				UpstreamPath: upstream.URL,
+				Converter:    relayconvert.ConverterNone,
+			},
+		},
+	})
+	info.ChannelId = 31
+	info.ChannelType = 32
+	info.RelayMode = relayconstant.RelayModeRealtime
+	info.RequestURLPath = "/v1/realtime"
+	c := advancedCustomGinContext("/v1/realtime")
+
+	response, err := adaptor.DoRequest(c, info, nil)
+	require.NoError(t, err)
+	conn, ok := response.(*websocket.Conn)
+	require.True(t, ok)
+	require.NoError(t, conn.Close())
+
+	recorder := httptest.NewRecorder()
+	runtime.Handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "newapi_channel_first_byte_seconds_count{channel_id=\"31\",channel_type=\"32\"} 1")
+}
 
 func TestAdaptorUsesExactRouteAndQueryAuth(t *testing.T) {
 	adaptor := &Adaptor{}

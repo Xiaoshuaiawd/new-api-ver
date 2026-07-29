@@ -696,6 +696,15 @@ func (info *RelayInfo) HasSendResponse() bool {
 	return info.FirstResponseTime.After(info.StartTime)
 }
 
+func (info *RelayInfo) FinalSuccess(handlerSuccess bool) bool {
+	if !handlerSuccess || info == nil || !info.IsStream || info.StreamStatus == nil {
+		return handlerSuccess
+	}
+	return info.StreamStatus.IsNormalEnd() &&
+		info.StreamStatus.EndError == nil &&
+		!info.StreamStatus.HasErrors()
+}
+
 type TaskRelayInfo struct {
 	Action       string
 	OriginTaskID string

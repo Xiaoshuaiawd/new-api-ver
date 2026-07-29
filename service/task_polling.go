@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	prometheusmetrics "github.com/QuantumNous/new-api/pkg/prometheus_metrics"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 
@@ -81,6 +82,13 @@ func sweepTimedOutTasks(ctx context.Context) {
 			continue
 		}
 		timedOutCount++
+		prometheusmetrics.RecordTaskCompletion(
+			string(task.Platform),
+			false,
+			task.SubmitTime,
+			task.FinishTime,
+			prometheusmetrics.TaskTimestampSeconds,
+		)
 		if !isLegacy && task.Quota != 0 {
 			RefundTaskQuota(ctx, task, reason)
 		}
@@ -238,6 +246,10 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 		return errors.New("adaptor not found")
 	}
 	proxy := ch.GetSetting().Proxy
+	pollSuccess := false
+	defer func() {
+		prometheusmetrics.RecordTaskPoll(string(constant.TaskPlatformSuno), pollSuccess)
+	}()
 	resp, err := adaptor.FetchTask(*ch.BaseURL, ch.Key, map[string]any{
 		"ids": taskIds,
 	}, proxy)
@@ -265,6 +277,7 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 		common.SysLog(fmt.Sprintf("渠道 #%d 未完成的任务有: %d, 成功获取到任务数: %s", channelId, len(taskIds), string(responseBody)))
 		return err
 	}
+	pollSuccess = true
 
 	for _, responseItem := range responseItems.Data {
 		if ctx.Err() != nil {
@@ -295,6 +308,11 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 			task.Progress = "100%"
 		}
 		task.Data = responseItem.Data
+		isTerminal := task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure
+		wasTerminal := prevStatus == model.TaskStatusSuccess || prevStatus == model.TaskStatusFailure
+		if isTerminal && task.FinishTime <= 0 {
+			task.FinishTime = time.Now().Unix()
+		}
 
 		// 持久化走 CAS，防止重叠轮询/sweep/多实例/持久化失败重试导致重复退款或覆盖终态。
 		won, err := task.UpdateWithStatus(prevStatus)
@@ -302,8 +320,19 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 			logger.LogError(ctx, fmt.Sprintf("UpdateSunoTask task %s error: %v", task.TaskID, err))
 		} else if !won {
 			logger.LogWarn(ctx, fmt.Sprintf("Task %s CAS lost or no-op update, skip billing", task.TaskID))
-		} else if isFailure && prevStatus != model.TaskStatusFailure && task.Quota != 0 {
-			RefundTaskQuota(ctx, task, task.FailReason)
+		} else {
+			if isTerminal && !wasTerminal {
+				prometheusmetrics.RecordTaskCompletion(
+					string(task.Platform),
+					task.Status == model.TaskStatusSuccess,
+					task.SubmitTime,
+					task.FinishTime,
+					prometheusmetrics.TaskTimestampSeconds,
+				)
+			}
+			if isFailure && prevStatus != model.TaskStatusFailure && task.Quota != 0 {
+				RefundTaskQuota(ctx, task, task.FailReason)
+			}
 		}
 	}
 	return nil
@@ -458,6 +487,10 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	if privateData.Key != "" {
 		key = privateData.Key
 	}
+	pollSuccess := false
+	defer func() {
+		prometheusmetrics.RecordTaskPoll(string(task.Platform), pollSuccess)
+	}()
 	resp, err := adaptor.FetchTask(baseURL, key, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
 		"action":  task.Action,
@@ -490,6 +523,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	} else if taskResult, err = adaptor.ParseTaskResult(responseBody); err != nil {
 		return fmt.Errorf("parseTaskResult failed for task %s: %w", taskId, err)
 	}
+	pollSuccess = true
 
 	task.Data = redactVideoResponseBody(responseBody)
 
@@ -570,6 +604,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	}
 
 	isDone := task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure
+	terminalCASWon := false
 	if isDone && snap.Status != task.Status {
 		won, err := task.UpdateWithStatus(snap.Status)
 		if err != nil {
@@ -580,6 +615,8 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 			logger.LogWarn(ctx, fmt.Sprintf("Task %s CAS lost or no-op update, skip billing", task.TaskID))
 			shouldRefund = false
 			shouldSettle = false
+		} else {
+			terminalCASWon = true
 		}
 	} else if !snap.Equal(task.Snapshot()) {
 		if _, err := task.UpdateWithStatus(snap.Status); err != nil {
@@ -588,6 +625,16 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	} else {
 		// No changes, skip update
 		logger.LogDebug(ctx, "No update needed for task %s", task.TaskID)
+	}
+	wasTerminal := snap.Status == model.TaskStatusSuccess || snap.Status == model.TaskStatusFailure
+	if terminalCASWon && !wasTerminal {
+		prometheusmetrics.RecordTaskCompletion(
+			string(task.Platform),
+			task.Status == model.TaskStatusSuccess,
+			task.SubmitTime,
+			task.FinishTime,
+			prometheusmetrics.TaskTimestampSeconds,
+		)
 	}
 
 	if shouldSettle {

@@ -75,6 +75,14 @@ func RedisGet(key string) (string, error) {
 	}
 	ctx := context.Background()
 	val, err := RDB.Get(ctx, key).Result()
+	switch {
+	case err == nil:
+		observeCacheLookup("redis", "hit")
+	case errors.Is(err, redis.Nil):
+		observeCacheLookup("redis", "miss")
+	default:
+		observeCacheLookup("redis", "error")
+	}
 	return val, err
 }
 
@@ -163,6 +171,10 @@ func RedisHGetObj(key string, obj interface{}) error {
 		SysLog(fmt.Sprintf("Redis HGETALL: key=%s", key))
 	}
 	ctx := context.Background()
+	lookupResult := "error"
+	defer func() {
+		observeCacheLookup("redis", lookupResult)
+	}()
 
 	result, err := RDB.HGetAll(ctx, key).Result()
 	if err != nil {
@@ -170,6 +182,7 @@ func RedisHGetObj(key string, obj interface{}) error {
 	}
 
 	if len(result) == 0 {
+		lookupResult = "miss"
 		return fmt.Errorf("key %s not found in Redis", key)
 	}
 
@@ -235,6 +248,7 @@ func RedisHGetObj(key string, obj interface{}) error {
 		}
 	}
 
+	lookupResult = "hit"
 	return nil
 }
 

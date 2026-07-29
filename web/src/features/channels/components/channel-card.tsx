@@ -61,7 +61,7 @@ function ChannelCardComponent({
 
   const fieldLabels: Record<string, string> = {
     balance: t('Used / Remaining'),
-    runtime_metrics: t('Concurrency / RPM'),
+    runtime_metrics: `${t('Concurrency / RPM')} (${t('Success')})`,
     response_time: t('Response'),
     test_time: t('Last Tested'),
   }

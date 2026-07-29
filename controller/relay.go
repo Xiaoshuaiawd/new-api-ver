@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
+	prometheusmetrics "github.com/QuantumNous/new-api/pkg/prometheus_metrics"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -31,6 +33,44 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
+
+func relayMetricsOutcome(c *gin.Context, apiErr *types.NewAPIError, relayInfo *relaycommon.RelayInfo) prometheusmetrics.RelayOutcome {
+	outcome := prometheusmetrics.RelayOutcome{Success: relayInfo.FinalSuccess(apiErr == nil)}
+	if apiErr != nil {
+		outcome.Error = prometheusmetrics.ErrorDetails{
+			Err:        apiErr,
+			ErrorType:  apiErr.GetErrorType(),
+			ErrorCode:  apiErr.GetErrorCode(),
+			StatusCode: apiErr.StatusCode,
+		}
+		if c != nil && c.Request != nil && c.Request.Context().Err() != nil {
+			outcome.Error.Err = c.Request.Context().Err()
+		}
+		return outcome
+	}
+	if relayInfo == nil {
+		return outcome
+	}
+	if relayInfo.FirstResponseTime.After(relayInfo.StartTime) {
+		outcome.TTFT = relayInfo.FirstResponseTime.Sub(relayInfo.StartTime)
+	}
+	if outcome.Success || relayInfo.StreamStatus == nil {
+		return outcome
+	}
+
+	streamErr := relayInfo.StreamStatus.EndError
+	switch relayInfo.StreamStatus.EndReason {
+	case relaycommon.StreamEndReasonTimeout:
+		streamErr = context.DeadlineExceeded
+	case relaycommon.StreamEndReasonClientGone:
+		streamErr = context.Canceled
+	}
+	if streamErr == nil {
+		streamErr = errors.New("stream ended abnormally")
+	}
+	outcome.Error.Err = streamErr
+	return outcome
+}
 
 func relayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
 	var err *types.NewAPIError
@@ -75,14 +115,27 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	var (
 		newAPIError *types.NewAPIError
+		relayInfo   *relaycommon.RelayInfo
 		ws          *websocket.Conn
 	)
+	relayAttempt := prometheusmetrics.BeginRelayAttempt(relayFormat)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			relayAttempt.Done(prometheusmetrics.RelayOutcome{
+				Success: false,
+				Error:   prometheusmetrics.ErrorDetails{Err: errors.New("relay panic")},
+			})
+			panic(recovered)
+		}
+		relayAttempt.Done(relayMetricsOutcome(c, newAPIError, relayInfo))
+	}()
 
 	if relayFormat == types.RelayFormatOpenAIRealtime {
 		var err error
 		ws, err = upgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
-			helper.WssError(c, ws, types.NewError(err, types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry()).ToOpenAIError())
+			newAPIError = types.NewError(err, types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+			helper.WssError(c, ws, newAPIError.ToOpenAIError())
 			return
 		}
 		defer ws.Close()
@@ -119,11 +172,12 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
-	relayInfo, err := relaycommon.GenRelayInfo(c, relayFormat, request, ws)
+	relayInfo, err = relaycommon.GenRelayInfo(c, relayFormat, request, ws)
 	if err != nil {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
 	}
+	relayAttempt.SetStream(relayInfo.IsStream)
 
 	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
 	needCountToken := constant.CountToken
@@ -211,19 +265,36 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
-		attempt := service.BeginChannelRuntimeAttempt(channel.Id)
-
-		switch relayFormat {
-		case types.RelayFormatOpenAIRealtime:
-			newAPIError = relay.WssHelper(c, relayInfo)
-		case types.RelayFormatClaude:
-			newAPIError = relay.ClaudeHelper(c, relayInfo)
-		case types.RelayFormatGemini:
-			newAPIError = geminiRelayHandler(c, relayInfo)
-		default:
-			newAPIError = relayHandler(c, relayInfo)
+		retryReason := prometheusmetrics.ErrorTypeInternal
+		if relayInfo.LastError != nil {
+			retryReason = prometheusmetrics.ClassifyNewAPIError(relayInfo.LastError)
 		}
-		attempt.Done()
+		service.TrackChannelAttempt(service.ChannelAttemptMeta{
+			ChannelID:   channel.Id,
+			ChannelType: channel.Type,
+			Stream:      relayInfo.IsStream,
+			RetryIndex:  relayInfo.RetryIndex,
+			RetryReason: retryReason,
+		}, func() service.ChannelAttemptOutcome {
+			switch relayFormat {
+			case types.RelayFormatOpenAIRealtime:
+				newAPIError = relay.WssHelper(c, relayInfo)
+			case types.RelayFormatClaude:
+				newAPIError = relay.ClaudeHelper(c, relayInfo)
+			case types.RelayFormatGemini:
+				newAPIError = geminiRelayHandler(c, relayInfo)
+			default:
+				newAPIError = relayHandler(c, relayInfo)
+			}
+			relayOutcome := relayMetricsOutcome(c, newAPIError, relayInfo)
+			return service.ChannelAttemptOutcome{
+				Success:    relayOutcome.Success,
+				Err:        relayOutcome.Error.Err,
+				ErrorType:  relayOutcome.Error.ErrorType,
+				ErrorCode:  relayOutcome.Error.ErrorCode,
+				StatusCode: relayOutcome.Error.StatusCode,
+			}
+		})
 
 		if newAPIError == nil {
 			relayInfo.LastError = nil
@@ -406,9 +477,35 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 }
 
 func RelayMidjourney(c *gin.Context) {
+	relayAttempt := prometheusmetrics.BeginRelayAttempt(types.RelayFormatMjProxy)
+	relayAttempt.SetStream(false)
+	metricsOutcome := prometheusmetrics.RelayOutcome{}
+	recordTaskSubmission := isMidjourneyTaskSubmissionMode(c.GetInt("relay_mode"))
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if recordTaskSubmission {
+				prometheusmetrics.RecordTaskSubmission(string(constant.TaskPlatformMidjourney), false)
+			}
+			relayAttempt.Done(prometheusmetrics.RelayOutcome{
+				Success: false,
+				Error:   prometheusmetrics.ErrorDetails{Err: errors.New("midjourney relay panic")},
+			})
+			panic(recovered)
+		}
+		if recordTaskSubmission {
+			prometheusmetrics.RecordTaskSubmission(string(constant.TaskPlatformMidjourney), metricsOutcome.Success)
+		}
+		relayAttempt.Done(metricsOutcome)
+	}()
+
 	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatMjProxy, nil, nil)
 
 	if err != nil {
+		metricsOutcome.Error = prometheusmetrics.ErrorDetails{
+			Err:        err,
+			ErrorCode:  types.ErrorCodeGenRelayInfoFailed,
+			StatusCode: http.StatusInternalServerError,
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"description": fmt.Sprintf("failed to generate relay info: %s", err.Error()),
 			"type":        "upstream_error",
@@ -416,6 +513,7 @@ func RelayMidjourney(c *gin.Context) {
 		})
 		return
 	}
+	recordTaskSubmission = isMidjourneyTaskSubmissionMode(relayInfo.RelayMode)
 
 	var mjErr *dto.MidjourneyResponse
 	switch relayInfo.RelayMode {
@@ -438,6 +536,10 @@ func RelayMidjourney(c *gin.Context) {
 			mjErr.Result = "当前分组负载已饱和，请稍后再试，或升级账户以提升服务质量。"
 			statusCode = http.StatusTooManyRequests
 		}
+		metricsOutcome.Error = prometheusmetrics.ErrorDetails{
+			Err:        errors.New(mjErr.Description),
+			StatusCode: statusCode,
+		}
 		c.JSON(statusCode, gin.H{
 			"description": fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result),
 			"type":        "upstream_error",
@@ -445,6 +547,26 @@ func RelayMidjourney(c *gin.Context) {
 		})
 		channelId := c.GetInt("channel_id")
 		logger.LogError(c, fmt.Sprintf("relay error (channel #%d, status code %d): %s", channelId, statusCode, fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result)))
+		return
+	}
+	metricsOutcome.Success = true
+	if upstreamSucceeded, recorded := relay.MidjourneyUpstreamSucceeded(c); recorded {
+		metricsOutcome.Success = upstreamSucceeded
+		if !upstreamSucceeded {
+			metricsOutcome.Error.Err = errors.New("midjourney upstream business failure")
+		}
+	}
+}
+
+func isMidjourneyTaskSubmissionMode(relayMode int) bool {
+	switch relayMode {
+	case relayconstant.RelayModeMidjourneyNotify,
+		relayconstant.RelayModeMidjourneyTaskFetch,
+		relayconstant.RelayModeMidjourneyTaskFetchByCondition,
+		relayconstant.RelayModeMidjourneyTaskImageSeed:
+		return false
+	default:
+		return true
 	}
 }
 
@@ -488,23 +610,45 @@ func RelayTaskFetch(c *gin.Context) {
 }
 
 func RelayTask(c *gin.Context) {
+	relayAttempt := prometheusmetrics.BeginRelayAttempt(types.RelayFormatTask)
+	relayAttempt.SetStream(false)
+	var taskErr *dto.TaskError
+	taskPlatform := string(relay.GetTaskPlatform(c))
+	taskPersisted := false
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			prometheusmetrics.RecordTaskSubmission(taskPlatform, false)
+			relayAttempt.Done(prometheusmetrics.RelayOutcome{
+				Success: false,
+				Error:   prometheusmetrics.ErrorDetails{Err: errors.New("task relay panic")},
+			})
+			panic(recovered)
+		}
+		prometheusmetrics.RecordTaskSubmission(taskPlatform, taskPersisted)
+		outcome := prometheusmetrics.RelayOutcome{Success: taskErr == nil}
+		if taskErr != nil {
+			outcome.Error = prometheusmetrics.ErrorDetails{
+				Err:        taskErr.Error,
+				ErrorCode:  types.ErrorCode(taskErr.Code),
+				StatusCode: taskErr.StatusCode,
+			}
+		}
+		relayAttempt.Done(outcome)
+	}()
+
 	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatTask, nil, nil)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, &dto.TaskError{
-			Code:       "gen_relay_info_failed",
-			Message:    err.Error(),
-			StatusCode: http.StatusInternalServerError,
-		})
+		taskErr = service.TaskErrorWrapperLocal(err, string(types.ErrorCodeGenRelayInfoFailed), http.StatusInternalServerError)
+		respondTaskError(c, taskErr)
 		return
 	}
 
-	if taskErr := relay.ResolveOriginTask(c, relayInfo); taskErr != nil {
+	if taskErr = relay.ResolveOriginTask(c, relayInfo); taskErr != nil {
 		respondTaskError(c, taskErr)
 		return
 	}
 
 	var result *relay.TaskSubmitResult
-	var taskErr *dto.TaskError
 	defer func() {
 		if taskErr != nil && relayInfo.Billing != nil {
 			relayInfo.Billing.Refund(c)
@@ -518,6 +662,7 @@ func RelayTask(c *gin.Context) {
 		RequestPath: c.Request.URL.Path,
 		Retry:       common.GetPointer(0),
 	}
+	retryReason := prometheusmetrics.ErrorTypeInternal
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 		var channel *model.Channel
@@ -552,12 +697,31 @@ func RelayTask(c *gin.Context) {
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
 
-		attempt := service.BeginChannelRuntimeAttempt(channel.Id)
-		result, taskErr = relay.RelayTaskSubmit(c, relayInfo)
-		attempt.Done()
+		service.TrackChannelAttempt(service.ChannelAttemptMeta{
+			ChannelID:   channel.Id,
+			ChannelType: channel.Type,
+			Stream:      false,
+			RetryIndex:  retryParam.GetRetry(),
+			RetryReason: retryReason,
+		}, func() service.ChannelAttemptOutcome {
+			result, taskErr = relay.RelayTaskSubmit(c, relayInfo)
+			if taskErr == nil {
+				return service.ChannelAttemptOutcome{Success: true}
+			}
+			return service.ChannelAttemptOutcome{
+				Err:        taskErr.Error,
+				ErrorCode:  types.ErrorCode(taskErr.Code),
+				StatusCode: taskErr.StatusCode,
+			}
+		})
 		if taskErr == nil {
 			break
 		}
+		retryReason = prometheusmetrics.ClassifyError(prometheusmetrics.ErrorDetails{
+			Err:        taskErr.Error,
+			ErrorCode:  types.ErrorCode(taskErr.Code),
+			StatusCode: taskErr.StatusCode,
+		})
 
 		if !taskErr.LocalError {
 			processChannelError(c,
@@ -579,6 +743,9 @@ func RelayTask(c *gin.Context) {
 
 	// ── 成功：结算 + 日志 + 插入任务 ──
 	if taskErr == nil {
+		if result != nil && result.Platform != "" {
+			taskPlatform = string(result.Platform)
+		}
 		if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
 			common.SysError("settle task billing error: " + settleErr.Error())
 		}
@@ -604,6 +771,8 @@ func RelayTask(c *gin.Context) {
 		task.Action = relayInfo.Action
 		if insertErr := task.Insert(); insertErr != nil {
 			common.SysError("insert task error: " + insertErr.Error())
+		} else {
+			taskPersisted = true
 		}
 	}
 

@@ -1,0 +1,137 @@
+{
+  "annotations": {"list": []},
+  "description": "new-api 异步任务提交、完成、轮询、端到端耗时和 Master-only 队列积压总览。",
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "最近 15 分钟已完成任务中的成功比例。没有 completion 样本时显示 No data，不把无任务解释为 0% 成功。",
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "decimals": 2, "mappings": [], "noValue": "No data", "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 0.8}, {"color": "green", "value": 0.95}]}, "unit": "percentunit"}, "overrides": []},
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "showPercentChange": false, "textMode": "auto", "wideLayout": true},
+      "pluginVersion": "12.1.0",
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "sum(rate(newapi_task_completions_total{cluster=\"$cluster\",job=\"new-api\",instance=~\"$instance\",platform=~\"$platform\",result=\"success\"}[15m])) / clamp_min(sum(rate(newapi_task_completions_total{cluster=\"$cluster\",job=\"new-api\",instance=~\"$instance\",platform=~\"$platform\"}[15m])), 0.000001)", "legendFormat": "completion success ratio", "range": true, "refId": "A"}],
+      "title": "Completion success ratio",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "最近 5 分钟异步任务提交速率，成功和失败都计入总 RPM。No data 表示当前筛选范围没有提交样本或抓取链路缺失。",
+      "fieldConfig": {"defaults": {"color": {"mode": "continuous-BlPu"}, "decimals": 1, "mappings": [], "noValue": "No data", "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}, "unit": "rpm"}, "overrides": []},
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "id": 2,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "showPercentChange": true, "textMode": "auto", "wideLayout": true},
+      "pluginVersion": "12.1.0",
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "sum(rate(newapi_task_submissions_total{cluster=\"$cluster\",job=\"new-api\",instance=~\"$instance\",platform=~\"$platform\"}[5m])) * 60", "legendFormat": "submission RPM", "range": true, "refId": "A"}],
+      "title": "Submission RPM",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "最近 5 分钟实际上游 poll 中 error 的比例。该口径只描述查询结果，不代表本地终态持久化或结算结果。",
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "decimals": 2, "mappings": [], "noValue": "No data", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 0.1}, {"color": "red", "value": 0.25}]}, "unit": "percentunit"}, "overrides": []},
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "id": 3,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "showPercentChange": false, "textMode": "auto", "wideLayout": true},
+      "pluginVersion": "12.1.0",
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "sum(rate(newapi_task_poll_total{cluster=\"$cluster\",job=\"new-api\",instance=~\"$instance\",platform=~\"$platform\",result=\"error\"}[5m])) / clamp_min(sum(rate(newapi_task_poll_total{cluster=\"$cluster\",job=\"new-api\",instance=~\"$instance\",platform=~\"$platform\"}[5m])), 0.000001)", "legendFormat": "poll error ratio", "range": true, "refId": "A"}],
+      "title": "Poll error ratio",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Master-only collector 导出的当前未完成任务总量。0 表示队列为空；No data 表示 task_queue collector 缺失或失败，而不是零积压。",
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "decimals": 0, "mappings": [], "noValue": "No data", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 50}, {"color": "red", "value": 100}]}, "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "id": 4,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "showPercentChange": false, "textMode": "auto", "wideLayout": true},
+      "pluginVersion": "12.1.0",
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "sum(max by (platform, state) (newapi_task_queue_size{cluster=\"$cluster\",job=\"new-api\",platform=~\"$platform\"}))", "legendFormat": "unfinished tasks", "range": true, "refId": "A"}],
+      "title": "Current task backlog",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "各 platform 的任务提交成功/失败 RPM；内部渠道重试不会重复增加 submission。",
+      "fieldConfig": {"defaults": {"decimals": 1, "noValue": "No data", "unit": "rpm"}, "overrides": []},
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 4},
+      "id": 5,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "pluginVersion": "12.1.0",
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "sum by (platform, result) (rate(newapi_task_submissions_total{cluster=\"$cluster\",job=\"new-api\",instance=~\"$instance\",platform=~\"$platform\"}[5m])) * 60", "legendFormat": "{{platform}} / {{result}}", "range": true, "refId": "A"}],
+      "title": "Task submissions by outcome",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "首次终态 CAS 获胜时记录的成功/失败 RPM；重复轮询、重复 Notify 和 CAS 失败不会重复计数。",
+      "fieldConfig": {"defaults": {"decimals": 1, "noValue": "No data", "unit": "rpm"}, "overrides": []},
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 4},
+      "id": 6,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "pluginVersion": "12.1.0",
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "sum by (platform, result) (rate(newapi_task_completions_total{cluster=\"$cluster\",job=\"new-api\",instance=~\"$instance\",platform=~\"$platform\"}[5m])) * 60", "legendFormat": "{{platform}} / {{result}}", "range": true, "refId": "A"}],
+      "title": "Task completions by outcome",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "首次终态的端到端耗时 P50/P95。Histogram 按 le、platform、result 跨实例聚合；非法时间只跳过 duration，不丢 completion。",
+      "fieldConfig": {"defaults": {"decimals": 1, "noValue": "No data", "unit": "s"}, "overrides": []},
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 11},
+      "id": 7,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "pluginVersion": "12.1.0",
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "histogram_quantile(0.50, sum by (le, platform, result) (rate(newapi_task_duration_seconds_bucket{cluster=\"$cluster\",job=\"new-api\",instance=~\"$instance\",platform=~\"$platform\"}[15m])))", "legendFormat": "P50 / {{platform}} / {{result}}", "range": true, "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "histogram_quantile(0.95, sum by (le, platform, result) (rate(newapi_task_duration_seconds_bucket{cluster=\"$cluster\",job=\"new-api\",instance=~\"$instance\",platform=~\"$platform\"}[15m])))", "legendFormat": "P95 / {{platform}} / {{result}}", "range": true, "refId": "B"}
+      ],
+      "title": "Task duration P50 / P95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Master-only 队列快照，按 waiting/running/unknown 展示。该面板故意不应用 instance 筛选，避免选择 Slave 时把共享队列误显示为 No data。",
+      "fieldConfig": {"defaults": {"decimals": 0, "noValue": "No data", "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 7, "w": 8, "x": 12, "y": 11},
+      "id": 8,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "pluginVersion": "12.1.0",
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max by (platform, state) (newapi_task_queue_size{cluster=\"$cluster\",job=\"new-api\",platform=~\"$platform\"})", "legendFormat": "{{platform}} / {{state}}", "range": true, "refId": "A"}],
+      "title": "Task queue by state",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Master-only task_queue collector 状态。DOWN 表示分组查询失败，ABSENT 表示没有 Master 导出该 collector。",
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "decimals": 0, "mappings": [{"options": {"0": {"color": "red", "index": 0, "text": "DOWN"}, "1": {"color": "green", "index": 1, "text": "UP"}}, "type": "value"}], "noValue": "ABSENT", "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}, "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 7, "w": 4, "x": 20, "y": 11},
+      "id": 9,
+      "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "showPercentChange": false, "textMode": "auto", "wideLayout": true},
+      "pluginVersion": "12.1.0",
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "max(newapi_shared_collector_up{cluster=\"$cluster\",job=\"new-api\",collector=\"task_queue\"})", "legendFormat": "task_queue", "range": true, "refId": "A"}],
+      "title": "Master task collector",
+      "type": "stat"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 41,
+  "tags": ["new-api", "prometheus", "tasks"],
+  "templating": {"list": [
+    {"current": {}, "datasource": {"type": "prometheus", "uid": "prometheus"}, "definition": "label_values(newapi_build_info{job=\"new-api\"}, cluster)", "hide": 0, "includeAll": false, "label": "Cluster", "multi": false, "name": "cluster", "options": [], "query": {"query": "label_values(newapi_build_info{job=\"new-api\"}, cluster)", "refId": "PrometheusVariableQueryEditor-Cluster"}, "refresh": 1, "regex": "", "sort": 1, "type": "query"},
+    {"allValue": ".*", "current": {}, "datasource": {"type": "prometheus", "uid": "prometheus"}, "definition": "label_values(up{cluster=\"$cluster\",job=\"new-api\"}, instance)", "hide": 0, "includeAll": true, "label": "Instance", "multi": true, "name": "instance", "options": [], "query": {"query": "label_values(up{cluster=\"$cluster\",job=\"new-api\"}, instance)", "refId": "PrometheusVariableQueryEditor-Instance"}, "refresh": 1, "regex": "", "sort": 1, "type": "query"},
+    {"allValue": ".*", "current": {}, "datasource": {"type": "prometheus", "uid": "prometheus"}, "definition": "label_values(newapi_task_queue_size{cluster=\"$cluster\",job=\"new-api\"}, platform)", "hide": 0, "includeAll": true, "label": "Platform", "multi": true, "name": "platform", "options": [], "query": {"query": "label_values(newapi_task_queue_size{cluster=\"$cluster\",job=\"new-api\"}, platform)", "refId": "PrometheusVariableQueryEditor-Platform"}, "refresh": 1, "regex": "", "sort": 1, "type": "query"}
+  ]},
+  "time": {"from": "now-6h", "to": "now"},
+  "timepicker": {"refresh_intervals": ["15s", "30s", "1m", "5m", "15m"], "time_options": ["5m", "15m", "1h", "6h", "12h", "24h", "2d", "7d", "30d"]},
+  "timezone": "browser",
+  "title": "new-api / Task Overview",
+  "uid": "newapi-task-overview",
+  "version": 1,
+  "weekStart": ""
+}

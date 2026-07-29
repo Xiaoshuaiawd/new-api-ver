@@ -1,0 +1,13 @@
+apiVersion: 1
+
+providers:
+  - name: new-api-monitoring
+    orgId: 1
+    folder: new-api Monitoring
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false
