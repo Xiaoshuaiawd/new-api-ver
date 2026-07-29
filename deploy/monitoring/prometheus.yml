@@ -1,0 +1,39 @@
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: default
+
+rule_files:
+  - /etc/prometheus/rules/recording-rules.yml
+  - /etc/prometheus/rules/alert-rules.yml
+  - /etc/prometheus/rules/relay-latency-thresholds.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090
+        labels:
+          cluster: default
+          instance: prometheus
+
+  - job_name: new-api
+    metrics_path: /metrics
+    scheme: http
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/new-api-bearer-token
+    static_configs:
+      - targets:
+          - host.docker.internal:3000
+        labels:
+          cluster: default
+          instance: new-api-1

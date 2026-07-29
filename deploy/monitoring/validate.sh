@@ -1,0 +1,321 @@
+#!/bin/sh
+
+set -eu
+
+monitoring_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_dir=$(CDPATH= cd -- "$monitoring_dir/../.." && pwd)
+promtool_bin=${PROMTOOL_BIN:-promtool}
+amtool_bin=${AMTOOL_BIN:-amtool}
+
+required_files="
+$repo_dir/docker-compose.monitoring.yml
+$monitoring_dir/prometheus.yml
+$monitoring_dir/recording-rules.yml
+$monitoring_dir/recording-rules.test.yml
+$monitoring_dir/alert-rules.yml
+$monitoring_dir/alert-rules.test.yml
+$monitoring_dir/relay-latency-thresholds.yml
+$monitoring_dir/alertmanager.yml.example
+$monitoring_dir/grafana/provisioning/datasources/prometheus.yml
+$monitoring_dir/grafana/provisioning/dashboards/default.yml
+$monitoring_dir/grafana/dashboards/system-overview.json
+$monitoring_dir/grafana/dashboards/channel-overview.json
+$monitoring_dir/grafana/dashboards/billing-overview.json
+$monitoring_dir/grafana/dashboards/task-overview.json
+$monitoring_dir/secrets/.gitignore
+$repo_dir/docs/prometheus-monitoring.md
+"
+
+for required_file in $required_files; do
+	if [ ! -s "$required_file" ]; then
+		echo "missing required monitoring artifact: $required_file" >&2
+		exit 1
+	fi
+done
+
+if ! command -v "$promtool_bin" >/dev/null 2>&1 && [ ! -x "$promtool_bin" ]; then
+	echo "promtool is required; set PROMTOOL_BIN to its executable path" >&2
+	exit 1
+fi
+
+tmp_dir=$(mktemp -d)
+trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
+
+sed \
+	-e "s#/etc/prometheus/rules/recording-rules.yml#$monitoring_dir/recording-rules.yml#" \
+	-e "s#/etc/prometheus/rules/alert-rules.yml#$monitoring_dir/alert-rules.yml#" \
+	-e "s#/etc/prometheus/rules/relay-latency-thresholds.yml#$monitoring_dir/relay-latency-thresholds.yml#" \
+	-e "s#/etc/prometheus/secrets/new-api-bearer-token#$monitoring_dir/secrets/new-api-bearer-token.example#" \
+	"$monitoring_dir/prometheus.yml" >"$tmp_dir/prometheus.yml"
+
+"$promtool_bin" check config "$tmp_dir/prometheus.yml"
+"$promtool_bin" check rules --lint=all --lint-fatal \
+	"$monitoring_dir/recording-rules.yml" \
+	"$monitoring_dir/alert-rules.yml" \
+	"$monitoring_dir/relay-latency-thresholds.yml"
+ruby -e '
+  require "tmpdir"
+  require "yaml"
+
+  allowed_formats = %w[
+    openai claude gemini openai_responses openai_responses_compaction
+    openai_alpha_search openai_audio openai_image openai_realtime rerank
+    embedding task mj_proxy other
+  ].freeze
+  allowed_quantiles = %w[p95 p99].freeze
+  expected_keys = %w[cluster job quantile relay_format].freeze
+
+  validate = lambda do |document|
+    rules = document.fetch("groups").flat_map { |group| group.fetch("rules") }
+    seen = {}
+
+    rules.each do |rule|
+      raise ArgumentError, "latency threshold record name is invalid" unless rule.fetch("record") == "newapi_relay_latency_threshold_seconds"
+      labels = rule.fetch("labels")
+      raise ArgumentError, "latency threshold labels are invalid" unless labels.keys.sort == expected_keys.sort
+      if labels.fetch("cluster").to_s.empty? || labels.fetch("job").to_s.empty?
+        raise ArgumentError, "latency threshold cluster/job must be non-empty"
+      end
+      raise ArgumentError, "latency threshold relay_format is invalid" unless allowed_formats.include?(labels.fetch("relay_format"))
+      raise ArgumentError, "latency threshold quantile is invalid" unless allowed_quantiles.include?(labels.fetch("quantile"))
+
+      match = /\Avector\(([^()]+)\)\z/.match(rule.fetch("expr").to_s.strip)
+      raise ArgumentError, "latency threshold must use vector(<positive seconds>)" unless match
+      seconds = Float(match[1], exception: false)
+      raise ArgumentError, "latency threshold must be finite and positive" unless seconds&.finite? && seconds.positive?
+
+      key = expected_keys.map { |name| labels.fetch(name) }
+      raise ArgumentError, "duplicate latency threshold #{key.join("/")}" if seen[key]
+      seen[key] = true
+    end
+  end
+
+  document = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
+  begin
+    validate.call(document)
+  rescue KeyError, ArgumentError => error
+    abort error.message
+  end
+
+  base_rule = {
+    "record" => "newapi_relay_latency_threshold_seconds",
+    "expr" => "vector(10)",
+    "labels" => {
+      "cluster" => "default",
+      "job" => "new-api",
+      "relay_format" => "openai",
+      "quantile" => "p95"
+    }
+  }
+  fixture = lambda do |rules|
+    { "groups" => [{ "name" => "test", "rules" => rules }] }
+  end
+  changed_rule = lambda do |path, value|
+    rule = Marshal.load(Marshal.dump(base_rule))
+    target = path.reduce(rule) { |current, key| current.fetch(key) }
+    target.replace(value) if target.is_a?(String)
+    rule
+  end
+  invalid_cases = {
+    "unknown-format" => ["latency threshold relay_format is invalid", changed_rule.call(%w[labels relay_format], "unknown")],
+    "unknown-quantile" => ["latency threshold quantile is invalid", changed_rule.call(%w[labels quantile], "p90")],
+    "zero" => ["latency threshold must be finite and positive", changed_rule.call(%w[expr], "vector(0)")],
+    "negative" => ["latency threshold must be finite and positive", changed_rule.call(%w[expr], "vector(-1)")],
+    "nan" => ["latency threshold must be finite and positive", changed_rule.call(%w[expr], "vector(NaN)")],
+    "non-constant" => ["latency threshold must use vector(<positive seconds>)", changed_rule.call(%w[expr], "scalar(1)")]
+  }
+  extra_label = Marshal.load(Marshal.dump(base_rule))
+  extra_label.fetch("labels")["instance"] = "app-1"
+  invalid_cases["extra-label"] = ["latency threshold labels are invalid", extra_label]
+  invalid_cases["duplicate"] = ["duplicate latency threshold default/new-api/p95/openai", [base_rule, base_rule]]
+
+  Dir.mktmpdir("newapi-relay-latency-thresholds") do |directory|
+    invalid_cases.each do |name, (expected_error, rule_or_rules)|
+      rules = rule_or_rules.is_a?(Array) ? rule_or_rules : [rule_or_rules]
+      path = File.join(directory, "#{name}.yml")
+      File.write(path, YAML.dump(fixture.call(rules)))
+      begin
+        validate.call(YAML.safe_load(File.read(path), aliases: true))
+        abort "invalid latency threshold fixture #{name} was accepted"
+      rescue KeyError, ArgumentError => error
+        unless error.message == expected_error
+          abort "invalid latency threshold fixture #{name} returned #{error.message.inspect}, expected #{expected_error.inspect}"
+        end
+      end
+    end
+  end
+' "$monitoring_dir/relay-latency-thresholds.yml"
+"$promtool_bin" test rules "$monitoring_dir/recording-rules.test.yml"
+"$promtool_bin" test rules "$monitoring_dir/alert-rules.test.yml"
+ruby -e '
+  require "yaml"
+
+  recording = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
+  alerts = YAML.safe_load(File.read(ARGV.fetch(1)), aliases: true)
+  recording_count = recording.fetch("groups").sum { |group| group.fetch("rules").length }
+  alert_count = alerts.fetch("groups").sum { |group| group.fetch("rules").length }
+  abort "expected 33 recording rules, got #{recording_count}" unless recording_count == 33
+  abort "expected 24 alert rules, got #{alert_count}" unless alert_count == 24
+' "$monitoring_dir/recording-rules.yml" "$monitoring_dir/alert-rules.yml"
+if command -v "$amtool_bin" >/dev/null 2>&1 || [ -x "$amtool_bin" ]; then
+	"$amtool_bin" check-config "$monitoring_dir/alertmanager.yml.example"
+else
+	if ! command -v ruby >/dev/null 2>&1; then
+		echo "amtool or ruby is required to validate Alertmanager YAML" >&2
+		exit 1
+	fi
+	ruby -e 'require "yaml"; YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)' \
+		"$monitoring_dir/alertmanager.yml.example"
+	echo "warning: amtool unavailable; Alertmanager received YAML and contract validation only" >&2
+fi
+
+rg -q '^  scrape_interval: 15s$' "$monitoring_dir/prometheus.yml"
+rg -q '^  scrape_timeout: 10s$' "$monitoring_dir/prometheus.yml"
+rg -q '^    cluster: default$' "$monitoring_dir/prometheus.yml"
+rg -q '^  - job_name: new-api$' "$monitoring_dir/prometheus.yml"
+rg -q '^      credentials_file: /etc/prometheus/secrets/new-api-bearer-token$' "$monitoring_dir/prometheus.yml"
+rg -q 'relay-latency-thresholds.yml:/etc/prometheus/rules/relay-latency-thresholds.yml:ro' "$repo_dir/docker-compose.monitoring.yml"
+rg -q '^inhibit_rules:$' "$monitoring_dir/alertmanager.yml.example"
+rg -q '^        send_resolved: true$' "$monitoring_dir/alertmanager.yml.example"
+rg -q '^!\*\.example$' "$monitoring_dir/secrets/.gitignore"
+
+ruby -e '
+  require "yaml"
+
+  config = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
+  cluster = config.fetch("global").fetch("external_labels").fetch("cluster")
+  jobs = config.fetch("scrape_configs")
+
+  jobs.each do |job|
+    job.fetch("static_configs").each do |static_config|
+      labels = static_config.fetch("labels")
+      unless labels.fetch("cluster", nil) == cluster
+        abort "scrape target #{job.fetch("job_name")} must set cluster=#{cluster}; external_labels are not added to local query series"
+      end
+    end
+  end
+' "$monitoring_dir/prometheus.yml"
+
+PROMETHEUS_BEARER_TOKEN_FILE="$monitoring_dir/secrets/new-api-bearer-token.example" \
+GRAFANA_ADMIN_PASSWORD_FILE="$monitoring_dir/secrets/grafana-admin-password.example" \
+ALERTMANAGER_WEBHOOK_URL_FILE="$monitoring_dir/secrets/alertmanager-webhook-url.example" \
+	docker compose -f "$repo_dir/docker-compose.monitoring.yml" config --format json >"$tmp_dir/compose.json"
+jq -e '
+  (.services | keys | sort) == ["alertmanager", "grafana", "prometheus"] and
+  ([.services[].image | endswith(":latest")] | any | not) and
+  ([.services[] | has("healthcheck")] | all) and
+  ([.services[] | has("volumes")] | all)
+' "$tmp_dir/compose.json" >/dev/null
+
+jq -e '
+  .apiVersion == 1 and
+  (.datasources | length) == 1 and
+  .datasources[0].type == "prometheus" and
+  .datasources[0].uid == "prometheus" and
+  .datasources[0].isDefault == true
+' "$monitoring_dir/grafana/provisioning/datasources/prometheus.yml" >/dev/null 2>&1 || {
+	# jq cannot parse YAML; validate the required datasource contract textually.
+	rg -q '^apiVersion: 1$' "$monitoring_dir/grafana/provisioning/datasources/prometheus.yml"
+	rg -q '^  - name: Prometheus$' "$monitoring_dir/grafana/provisioning/datasources/prometheus.yml"
+	rg -q '^    type: prometheus$' "$monitoring_dir/grafana/provisioning/datasources/prometheus.yml"
+	rg -q '^    uid: prometheus$' "$monitoring_dir/grafana/provisioning/datasources/prometheus.yml"
+	rg -q '^    isDefault: true$' "$monitoring_dir/grafana/provisioning/datasources/prometheus.yml"
+}
+
+rg -q '^apiVersion: 1$' "$monitoring_dir/grafana/provisioning/dashboards/default.yml"
+rg -q '^      path: /var/lib/grafana/dashboards$' "$monitoring_dir/grafana/provisioning/dashboards/default.yml"
+
+validate_dashboard() {
+	dashboard_file=$1
+	expected_uid=$2
+	minimum_panels=$3
+	shift 3
+
+	jq -e --arg expected_uid "$expected_uid" --argjson minimum_panels "$minimum_panels" '
+    .uid == $expected_uid and
+    (.title | length > 0) and
+    .schemaVersion >= 39 and
+    .refresh == "30s" and
+    .timezone == "browser" and
+    (.time.from == "now-6h") and
+    (.panels | length >= $minimum_panels) and
+    ([.panels[].id] | length == (unique | length)) and
+    ([.panels[] | select((.title // "") == "" or (.description // "") == "")] | length == 0) and
+    ([.panels[] | select(.type != "row") | .targets[]? | select(.datasource.uid != "prometheus")] | length == 0) and
+    ([.panels[] | select(.type != "row") | .targets[]? | select((.expr // "") == "")] | length == 0)
+  ' "$dashboard_file" >/dev/null
+
+	for variable_name in "$@"; do
+		jq -e --arg variable_name "$variable_name" '
+      [.templating.list[] | select(.name == $variable_name)] | length == 1
+    ' "$dashboard_file" >/dev/null
+	done
+}
+
+validate_dashboard \
+	"$monitoring_dir/grafana/dashboards/system-overview.json" \
+	"newapi-system-overview" \
+	12 \
+	cluster instance relay_format
+
+validate_dashboard \
+	"$monitoring_dir/grafana/dashboards/channel-overview.json" \
+	"newapi-channel-overview" \
+	10 \
+	cluster instance channel_id
+
+validate_dashboard \
+	"$monitoring_dir/grafana/dashboards/billing-overview.json" \
+	"newapi-billing-overview" \
+	6 \
+	cluster instance billing_source
+
+validate_dashboard \
+	"$monitoring_dir/grafana/dashboards/task-overview.json" \
+	"newapi-task-overview" \
+	9 \
+	cluster instance platform
+
+jq -s '
+  [
+    .[].panels[].targets[]?
+    | select((.expr // "") != "")
+    | .expr
+    | gsub("\\$cluster"; "default")
+    | gsub("\\$instance"; ".*")
+    | gsub("\\$relay_format"; ".*")
+    | gsub("\\$channel_id"; ".*")
+    | gsub("\\$billing_source"; ".*")
+    | gsub("\\$platform"; ".*")
+  ]
+  | to_entries
+  | {
+      groups: [
+        {
+          name: "newapi-grafana-queries",
+          rules: [
+            .[]
+            | {
+                record: ("newapi_dashboard_query_" + (.key | tostring)),
+                expr: .value
+              }
+          ]
+        }
+      ]
+    }
+' \
+	"$monitoring_dir/grafana/dashboards/system-overview.json" \
+	"$monitoring_dir/grafana/dashboards/channel-overview.json" \
+	"$monitoring_dir/grafana/dashboards/billing-overview.json" \
+	"$monitoring_dir/grafana/dashboards/task-overview.json" \
+	>"$tmp_dir/dashboard-rules.json"
+
+dashboard_query_count=$(jq '.groups[0].rules | length' "$tmp_dir/dashboard-rules.json")
+if [ "$dashboard_query_count" -ne 70 ]; then
+	echo "expected 70 dashboard PromQL expressions, got $dashboard_query_count" >&2
+	exit 1
+fi
+
+"$promtool_bin" check rules --lint=all --lint-fatal "$tmp_dir/dashboard-rules.json"
+
+echo "monitoring static validation passed"
