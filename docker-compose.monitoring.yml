@@ -133,6 +133,8 @@ services:
       - mysql
     command:
       - --config.my-cnf=/run/secrets/mysql_exporter_cnf
+      - --collect.info_schema.tables
+      - --collect.info_schema.tables.databases=*
     secrets:
       - mysql_exporter_cnf
     networks:

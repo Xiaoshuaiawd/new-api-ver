@@ -1,0 +1,447 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "new-api 计费、Token、实际额度、失败、订阅拒绝和饱和事件趋势。",
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "最近 5 分钟各类 Token 的使用速率。仅来自成功持久化的消费日志。",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "noValue": "暂无数据",
+          "unit": "tokens/sec"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "pluginVersion": "12.1.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (direction) (rate(newapi_tokens_total{cluster=\"$cluster\",job=\"new-api\",instance=~\"$instance\"}[5m]))",
+          "legendFormat": "{{direction}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Token 使用速率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "内部额度的扣除、退款和净变化趋势；计数器使用速率计算，不能作为数据库账单累计。",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "noValue": "暂无数据",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "pluginVersion": "12.1.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (billing_source) (rate(newapi_quota_charged_total{cluster=\"$cluster\",job=\"new-api\",instance=~\"$instance\",billing_source=~\"$billing_source\"}[5m]))",
+          "legendFormat": "已扣除 / {{billing_source}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "-sum by (billing_source) (rate(newapi_quota_refunded_total{cluster=\"$cluster\",job=\"new-api\",instance=~\"$instance\",billing_source=~\"$billing_source\"}[5m]))",
+          "legendFormat": "已退款 / {{billing_source}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (billing_source) (rate(newapi_quota_charged_total{cluster=\"$cluster\",job=\"new-api\",instance=~\"$instance\",billing_source=~\"$billing_source\"}[5m])) - sum by (billing_source) (rate(newapi_quota_refunded_total{cluster=\"$cluster\",job=\"new-api\",instance=~\"$instance\",billing_source=~\"$billing_source\"}[5m]))",
+          "legendFormat": "净变化 / {{billing_source}}",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "额度扣除与退款速率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "按冻结分组倍率还原的实际额度速率，适合趋势观察，不替代使用日志核对。",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "noValue": "暂无数据",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 7
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "pluginVersion": "12.1.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (billing_source) (rate(newapi_actual_quota_charged_total{cluster=\"$cluster\",job=\"new-api\",instance=~\"$instance\",billing_source=~\"$billing_source\"}[5m]))",
+          "legendFormat": "实际扣除 / {{billing_source}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "-sum by (billing_source) (rate(newapi_actual_quota_refunded_total{cluster=\"$cluster\",job=\"new-api\",instance=~\"$instance\",billing_source=~\"$billing_source\"}[5m]))",
+          "legendFormat": "实际退款 / {{billing_source}}",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "实际额度速率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "预扣、结算、退款和任务重算的成功/失败事件速率。",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "noValue": "暂无数据",
+          "unit": "ops/sec"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 7
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "pluginVersion": "12.1.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (operation, result) (rate(newapi_billing_operations_total{cluster=\"$cluster\",job=\"new-api\",instance=~\"$instance\",billing_source=~\"$billing_source\"}[5m]))",
+          "legendFormat": "操作：{{operation}} / 结果：{{result}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "计费生命周期操作",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "按固定失败原因枚举统计计费失败速率；单次事件不直接触发告警。",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "noValue": "暂无数据",
+          "unit": "ops/sec"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "pluginVersion": "12.1.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (operation, reason) (rate(newapi_billing_failures_total{cluster=\"$cluster\",job=\"new-api\",instance=~\"$instance\",billing_source=~\"$billing_source\"}[5m]))",
+          "legendFormat": "操作：{{operation}} / 原因：{{reason}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "计费失败",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "订阅拒绝和额度饱和事件；饱和事件应回查管理员审计日志。",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "noValue": "暂无数据",
+          "unit": "ops/sec"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "pluginVersion": "12.1.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (reason) (rate(newapi_subscription_rejections_total{cluster=\"$cluster\",job=\"new-api\",instance=~\"$instance\"}[5m]))",
+          "legendFormat": "订阅 / {{reason}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (kind, operation) (rate(newapi_quota_saturation_total{cluster=\"$cluster\",job=\"new-api\",instance=~\"$instance\"}[5m]))",
+          "legendFormat": "额度饱和 / {{kind}} / {{operation}}",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "订阅拒绝与额度饱和",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 41,
+  "tags": [
+    "new-api",
+    "prometheus",
+    "billing"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(newapi_build_info{job=\"new-api\"}, cluster)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "集群",
+        "multi": false,
+        "name": "cluster",
+        "options": [],
+        "query": {
+          "query": "label_values(newapi_build_info{job=\"new-api\"}, cluster)",
+          "refId": "PrometheusVariableQueryEditor-Cluster"
+        },
+        "refresh": 1,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(up{cluster=\"$cluster\",job=\"new-api\"}, instance)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "实例",
+        "multi": true,
+        "name": "instance",
+        "options": [],
+        "query": {
+          "query": "label_values(up{cluster=\"$cluster\",job=\"new-api\"}, instance)",
+          "refId": "PrometheusVariableQueryEditor-Instance"
+        },
+        "refresh": 1,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(newapi_quota_charged_total{cluster=\"$cluster\",job=\"new-api\"}, billing_source)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "计费来源",
+        "multi": true,
+        "name": "billing_source",
+        "options": [],
+        "query": {
+          "query": "label_values(newapi_quota_charged_total{cluster=\"$cluster\",job=\"new-api\"}, billing_source)",
+          "refId": "PrometheusVariableQueryEditor-BillingSource"
+        },
+        "refresh": 1,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "15s",
+      "30s",
+      "1m",
+      "5m",
+      "15m"
+    ],
+    "time_options": [
+      "5m",
+      "15m",
+      "1h",
+      "6h",
+      "12h",
+      "24h",
+      "2d",
+      "7d",
+      "30d"
+    ]
+  },
+  "timezone": "browser",
+  "title": "new-api / 计费总览",
+  "uid": "newapi-billing-overview",
+  "version": 1,
+  "weekStart": ""
+}

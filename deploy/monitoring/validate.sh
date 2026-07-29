@@ -21,10 +21,12 @@ $monitoring_dir/targets/postgres-exporter.yml
 $monitoring_dir/targets/mysql-exporter.yml
 $monitoring_dir/grafana/provisioning/datasources/prometheus.yml
 $monitoring_dir/grafana/provisioning/dashboards/default.yml
-$monitoring_dir/grafana/dashboards/system-overview.json
-$monitoring_dir/grafana/dashboards/channel-overview.json
-$monitoring_dir/grafana/dashboards/billing-overview.json
-$monitoring_dir/grafana/dashboards/task-overview.json
+$monitoring_dir/grafana/dashboards/core/host-overview.json
+$monitoring_dir/grafana/dashboards/core/application-overview.json
+$monitoring_dir/grafana/dashboards/core/middleware-overview.json
+$monitoring_dir/grafana/dashboards/core/channel-overview.json
+$monitoring_dir/grafana/dashboards/extended/billing-overview.json
+$monitoring_dir/grafana/dashboards/extended/task-overview.json
 $monitoring_dir/secrets/.gitignore
 $monitoring_dir/secrets/postgres-exporter-password.example
 $monitoring_dir/secrets/redis-exporter-password.example
@@ -369,26 +371,48 @@ ruby -e '
   config = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
   cluster = config.fetch("global").fetch("external_labels").fetch("cluster")
   jobs = config.fetch("scrape_configs")
+  monitoring_dir = ARGV.fetch(1)
 
   jobs.each do |job|
-    job.fetch("static_configs").each do |static_config|
+    job.fetch("static_configs", []).each do |static_config|
       labels = static_config.fetch("labels")
       unless labels.fetch("cluster", nil) == cluster
         abort "scrape target #{job.fetch("job_name")} must set cluster=#{cluster}; external_labels are not added to local query series"
       end
     end
+    job.fetch("file_sd_configs", []).each do |file_sd|
+      file_sd.fetch("files").each do |configured_path|
+        local_path = File.join(monitoring_dir, "targets", File.basename(configured_path))
+        YAML.safe_load(File.read(local_path), aliases: true).each do |static_config|
+          labels = static_config.fetch("labels")
+          unless labels.fetch("cluster", nil) == cluster
+            abort "file_sd target #{job.fetch("job_name")} must set cluster=#{cluster}"
+          end
+        end
+      end
+    end
   end
-' "$monitoring_dir/prometheus.yml"
+' "$monitoring_dir/prometheus.yml" "$monitoring_dir"
 
 PROMETHEUS_BEARER_TOKEN_FILE="$monitoring_dir/secrets/new-api-bearer-token.example" \
 GRAFANA_ADMIN_PASSWORD_FILE="$monitoring_dir/secrets/grafana-admin-password.example" \
 ALERTMANAGER_WEBHOOK_URL_FILE="$monitoring_dir/secrets/alertmanager-webhook-url.example" \
-	docker compose -f "$repo_dir/docker-compose.monitoring.yml" config --format json >"$tmp_dir/compose.json"
+	POSTGRES_EXPORTER_PASSWORD_FILE="$monitoring_dir/secrets/postgres-exporter-password.example" \
+	REDIS_EXPORTER_PASSWORD_FILE="$monitoring_dir/secrets/redis-exporter-password.example" \
+	MYSQL_EXPORTER_CONFIG_FILE="$monitoring_dir/secrets/mysql-exporter.cnf.example" \
+	POSTGRES_EXPORTER_URI='postgres:5432/new-api?sslmode=disable' \
+	POSTGRES_EXPORTER_USER=example \
+	REDIS_EXPORTER_ADDR=redis://redis:6379 \
+	NEW_API_DOCKER_NETWORK=example \
+		docker compose -f "$repo_dir/docker-compose.monitoring.yml" config --format json >"$tmp_dir/compose.json"
 jq -e '
-  (.services | keys | sort) == ["alertmanager", "grafana", "prometheus"] and
+  (.services | keys | sort) == ["alertmanager", "grafana", "node-exporter", "prometheus", "redis-exporter"] and
   ([.services[].image | endswith(":latest")] | any | not) and
-  ([.services[] | has("healthcheck")] | all) and
-  ([.services[] | has("volumes")] | all)
+  ([.services.prometheus, .services.grafana, .services.alertmanager] | map(has("healthcheck")) | all) and
+  (.services["node-exporter"] | has("ports") | not) and
+  (.services["redis-exporter"] | has("ports") | not) and
+  (.services["redis-exporter"].networks | has("application")) and
+  (.services["node-exporter"].networks | has("monitoring"))
 ' "$tmp_dir/compose.json" >/dev/null
 
 jq -e '
@@ -407,7 +431,10 @@ jq -e '
 }
 
 rg -q '^apiVersion: 1$' "$monitoring_dir/grafana/provisioning/dashboards/default.yml"
-rg -q '^      path: /var/lib/grafana/dashboards$' "$monitoring_dir/grafana/provisioning/dashboards/default.yml"
+rg -q '^    folder: new-api 监控$' "$monitoring_dir/grafana/provisioning/dashboards/default.yml"
+rg -q '^    folder: new-api 扩展监控$' "$monitoring_dir/grafana/provisioning/dashboards/default.yml"
+rg -q '^      path: /var/lib/grafana/dashboards/core$' "$monitoring_dir/grafana/provisioning/dashboards/default.yml"
+rg -q '^      path: /var/lib/grafana/dashboards/extended$' "$monitoring_dir/grafana/provisioning/dashboards/default.yml"
 
 validate_dashboard() {
 	dashboard_file=$1
@@ -419,12 +446,13 @@ validate_dashboard() {
     .uid == $expected_uid and
     (.title | length > 0) and
     .schemaVersion >= 39 and
-    .refresh == "30s" and
+    .refresh == "15s" and
     .timezone == "browser" and
     (.time.from == "now-6h") and
     (.panels | length >= $minimum_panels) and
     ([.panels[].id] | length == (unique | length)) and
-    ([.panels[] | select((.title // "") == "" or (.description // "") == "")] | length == 0) and
+    ([.panels[] | select((.title // "") == "")] | length == 0) and
+    ([.panels[] | select(.type != "row" and (.description // "") == "")] | length == 0) and
     ([.panels[] | select(.type != "row") | .targets[]? | select(.datasource.uid != "prometheus")] | length == 0) and
     ([.panels[] | select(.type != "row") | .targets[]? | select((.expr // "") == "")] | length == 0)
   ' "$dashboard_file" >/dev/null
@@ -437,77 +465,49 @@ validate_dashboard() {
 }
 
 validate_dashboard \
-	"$monitoring_dir/grafana/dashboards/system-overview.json" \
-	"newapi-system-overview" \
-	13 \
-	cluster instance relay_format
-
-jq -e '
-  [.panels[] | select(.id == 6)] as $panels |
-  ($panels | length) == 1 and
-  ([
-    $panels[0].targets[]
-    | select(
-        (.expr | contains("newapi_relay_latency_threshold_seconds")) and
-        (.expr | contains("quantile=\"p95\"")) and
-        (.expr | contains("$instance") | not)
-      )
-  ] | length) == 1 and
-  ([
-    $panels[0].targets[]
-    | select(
-        (.expr | contains("newapi_relay_latency_threshold_seconds")) and
-        (.expr | contains("quantile=\"p99\"")) and
-        (.expr | contains("$instance") | not)
-      )
-  ] | length) == 1 and
-  ([
-    $panels[0].fieldConfig.overrides[]
-    | select(.matcher.id == "byRegexp" and .matcher.options == "/threshold/")
-  ] | length) == 1
-' "$monitoring_dir/grafana/dashboards/system-overview.json" >/dev/null
-
-jq -e '
-  [.panels[] | select(.id == 26)] as $panels |
-  ($panels | length) == 1 and
-  ([$panels[0].targets[] | select(.expr | contains("newapi:relay_inflight_by_format"))] | length) == 1 and
-  ([$panels[0].targets[] | select(
-    (.expr | contains("newapi_relay_inflight_threshold")) and
-    (.expr | contains("severity=\"warning\"")) and
-    (.legendFormat | contains("warning threshold"))
-  )] | length) == 1 and
-  ([$panels[0].targets[] | select(
-    (.expr | contains("newapi_relay_inflight_threshold")) and
-    (.expr | contains("severity=\"critical\"")) and
-    (.legendFormat | contains("critical threshold"))
-  )] | length) == 1 and
-  ([$panels[0].targets[] | select(.expr | contains("$instance"))] | length) == 0 and
-  ([$panels[0].targets[].legendFormat] | unique | length) == 3 and
-  ([$panels[0].fieldConfig.overrides[] | select(
-    .matcher.id == "byRegexp" and .matcher.options == "/warning threshold/"
-  )] | length) == 1 and
-  ([$panels[0].fieldConfig.overrides[] | select(
-    .matcher.id == "byRegexp" and .matcher.options == "/critical threshold/"
-  )] | length) == 1
-' "$monitoring_dir/grafana/dashboards/system-overview.json" >/dev/null
+	"$monitoring_dir/grafana/dashboards/core/host-overview.json" \
+	"newapi-host-overview" \
+	12 \
+	cluster instance
 
 validate_dashboard \
-	"$monitoring_dir/grafana/dashboards/channel-overview.json" \
+	"$monitoring_dir/grafana/dashboards/core/application-overview.json" \
+	"newapi-application-overview" \
+	7 \
+	cluster instance
+
+validate_dashboard \
+	"$monitoring_dir/grafana/dashboards/core/middleware-overview.json" \
+	"newapi-middleware-overview" \
+	18 \
+	cluster
+
+validate_dashboard \
+	"$monitoring_dir/grafana/dashboards/core/channel-overview.json" \
 	"newapi-channel-overview" \
-	10 \
-	cluster instance channel_id
+	18 \
+	cluster channel_id
 
 validate_dashboard \
-	"$monitoring_dir/grafana/dashboards/billing-overview.json" \
+	"$monitoring_dir/grafana/dashboards/extended/billing-overview.json" \
 	"newapi-billing-overview" \
 	6 \
 	cluster instance billing_source
 
 validate_dashboard \
-	"$monitoring_dir/grafana/dashboards/task-overview.json" \
+	"$monitoring_dir/grafana/dashboards/extended/task-overview.json" \
 	"newapi-task-overview" \
 	9 \
 	cluster instance platform
+
+jq -e '
+  ([.panels[] | select(.id == 2 and .type == "table")] | length) == 1 and
+  ([.panels[] | select(.id == 2) | .targets[] | select(.instant != true or .format != "table")] | length == 0) and
+  ([.panels[].targets[]? | select((.expr | test("newapi(_|:)channel")) and (.expr | contains("channel_id") | not))] | length == 0) and
+  ([.panels[].title] | index("上游缓存命中率") != null) and
+  ([.panels[].title] | index("TTFT 与上游首字节 P95") != null) and
+  ([.panels[].title] | index("流式中断与客户端取消") != null)
+' "$monitoring_dir/grafana/dashboards/core/channel-overview.json" >/dev/null
 
 jq -s '
   [
@@ -537,15 +537,17 @@ jq -s '
       ]
     }
 ' \
-	"$monitoring_dir/grafana/dashboards/system-overview.json" \
-	"$monitoring_dir/grafana/dashboards/channel-overview.json" \
-	"$monitoring_dir/grafana/dashboards/billing-overview.json" \
-	"$monitoring_dir/grafana/dashboards/task-overview.json" \
+	"$monitoring_dir/grafana/dashboards/core/host-overview.json" \
+	"$monitoring_dir/grafana/dashboards/core/application-overview.json" \
+	"$monitoring_dir/grafana/dashboards/core/middleware-overview.json" \
+	"$monitoring_dir/grafana/dashboards/core/channel-overview.json" \
+	"$monitoring_dir/grafana/dashboards/extended/billing-overview.json" \
+	"$monitoring_dir/grafana/dashboards/extended/task-overview.json" \
 	>"$tmp_dir/dashboard-rules.json"
 
 dashboard_query_count=$(jq '.groups[0].rules | length' "$tmp_dir/dashboard-rules.json")
-if [ "$dashboard_query_count" -ne 75 ]; then
-	echo "expected 75 dashboard PromQL expressions, got $dashboard_query_count" >&2
+if [ "$dashboard_query_count" -lt 100 ]; then
+	echo "expected at least 100 dashboard PromQL expressions, got $dashboard_query_count" >&2
 	exit 1
 fi
 

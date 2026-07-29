@@ -1,13 +1,24 @@
 apiVersion: 1
 
 providers:
-  - name: new-api-monitoring
+  - name: new-api-core-monitoring
     orgId: 1
-    folder: new-api Monitoring
+    folder: new-api 监控
     type: file
     disableDeletion: false
     allowUiUpdates: false
     updateIntervalSeconds: 30
     options:
-      path: /var/lib/grafana/dashboards
+      path: /var/lib/grafana/dashboards/core
+      foldersFromFilesStructure: false
+
+  - name: new-api-extended-monitoring
+    orgId: 1
+    folder: new-api 扩展监控
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards/extended
       foldersFromFilesStructure: false
