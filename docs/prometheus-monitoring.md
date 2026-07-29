@@ -30,6 +30,7 @@ deploy/monitoring/
   recording-rules.yml
   alert-rules.yml
   relay-latency-thresholds.yml
+  relay-concurrency-thresholds.yml
   alertmanager.yml.example
   validate.sh
   grafana/
@@ -164,7 +165,7 @@ deploy/monitoring/validate.sh
 
 校验内容包括：
 
-- Prometheus 配置、34 条基础 Recording Rules、26 条告警规则，以及默认 0 条 Relay 延迟阈值规则。
+- Prometheus 配置、35 条基础 Recording Rules、28 条告警规则，以及默认 0 条 Relay 延迟阈值规则和 0 条 Relay 并发阈值规则。
 - Recording/告警固定输入测试。
 - Alertmanager route、恢复通知和 warning/critical 抑制配置。
 - Compose 服务、固定镜像版本、持久化卷和健康检查。
@@ -177,7 +178,8 @@ promtool check config deploy/monitoring/prometheus.yml
 promtool check rules --lint=all --lint-fatal \
   deploy/monitoring/recording-rules.yml \
   deploy/monitoring/alert-rules.yml \
-  deploy/monitoring/relay-latency-thresholds.yml
+  deploy/monitoring/relay-latency-thresholds.yml \
+  deploy/monitoring/relay-concurrency-thresholds.yml
 promtool test rules deploy/monitoring/recording-rules.test.yml
 promtool test rules deploy/monitoring/alert-rules.test.yml
 amtool check-config deploy/monitoring/alertmanager.yml.example
@@ -218,7 +220,7 @@ Grafana provisioning 设置为不可直接保存 UI 修改。需要改面板时�
 
 ### System Overview
 
-包含最终请求 RPM、服务成功率、P50/P95/P99、按 Relay 格式配置的 P95/P99 阈值线、Relay inflight、流式 inflight、固定错误类型、限流拒绝 RPM、实例健康、Go Runtime、进程 CPU、数据库连接池、单实例数据库连接等待次数/平均时长、Master collector，以及 Redis 启用状态、操作 RPM、P95 耗时、缓存命中率和错误/降级趋势。
+包含最终请求 RPM、服务成功率、P50/P95/P99、按 Relay 格式配置的 P95/P99 延迟阈值线、按格式聚合的实际 inflight 与 warning/critical 并发阈值线、Relay inflight、流式 inflight、固定错误类型、限流拒绝 RPM、实例健康、Go Runtime、进程 CPU、数据库连接池、单实例数据库连接等待次数/平均时长、Master collector，以及 Redis 启用状态、操作 RPM、P95 耗时、缓存命中率和错误/降级趋势。
 
 数据库等待使用 `sql.DB.Stats()` 的累计 `WaitCount` 和 `WaitDuration`。Recording Rules 先按 `cluster/job/instance/database` 计算 5 分钟增量，再用同一实例的累计等待时长除以等待次数；不先跨实例汇总再求平均。面板中 `0` 表示窗口内没有等待，`No data` 表示对应 DB 指标缺失。初始 warning 同时要求 5 分钟等待次数 `>= 20`、平均等待 `> 0.1s`，并持续 `10m`；该阈值需在生产观察期校准。
 
@@ -289,8 +291,9 @@ newapi:relay_request_increase_by_format:5m{cluster="default",job="new-api",relay
 newapi:relay_error_ratio:5m{cluster="default",job="new-api",error_type=~"rate_limit|upstream_5xx|timeout"}
 newapi:relay_error_increase:5m{cluster="default",job="new-api",error_type=~"rate_limit|upstream_5xx|timeout"}
 
-# 集群 Relay 当前并发
-sum(newapi_relay_inflight{cluster="default",job="new-api"})
+# 按 Relay 格式同时查看实际并发和配置阈值
+newapi:relay_inflight_by_format{cluster="default",job="new-api",relay_format="openai"}
+newapi_relay_inflight_threshold{cluster="default",job="new-api",relay_format="openai",severity=~"warning|critical"}
 
 # 渠道成功 RPM
 newapi:channel_success_rpm:5m{cluster="default",job="new-api"}
@@ -388,6 +391,7 @@ Counter 必须通过 `rate()` 或 `increase()` 使用，不能把各实例当前
 
 - 服务成功率 warning/critical，并带最低请求量门槛。
 - Relay P95/P99 延迟超过按 `cluster/job/relay_format` 配置的阈值；没有阈值序列时默认休眠。
+- Relay inflight 超过按 `cluster/job/relay_format` 配置的 warning/critical 阈值；没有阈值序列时默认休眠。
 - Relay `rate_limit`、`upstream_5xx` 和 `timeout` 异常比例；均同时要求最低总请求量和最低错误事件量。本地限流拒绝使用独立 Counter 门槛，不与上游 429 混算。
 - 渠道失败比例、重试比例和窗口内无成功。
 - 单实例 DB 连接池利用率 warning/critical。
@@ -411,6 +415,7 @@ Alertmanager 的 webhook receiver 设置 `send_resolved: true`，告警恢复后
 - `NewAPIServiceSuccessRateCritical` 抑制同一 `cluster/job` 的 `NewAPIServiceSuccessRateLow`。
 - `NewAPIDBPoolUtilizationCritical` 抑制同一 `cluster/job/instance/database` 的 `NewAPIDBPoolUtilizationHigh`。
 - `NewAPIRelayP99LatencyHigh` 抑制同一 `cluster/job/relay_format` 的 `NewAPIRelayP95LatencyHigh`。
+- `NewAPIRelayInflightCritical` 抑制同一 `cluster/job/relay_format` 的 `NewAPIRelayInflightHigh`。
 
 维护窗口可使用 Alertmanager UI 创建 silence，或使用 `amtool`：
 
@@ -479,6 +484,71 @@ curl -fsS -X POST http://localhost:9090/-/reload
 
 重载后在 Prometheus `Status → Rules` 检查阈值规则和告警状态。阈值配置只是运维告警条件，不会自动禁用渠道、修改路由、终止请求或改变 Relay、计费和退款行为。
 
+### Relay 并发阈值配置与启用
+
+`deploy/monitoring/relay-concurrency-thresholds.yml` 默认只有空的 `rules: []`，不会导出 `newapi_relay_inflight_threshold`，因此 warning/critical 并发告警默认不会进入 pending。必须先观察真实的按格式并发基线，再为具体 `cluster/job/relay_format/severity` 增加阈值。
+
+同一格式可以只配置一个严重级别，也可以同时配置 warning 和 critical。例如：
+
+```yaml
+groups:
+  - name: newapi-relay-concurrency-thresholds
+    rules:
+      - record: newapi_relay_inflight_threshold
+        expr: vector(30)
+        labels:
+          cluster: default
+          job: new-api
+          relay_format: openai
+          severity: warning
+      - record: newapi_relay_inflight_threshold
+        expr: vector(50)
+        labels:
+          cluster: default
+          job: new-api
+          relay_format: openai
+          severity: critical
+```
+
+允许的 `severity` 只有 `warning`、`critical`。允许的 `relay_format` 只有：
+
+```text
+openai
+claude
+gemini
+openai_responses
+openai_responses_compaction
+openai_alpha_search
+openai_audio
+openai_image
+openai_realtime
+rerank
+embedding
+task
+mj_proxy
+other
+```
+
+阈值必须写成正整数请求数的 `vector(<integer>)`。相同 `cluster/job/relay_format/severity` 不能重复，不能增加 `instance`、模型、渠道、用户、Token、IP、Request ID 或错误文本等标签。同一 `cluster/job/relay_format` 同时配置两个严重级别时，critical 必须严格大于 warning。
+
+实际并发使用 `newapi:relay_inflight_by_format`，按 `cluster/job/relay_format` 汇总所有实例和流式状态。warning 需要实际并发严格大于阈值并持续 `10m`，critical 持续 `5m`；等于阈值或短暂峰值不会触发。多实例 Gauge 的求和是抓取时刻的趋势，不是严格同时刻的精确快照。
+
+修改阈值后先执行完整校验，再让 Prometheus 重载规则：
+
+```bash
+PROMTOOL_BIN=/path/to/promtool deploy/monitoring/validate.sh
+curl -fsS -X POST http://localhost:9090/-/reload
+```
+
+重载后可同时查询实际值和阈值：
+
+```promql
+newapi:relay_inflight_by_format{cluster="default",job="new-api",relay_format="openai"}
+newapi_relay_inflight_threshold{cluster="default",job="new-api",relay_format="openai",severity=~"warning|critical"}
+```
+
+并发阈值只是运维告警条件，不是应用硬限制，不会拒绝请求、修改路由、禁用渠道或改变 Relay、计费和退款行为。
+
 ## 九、无数据与常见故障
 
 ### new-api target 为 DOWN / 403
@@ -539,6 +609,20 @@ curl -fsS -X POST http://localhost:9090/-/reload
 6. 修改文件后是否通过 `validate.sh` 并成功调用 Prometheus reload。
 
 如果校验报告重复阈值、未知格式、额外标签或非正数，修正配置后再重载；不要绕过校验直接把错误规则放入生产。
+
+### Relay 并发告警未触发或阈值线无数据
+
+依次检查：
+
+1. `relay-concurrency-thresholds.yml` 是否仍为默认空规则；空规则表示告警按设计休眠，不是 0 请求阈值。
+2. 阈值的 `cluster`、`job`、`relay_format` 是否与 `newapi:relay_inflight_by_format` 完全一致；这三个标签不会跨值匹配。
+3. `severity` 是否为 `warning` 或 `critical`，表达式是否为正整数 `vector(<integer>)`。
+4. 实际并发是否严格大于阈值；等于阈值不会触发。
+5. warning 是否连续超过阈值 10 分钟、critical 是否连续超过 5 分钟；短暂峰值不会触发。
+6. 同格式同时配置两个级别时，critical 是否严格大于 warning。
+7. 修改文件后是否通过 `validate.sh` 并成功调用 Prometheus reload。
+
+如果校验报告重复阈值、未知格式、未知严重级别、额外标签、非正整数或 critical 不高于 warning，修正配置后再重载；不要绕过校验直接把错误规则放入生产。
 
 ## 十、基数验收
 

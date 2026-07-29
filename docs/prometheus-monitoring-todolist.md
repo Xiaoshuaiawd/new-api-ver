@@ -21,7 +21,7 @@
 
 ---
 
-> 状态（2026-07-29）：P0-A、P0-B 已完成；P0-C 的规则、Alertmanager 示例、Grafana provisioning/dashboard、Prometheus 配置、独立 Compose 和部署文档已完成静态实现与本地联调，发布验收仍保留生产基数校准、活动 Relay inflight 多实例下钻等环境项。P1 D1-D9 的限流、Redis/缓存、计费、异步任务、transport 首字节、Relay 固定错误告警、数据库连接等待、Go Runtime 增长与 Relay 延迟告警基础设施已完成代码/规则、Dashboard 说明、固定输入测试和本地验证。当前共 34 条基础 Recording Rules、26 条告警、0 条默认延迟阈值规则和 72 条 Dashboard PromQL。DB 等待、Goroutine/heap 增长、任务积压和 Relay 延迟阈值都需要生产校准，生产证据完成前不视为最终值。
+> 状态（2026-07-29）：P0-A、P0-B 已完成；P0-C 的规则、Alertmanager 示例、Grafana provisioning/dashboard、Prometheus 配置、独立 Compose 和部署文档已完成静态实现与本地联调，发布验收仍保留生产基数校准、活动 Relay inflight 多实例下钻等环境项。P1 D1-D10 的限流、Redis/缓存、计费、异步任务、transport 首字节、Relay 固定错误告警、数据库连接等待、Go Runtime 增长、Relay 延迟告警与 Relay 并发告警基础设施已完成代码/规则、Dashboard 说明、固定输入测试和本地验证。当前共 35 条基础 Recording Rules、28 条告警、0 条默认延迟阈值规则、0 条默认并发阈值规则和 75 条 Dashboard PromQL。DB 等待、Goroutine/heap 增长、任务积压、Relay 延迟与并发阈值都需要生产校准，生产证据完成前不视为最终值。
 >
 > 勾选规则：只有代码、测试、配置或文档已经落地并通过对应验收时，才允许把条目标记为 `[x]`。仅完成设计、创建空文件或本地手工观察不算完成。
 
@@ -32,7 +32,7 @@
 | P0-A 基础接入 | 代码与自动测试已完成 | 独立 Registry、安全 `/metrics`、Go/Process/Build Info、DB 连接池 | 部署环境手工抓取纳入 P0-C 联调 |
 | P0-B 流量与渠道 | 代码与自动测试已完成 | HTTP、Relay、流式、渠道 attempt/retry/inflight/duration、固定错误分类及 `ErrorType` 兜底、Master-only `channel_enabled`/collector 健康状态、渠道 Histogram 关闭开关、客户端取消与 deadline 传播、异常流失败、clean EOF 成功回归、Prometheus/性能看板统一最终成功判定、Midjourney controller 成功边界 | 生产 `R/N` 基数验收归 P0-C 发布联调 |
 | P0-C 可视化与告警 | 进行中 | Recording/告警规则、Prometheus/Alertmanager 配置、Grafana provisioning 与四个 dashboard、独立 Compose、静态验证脚本、部署文档和本地运行联调 | 生产基数校准、活动 Relay inflight 的多实例下钻、新增 dashboard 的发布环境容器加载和完整发布验收 |
-| P1 业务监控 | 进行中 | 限流拒绝；Redis 启用状态、命令/pipeline、耗时、缓存命中、限流失败、降级、Dashboard 和告警；D3 计费全链路；D4 异步任务全链路；D5 transport 首字节；D6 429/5xx/timeout 异常告警；D7 数据库连接等待；D8 Goroutine/Go heap 持续增长；D9 Relay P95/P99 可配置延迟告警 | 发布环境加载验收与生产阈值校准 |
+| P1 业务监控 | 进行中 | 限流拒绝；Redis 启用状态、命令/pipeline、耗时、缓存命中、限流失败、降级、Dashboard 和告警；D3 计费全链路；D4 异步任务全链路；D5 transport 首字节；D6 429/5xx/timeout 异常告警；D7 数据库连接等待；D8 Goroutine/Go heap 持续增长；D9 Relay P95/P99 可配置延迟告警；D10 Relay 按格式可配置并发告警 | 发布环境加载验收与生产阈值校准 |
 
 注：本文中“口径已确定”与“代码已实现”是两种状态。规范性条目可因文档决策已落地而勾选；指标、collector 和验收条目必须有对应代码与测试依据。
 
@@ -64,7 +64,7 @@
 | 计费、Token 与实际额度 | `pkg/prometheus_metrics/billing.go`、`model/log.go`、`service/billing.go`、`service/billing_session.go`、`service/task_billing.go` | `pkg/prometheus_metrics/billing_test.go`、`service/billing_metrics_test.go`、`service/task_billing_test.go` 及对应计费会话测试 |
 | 异步任务提交、poll、首次终态与队列 | `pkg/prometheus_metrics/task.go`、`task_queue_collector.go`、`controller/relay.go`、`service/task_polling.go`、`controller/midjourney.go`、`relay/relay_task.go`、`relay/mjproxy_handler.go` | `task_test.go`、`task_queue_collector_test.go`、`controller/relay_metrics_test.go`、`service/task_polling_test.go`、`controller/midjourney_metrics_test.go`、`relay/relay_task_metrics_test.go`、`relay/mjproxy_handler_test.go`、`model/task_cas_test.go` |
 | Recording/Alert Rules | `deploy/monitoring/recording-rules.yml`、`alert-rules.yml` | `recording-rules.test.yml`、`alert-rules.test.yml` |
-| P0-C/P1 静态部署产物 | `docker-compose.monitoring.yml`、`deploy/monitoring/prometheus.yml`、Alertmanager/Grafana 配置、四个 dashboard、`docs/prometheus-monitoring.md` | `deploy/monitoring/validate.sh`：Prometheus/rules、Compose、YAML/JSON、34 条基础 Recording Rules、26 条告警、0 条默认延迟阈值规则和 72 条 dashboard PromQL 静态校验 |
+| P0-C/P1 静态部署产物 | `docker-compose.monitoring.yml`、`deploy/monitoring/prometheus.yml`、Alertmanager/Grafana 配置、四个 dashboard、`docs/prometheus-monitoring.md` | `deploy/monitoring/validate.sh`：Prometheus/rules、Compose、YAML/JSON、35 条基础 Recording Rules、28 条告警、0 条默认延迟阈值规则、0 条默认并发阈值规则和 75 条 dashboard PromQL 静态校验 |
 
 证据索引只说明“在哪里验证”，不替代对应批次的验收命令。测试名称或文件调整时必须同步更新本表，避免文档中的完成状态失去来源。
 
@@ -74,7 +74,7 @@
 2. 在测试环境代入实际路由数 `R`、渠道数 `N`，完成基数、安全抓取和多实例聚合验收。
 3. 在发布环境验证 Billing/Task dashboard 容器自动加载、Master-only 队列面板和任务告警 firing/resolved 生命周期。
 4. 在发布环境分别产生共享 HTTP、AWS Bedrock、OpenAI/AdvancedCustom Realtime、讯飞和火山 TTS 流量，确认首字节 Histogram 各路径都有真实样本，并保存 channel ID/type 与实例维度的查询证据。
-5. 上线后使用真实积压、完成率、poll 错误率和按 `relay_format` 的 P95/P99 耗时分布校准候选阈值；生产积压与 Relay 延迟阈值保持未校准状态，不能仅凭本地样本宣称完成。
+5. 上线后使用真实积压、完成率、poll 错误率以及按 `relay_format` 的 P95/P99 耗时和 inflight 分布校准候选阈值；生产积压、Relay 延迟与并发阈值保持未校准状态，不能仅凭本地样本宣称完成。
 
 ### 运行验收状态记录（2026-07-28）
 
@@ -762,7 +762,7 @@ completion 与计费生命周期必须保持解耦：终态 CAS 获胜就记录�
 - [x] 基于时间窗口的 Recording Rule 名称包含窗口，例如 `newapi:relay_success_ratio:5m`；瞬时 DB 利用率使用 `:instance` 后缀。
 - [x] 比率查询使用 `clamp_min` 避免除零；比例告警另加独立事件量门槛，不把 `clamp_min` 当作低流量保护。
 - [x] 名称严格区分 `rpm`、每秒 `rate` 和无单位 `ratio`；重试数与 attempt 数之比命名为 `retry_ratio`。
-- [x] D3 新增 6 条 15 分钟计费规则；D4 新增 8 条任务规则；D6 新增 2 条固定 `error_type` 规则；D7 新增 3 条单实例 DB 等待规则；D8 新增 2 条单实例 Runtime 增长规则；D9 新增 1 条按 `relay_format` 保留维度的 5 分钟最终请求量规则，当前基础 Recording Rules 为 34 条。
+- [x] D3 新增 6 条 15 分钟计费规则；D4 新增 8 条任务规则；D6 新增 2 条固定 `error_type` 规则；D7 新增 3 条单实例 DB 等待规则；D8 新增 2 条单实例 Runtime 增长规则；D9 新增 1 条按 `relay_format` 保留维度的 5 分钟最终请求量规则；D10 新增 1 条按格式汇总 inflight 的规则，当前基础 Recording Rules 为 35 条。
 
 P0 已提供以下规则。当前默认配置同时保留 `cluster` 和 `job` 作为部署边界；完整可执行版本以 `deploy/monitoring/recording-rules.yml` 为准：
 
@@ -776,6 +776,8 @@ groups:
         expr: sum by (cluster, job) (increase(newapi_relay_requests_total[5m]))
       - record: newapi:relay_request_increase_by_format:5m
         expr: sum by (cluster, job, relay_format) (increase(newapi_relay_requests_total[5m]))
+      - record: newapi:relay_inflight_by_format
+        expr: sum by (cluster, job, relay_format) (newapi_relay_inflight)
       - record: newapi:relay_success_ratio:5m
         expr: sum by (cluster, job) (rate(newapi_relay_requests_total{result="success"}[5m])) / clamp_min(sum by (cluster, job) (rate(newapi_relay_requests_total[5m])), 0.000001)
       - record: newapi:relay_error_increase:5m
@@ -812,7 +814,7 @@ groups:
         expr: max by (cluster, job, instance) (deriv(go_memstats_heap_alloc_bytes[30m]))
 ```
 
-- [x] 已使用 `promtool test rules` 为成功率、低流量门槛、Histogram 聚合、按格式请求量、Relay 延迟阈值缺失/低流量/标签隔离、DB 无上限连接池、DB 等待次数/时长/平均值和 absent 告警增加固定输入/期望测试。
+- [x] 已使用 `promtool test rules` 为成功率、低流量门槛、Histogram 聚合、按格式请求量、按格式 inflight、Relay 延迟阈值缺失/低流量/标签隔离、Relay 并发阈值持续时长/等值边界/缺失/标签隔离/短峰值、DB 无上限连接池、DB 等待次数/时长/平均值和 absent 告警增加固定输入/期望测试。
 
 ### Prometheus 告警规则与 Alertmanager
 
@@ -823,7 +825,8 @@ groups:
 - [x] 单渠道窗口内持续失败：使用“窗口内 attempt 达到门槛且成功数为 0”的可观测定义，不声称还原严格的请求序列。
 - [x] P95/P99 延迟持续过高的告警基础设施已完成：阈值按 `cluster/job/relay_format/quantile` 配置，P95/P99 分别带 50/100 个最终请求门槛并持续 10 分钟；默认空阈值文件使告警休眠。
 - [x] 重试比例持续过高。
-- [ ] 并发持续异常；“接近限制”必须等项目导出固定并发上限指标后再启用，P0 不用未知上限制造比例告警。
+- [x] Relay 并发持续异常告警基础设施已完成：按 `cluster/job/relay_format` 汇总实际 inflight，并由默认空规则文件提供独立 warning/critical 绝对阈值；本批不引入“接近固定上限”的比例告警或请求拒绝器。
+- [ ] 生产 Relay 并发阈值已根据真实的按格式基线完成校准并写入 `relay-concurrency-thresholds.yml`；仓库默认文件有意保持为空。
 - [x] 429、5xx 和超时数量异常：Relay `rate_limit`、`upstream_5xx`、`timeout` 使用比例、总请求量和错误事件量三重门槛；本地限流拒绝使用独立 Counter 门槛。
 - [x] 数据库连接池利用率过高。
 - [x] 数据库连接等待持续异常：单实例 5 分钟等待次数 `>= 20` 且平均等待时长 `> 0.1s`，持续 10 分钟触发 warning；次数与平均耗时双门槛避免大量瞬时等待或低流量单次慢等待误报。
@@ -833,7 +836,7 @@ groups:
 - [x] 异步任务已提供队列分组/汇总 Recording Rules、积压持续告警、collector down 和 absent 告警，并通过固定输入边界测试；积压 `> 100` 且持续 `15m` 是候选阈值，生产阈值待批次 E 校准。
 - [x] `up == 0` 或 Master-only collector `absent()`。
 - [x] Prometheus 告警规则已配置 `for` 持续时间、统一 `severity` 分级和可操作 annotation。
-- [x] Alertmanager 示例已配置 webhook `send_resolved: true`、静默操作说明，以及服务、DB 和同格式 Relay P99 critical→P95 warning 抑制规则。
+- [x] Alertmanager 示例已配置 webhook `send_resolved: true`、静默操作说明，以及服务、DB、同格式 Relay P99 critical→P95 warning、同格式 Relay inflight critical→warning 抑制规则。
 - [x] 测试环境已验证 Alertmanager firing/resolved Webhook、warning/critical 抑制和 silence；真实 Prometheus `NewAPIInstanceDown` 规则也已进入 firing 并在实例恢复后 resolved。
 
 初始告警必须采用“比例 + 最低事件量”双门槛，避免低流量单次失败触发：
@@ -899,7 +902,7 @@ groups:
 - [ ] 扩大到全部 `relay/helper` 测试的 race 验收尚未通过：现有大量 `t.Parallel()` 用例会触发 `logger/logger.go` 全局状态竞态；该问题与本批取消传播及流式成功判定无关，需单独修复后重跑。
 - [ ] 扩大到全部 `service` 测试的 race 验收尚未通过：当前被 `service/task_polling_test.go` 触发的既有 logger 全局状态和异步 Task 对象竞态阻塞，需单独修复后重跑。
 - [x] 使用 `promtool check rules --lint=all --lint-fatal` 和 `promtool test rules` 校验 Recording/告警规则。
-- [x] `deploy/monitoring/validate.sh` 使用临时宿主机路径映射执行 `promtool check config`，并校验 34 条基础 Recording Rules、26 条告警、0 条默认延迟阈值规则、Compose、YAML/JSON 与四个 dashboard 的 72 条 PromQL。
+- [x] `deploy/monitoring/validate.sh` 使用临时宿主机路径映射执行 `promtool check config`，并校验 35 条基础 Recording Rules、28 条告警、0 条默认延迟阈值规则、0 条默认并发阈值规则、Compose、YAML/JSON 与四个 dashboard 的 75 条 PromQL。
 - [x] 已在本地测试环境启动应用、Prometheus、Grafana、Alertmanager，验证安全抓取、规则加载、dashboard provisioning、告警通知与恢复链路。
 - [x] 已补充指标口径、部署决策表、抓取示例、常用 PromQL、排障、基数、备份和升级文档。
 
@@ -1135,12 +1138,12 @@ promtool test rules deploy/monitoring/alert-rules.test.yml
 - `deploy/monitoring/validate.sh`
 - `docs/prometheus-monitoring.md`
 
-- [x] Prometheus 配置加载 Recording/Alert/Relay 延迟阈值 Rules，并提供单实例、多实例 target 示例和 Bearer credentials file 说明。
+- [x] Prometheus 配置加载 Recording/Alert/Relay 延迟阈值/Relay 并发阈值 Rules，并提供单实例、多实例 target 示例和 Bearer credentials file 说明。
 - [x] Grafana 系统面板实现最终请求、成功比例、延迟、inflight、Go/Process 和 DB；渠道面板实现成功/attempt/retry RPM、失败比例、耗时、inflight 和 enabled。
 - [x] dashboard 提供 `instance`、`relay_format` 或 `channel_id` 等受控变量，并说明 Counter reset、无数据、Master 缺失和渠道 Histogram 关闭状态。
 - [x] Compose 使用固定镜像版本、持久化卷、健康检查和外部 secret 文件；不修改默认业务部署栈。
 - [x] 部署文档给出配置决策表、抓取示例、常用 PromQL、故障排查、基数、备份和升级步骤。
-- [x] 静态验收通过：Prometheus 配置、34 条基础 Recording Rules、26 条告警规则、0 条默认延迟阈值规则、Compose、Alertmanager YAML 契约、Grafana provisioning/JSON 和四个 dashboard 的 72 条 PromQL 均通过校验。
+- [x] 静态验收通过：Prometheus 配置、35 条基础 Recording Rules、28 条告警规则、0 条默认延迟阈值规则、0 条默认并发阈值规则、Compose、Alertmanager YAML 契约、Grafana provisioning/JSON 和四个 dashboard 的 75 条 PromQL 均通过校验。
 - [x] 本地启动验收已覆盖三个监控组件 healthy、应用 target 为 UP、原有两个 dashboard 自动加载、Webhook 恢复/抑制/静默生效；新增 billing/task dashboard 和 D3/D4 告警的容器加载需在发布环境复现。
 
 ```bash
@@ -1229,7 +1232,7 @@ git diff --check
 - [x] 阶段 D5-4：基数预算已增加 `14N` 首字节 Histogram，总上界更新为 `80R + 111N + 1,800`；`PROMETHEUS_DISABLE_CHANNEL_HISTOGRAM=true` 同时关闭渠道总耗时和首字节 Histogram，保守渠道数阈值下调为 `N >= 300`。
 - [x] 阶段 D5-5a：已完成非共享传输盘点；AWS Bedrock 普通、流式和 Nova 调用通过 SDK context 接入统一 trace，并用行为测试锁定标签冻结与单次记录。自建 HTTP client 中的鉴权、上传、模型管理、任务 polling 和内部后续查询已明确排除，不与主传输首字节混算。
 - [x] 阶段 D5-5b：核对 Gorilla WebSocket v1.5.0 官方实现后确认 Upgrade 已原生触发 `GetConn`/`GotFirstResponseByte`；共享 Realtime、讯飞和火山 TTS 均通过 traced `DialContext` 接入同一 Histogram，并用真实 Upgrade 服务器完成 RED→GREEN 行为测试，不新增含义不同的 handshake/首帧指标。
-- [x] 阶段 D5-6：包含 HTTP、AWS 和三类 WebSocket 路径的定向普通/race、当时的监控静态验证（26 条 Recording Rules、17 条告警、68 条 Dashboard PromQL）、`go test ./... -count=1` 和 `git diff --check` 全部通过；D6 完成后为 28/21，D7 完成后为 31/22，D8 完成后为 33/24，D9 完成后当前为 34/26。
+- [x] 阶段 D5-6：包含 HTTP、AWS 和三类 WebSocket 路径的定向普通/race、当时的监控静态验证（26 条 Recording Rules、17 条告警、68 条 Dashboard PromQL）、`go test ./... -count=1` 和 `git diff --check` 全部通过；D6 完成后为 28/21，D7 完成后为 31/22，D8 完成后为 33/24，D9 完成后为 34/26，D10 完成后当前为 35/28。
 
 ```bash
 go test ./pkg/prometheus_metrics ./relay/channel ./relay/channel/aws ./relay/channel/advancedcustom ./relay/channel/xunfei ./relay/channel/volcengine ./service -run 'AwsInvokeContext|ChannelFirstByte|SharedHTTPFirstByte|WebSocketFirstResponseByte|XunfeiMakeRequestRecords|HandleTTSWebSocketResponseRecords|ChannelDurationHistogram' -count=1
@@ -1311,9 +1314,31 @@ go test ./... -count=1
 git diff --check
 ```
 
+### 批次 D10：P1 Relay 并发异常告警基础设施
+
+**文件：** `deploy/monitoring/relay-concurrency-thresholds.yml`、`prometheus.yml`、`recording-rules.yml`、`recording-rules.test.yml`、`alert-rules.yml`、`alert-rules.test.yml`、`alertmanager.yml.example`、`grafana/dashboards/system-overview.json`、`validate.sh`、`docker-compose.monitoring.yml`、`docs/prometheus-monitoring.md` 和本 TODO。
+
+- [x] 阶段 D10-1：新增独立 Relay 并发阈值规则文件并由 Prometheus/Compose 加载；仓库默认 `rules: []`，因此不导出阈值序列，warning/critical 告警默认休眠。
+- [x] 阶段 D10-2：严格契约校验只接受固定 record 名、`cluster/job/relay_format/severity` 四个标签、允许的 Relay 格式、`warning|critical` 和正整数 `vector(<integer>)`；固定自测已拒绝未知格式、未知严重级别、0、负数、小数、NaN、非常量、额外标签、重复键以及 critical 不高于 warning，并接受只配置单个严重级别。
+- [x] 阶段 D10-3：先用失败规则测试锁定多实例、流式状态按格式求和，再新增 `newapi:relay_inflight_by_format`；聚合保留 `cluster/job/relay_format`，Gauge 求和明确属于抓取时刻趋势。
+- [x] 阶段 D10-4：新增 `NewAPIRelayInflightHigh` warning 和 `NewAPIRelayInflightCritical` critical；实际并发必须严格大于阈值，warning/critical 分别持续 `10m`/`5m`，阈值缺失时向量匹配自然为空。
+- [x] 阶段 D10-5：固定输入测试已覆盖 warning/critical 持续触发、等于阈值不触发、阈值缺失不触发、`cluster/job/relay_format` 不串用和短暂峰值不触发。
+- [x] 阶段 D10-6：Alertmanager 由同 `cluster/job/relay_format` 的 inflight critical 抑制 warning；契约校验锁定抑制范围。
+- [x] 阶段 D10-7：System Overview 新增按格式实际 inflight 与 warning/critical 阈值面板；阈值查询故意忽略 `instance`，不同严重级别使用文字图例、不同虚线和线宽区分，并说明默认 No data 与多实例抓取错峰语义。
+- [x] 阶段 D10-8：静态总数为 35 条基础 Recording Rules、28 条告警、75 条 Dashboard PromQL、0 条默认延迟阈值规则和 0 条默认并发阈值规则；`promtool check/test`、Compose/Alertmanager/Grafana 契约和完整监控校验已通过。
+- [x] 阶段 D10-9：本批只修改 Prometheus/Alertmanager/Grafana 配置、规则测试和文档，不修改 Relay、渠道状态、亲和性、优先级、计费、退款、重试、路由、并发拒绝或客户端响应语义；`go test ./... -count=1`、`git diff --check` 和监控文件行尾空白检查均已通过。
+- [ ] 生产 Relay 并发阈值已根据真实的按格式基线完成校准并写入 `relay-concurrency-thresholds.yml`；仓库默认文件有意保持为空。
+
+```bash
+PROMTOOL_BIN=/tmp/newapi-promtool-bin/promtool deploy/monitoring/validate.sh
+go test ./... -count=1
+git diff --check
+```
+
 ### 批次 E：生产校准
 
 - [ ] 上线观察两周，记录时间序列数量、scrape duration/size、Histogram 分布、应用开销和告警噪声。
 - [ ] 根据真实的每个 `cluster/job/relay_format` P95/P99 分布校准延迟阈值并记录选择依据；仓库默认阈值文件继续保持为空。
+- [ ] 根据真实的每个 `cluster/job/relay_format` inflight 分布校准 warning/critical 并发阈值并记录选择依据；仓库默认阈值文件继续保持为空。
 - [ ] 根据真实分布调整 buckets、阈值和 SLO；每次规则修改同步更新 `promtool test rules` 固定用例和变更记录。
 - [ ] 将确认稳定的告警接入值班流程；无法给出明确处置动作的告警只保留面板，不发送通知。
