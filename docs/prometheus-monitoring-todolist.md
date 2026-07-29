@@ -1347,8 +1347,16 @@ git diff --check
 - [x] D11-6：Grafana 重构为 `new-api 监控` 下的主机/程序/中间件/渠道总览，以及 `new-api 扩展监控` 下的计费/任务总览；6 页标题、行、面板和说明均为中文，刷新周期统一为 15 秒。
 - [x] D11-7：Grafana 12.1 临时容器已真实验证双文件夹和 6 个 dashboard provisioning；108 条 Dashboard PromQL 已通过 Prometheus 语法校验。
 - [x] D11-8：当前静态验收口径为 46 条 Recording Rules、28 条告警、108 条 Dashboard PromQL；Go 定向测试覆盖指标注册、渠道 attempt 归因、RelayInfo 与最终结算路径。
-- [ ] D11-9：生产 PostgreSQL profile 已启动，new-api、Node、PostgreSQL、Redis target 均为 `UP`，且未破坏现有数据卷。
-- [ ] D11-10：生产 Grafana 已验证 6 个中文 dashboard 与双文件夹；真实多渠道流量已产生至少两个 `channel_id` 的 RPM/P95/TTFT/缓存率/Token 证据。Provider 无 Usage 的面板允许显示“暂无数据”。
+- [x] D11-9：生产 PostgreSQL profile 已启动，new-api、Node、PostgreSQL、Redis target 均为 `UP`，且未破坏现有数据卷。
+- [ ] D11-10：生产 Grafana 已验证 6 个中文 dashboard 与双文件夹；真实多渠道流量已产生至少两个 `channel_id` 的 RPM/P95/TTFT/缓存率/Token 证据。当前生产只有 1 个启用渠道，已完成 `channel_id=1` 的真实流量验收，第二个渠道未上线前不勾选本项。Provider 无 Usage 的面板允许显示“暂无数据”。
+
+#### D11 生产验收记录（2026-07-29）
+
+- [x] new-api 应用镜像基于 `6712fbc2f`构建并健康运行；PostgreSQL、Redis 业务容器和 7 个原有数据卷原样保留。
+- [x] Prometheus 的 `new-api`、`node-exporter`、`postgres-exporter`、`redis-exporter` 四个 target 均为 `UP`；46 条 Recording Rules 和 28 条告警的 rule health 均为 `ok`。
+- [x] Grafana 只保留 `new-api 监控`、`new-api 扩展监控` 两个中文文件夹，6 个 dashboard UID 已通过 API 确认。
+- [x] `channel_id=1` 真实成功流量已验证 1 分钟 attempt RPM `1.33`、成功率 `100%`、TTFT P95 `1.95s`、Token 吞吐以及上游缓存命中率 `0%`；零缓存命中已不再显示 No data。
+- [ ] 多渠道对比的生产数据证据待第二个渠道实际启用后补齐，不为了验收人为伪造渠道。
 
 ```bash
 go test ./pkg/prometheus_metrics ./service ./controller ./relay/common ./relay -count=1
