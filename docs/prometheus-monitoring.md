@@ -296,8 +296,8 @@ docker compose -f docker-compose.monitoring.yml exec -T feishu-alert-webhook /fe
 1. Prometheus `Status → Targets` 中 `new-api`、`node-exporter`、`postgres-exporter`、`redis-exporter` 和 `feishu-alert-webhook` target 为 `UP`。
 2. Prometheus `Status → Rules` 中 Recording/Alert Rules 加载成功。
 3. Grafana 自动出现两个文件夹：
-   - `new-api 监控`：`new-api / 主机总览`、`new-api / 程序总览`、`new-api / 中间件总览`、`new-api / 渠道总览`
-   - `new-api 扩展监控`：`new-api / 计费总览`、`new-api / 任务总览`
+   - `测试环境-new-api 监控`：`new-api / 主机总览`、`new-api / 程序总览`、`new-api / 中间件总览`、`new-api / 渠道总览`
+   - `测试环境-new-api 扩展监控`：`new-api / 计费总览`、`new-api / 任务总览`
 4. Alertmanager `Status` 页面能看到当前配置和运行状态，两个 receiver 都指向内网的 `feishu-alert-webhook`。
 
 Grafana provisioning 设置为不可直接保存 UI 修改。需要改面板时修改仓库中的 JSON，等待最多 30 秒自动重新加载。
@@ -328,13 +328,13 @@ Goroutine 和 Go heap 增长使用 `deriv(...[30m])` 按单实例计算每秒线
 
 ### 渠道总览
 
-渠道实时口径使用 1 分钟窗口：attempt RPM、失败 RPM、重试 RPM、成功率和超时率。性能与缓存口径使用 5 分钟窗口：P90/P95 渠道 attempt 总耗时、P95 TTFT、P95 上游响应头首字节、上游缓存命中率和 Token 每分钟吞吐。页面还展示渠道 inflight、启用状态、固定错误分类和重试原因，可在多个 `channel_id` 之间对比。
+渠道实时口径使用 1 分钟窗口：attempt RPM、失败 RPM、重试 RPM、成功率和超时率。性能与缓存口径使用 5 分钟窗口：P90/P95 渠道 attempt 总耗时、P95 TTFT、P95 上游响应头首字节、上游缓存命中率和 Token 每分钟吞吐。页面还展示渠道 inflight、启用状态、固定错误分类和重试原因，可在多个渠道之间对比。渠道下拉、实时状态表和图例显示渠道名称与 ID；查询仍使用 ID，避免将渠道名称加入高频指标标签。
 
 变量：
 
 - `cluster`
 - `instance`
-- `channel_id`
+- `channel_id`（界面显示渠道名称，实际查询值为渠道 ID）
 
 上游缓存命中率定义为 `cache_read Token / input Token`，不是 Redis 命中率，也不是按请求条数统计。TTFT 从当前渠道 attempt 开始计时，只记录该渠道到第一个可交付内容的时间，不包含前一个失败渠道的耗时。Provider 已返回 Usage 且 `cache_read=0` 时显示 `0%`；Provider 完全没有返回 Usage 时，缓存命中率和 Token 吞吐面板显示“暂无数据”，不伪造为 `0`。
 

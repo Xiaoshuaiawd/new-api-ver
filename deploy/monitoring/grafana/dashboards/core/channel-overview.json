@@ -2,7 +2,7 @@
   "annotations": {
     "list": []
   },
-  "description": "多渠道实时流量、稳定性、延迟、上游缓存、错误与 Token 吞吐监控。",
+  "description": "多渠道实时流量、稳定性、延迟、上游缓存、错误与 Token 吞吐监控。渠道下拉与图例均显示渠道名称和 ID。",
   "editable": false,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -28,7 +28,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "每行一个渠道。RPM、成功率和超时率使用最近 1 分钟窗口；延迟和缓存使用最近 5 分钟窗口。",
+      "description": "每行一个渠道，显示渠道名称和 ID。RPM、成功率和超时率使用最近 1 分钟窗口；延迟和缓存使用最近 5 分钟窗口。",
       "fieldConfig": {
         "defaults": {
           "noValue": "暂无数据"
@@ -357,6 +357,19 @@
           "refId": "L",
           "instant": true,
           "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max by (channel_id, channel_name) (newapi_channel_info{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"})",
+          "legendFormat": "渠道名称",
+          "range": false,
+          "refId": "M",
+          "instant": true,
+          "format": "table"
         }
       ],
       "title": "渠道实时状态表",
@@ -383,22 +396,25 @@
               "Time 8": true,
               "Time 9": true,
               "Time 10": true,
-              "Time 11": true
+              "Time 11": true,
+              "Time 12": true,
+              "Value #M": true
             },
             "indexByName": {
-              "channel_id": 0,
-              "Value #A": 1,
-              "Value #B": 2,
-              "Value #C": 3,
-              "Value #D": 4,
-              "Value #E": 5,
-              "Value #F": 6,
-              "Value #G": 7,
-              "Value #H": 8,
-              "Value #I": 9,
-              "Value #J": 10,
-              "Value #K": 11,
-              "Value #L": 12
+              "channel_id": 1,
+              "Value #A": 2,
+              "Value #B": 3,
+              "Value #C": 4,
+              "Value #D": 5,
+              "Value #E": 6,
+              "Value #F": 7,
+              "Value #G": 8,
+              "Value #H": 9,
+              "Value #I": 10,
+              "Value #J": 11,
+              "Value #K": 12,
+              "Value #L": 13,
+              "channel_name": 0
             },
             "renameByName": {
               "channel_id": "渠道 ID",
@@ -413,7 +429,8 @@
               "Value #I": "P95",
               "Value #J": "TTFT P95",
               "Value #K": "缓存命中率",
-              "Value #L": "上游首字节 P95"
+              "Value #L": "上游首字节 P95",
+              "channel_name": "渠道名称"
             }
           }
         }
@@ -479,8 +496,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "newapi:channel_attempt_rpm:1m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"}",
-          "legendFormat": "渠道 {{channel_id}}",
+          "expr": "(newapi:channel_attempt_rpm:1m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"}) * on (channel_id) group_left(channel_name) newapi_channel_info{cluster=\"$cluster\",job=\"new-api\"}",
+          "legendFormat": "渠道 {{channel_name}}（ID {{channel_id}}）",
           "range": true,
           "refId": "A"
         }
@@ -534,8 +551,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "newapi:channel_failure_rpm:1m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"}",
-          "legendFormat": "渠道 {{channel_id}}",
+          "expr": "(newapi:channel_failure_rpm:1m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"}) * on (channel_id) group_left(channel_name) newapi_channel_info{cluster=\"$cluster\",job=\"new-api\"}",
+          "legendFormat": "渠道 {{channel_name}}（ID {{channel_id}}）",
           "range": true,
           "refId": "A"
         }
@@ -589,8 +606,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "newapi:channel_retry_rpm:1m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"}",
-          "legendFormat": "渠道 {{channel_id}}",
+          "expr": "(newapi:channel_retry_rpm:1m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"}) * on (channel_id) group_left(channel_name) newapi_channel_info{cluster=\"$cluster\",job=\"new-api\"}",
+          "legendFormat": "渠道 {{channel_name}}（ID {{channel_id}}）",
           "range": true,
           "refId": "A"
         }
@@ -644,8 +661,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "newapi:channel_success_ratio:1m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"}",
-          "legendFormat": "渠道 {{channel_id}} / 成功率",
+          "expr": "(newapi:channel_success_ratio:1m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"}) * on (channel_id) group_left(channel_name) newapi_channel_info{cluster=\"$cluster\",job=\"new-api\"}",
+          "legendFormat": "渠道 {{channel_name}}（ID {{channel_id}}） / 成功率",
           "range": true,
           "refId": "A"
         },
@@ -655,8 +672,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "newapi:channel_timeout_ratio:1m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"}",
-          "legendFormat": "渠道 {{channel_id}} / 超时率",
+          "expr": "(newapi:channel_timeout_ratio:1m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"}) * on (channel_id) group_left(channel_name) newapi_channel_info{cluster=\"$cluster\",job=\"new-api\"}",
+          "legendFormat": "渠道 {{channel_name}}（ID {{channel_id}}） / 超时率",
           "range": true,
           "refId": "B"
         }
@@ -710,8 +727,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (channel_id) (newapi_channel_inflight{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"})",
-          "legendFormat": "渠道 {{channel_id}}",
+          "expr": "(sum by (channel_id) (newapi_channel_inflight{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"})) * on (channel_id) group_left(channel_name) newapi_channel_info{cluster=\"$cluster\",job=\"new-api\"}",
+          "legendFormat": "渠道 {{channel_name}}（ID {{channel_id}}）",
           "range": true,
           "refId": "A"
         }
@@ -778,8 +795,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "newapi:channel_duration_seconds:p90_5m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"}",
-          "legendFormat": "渠道 {{channel_id}} / P90",
+          "expr": "(newapi:channel_duration_seconds:p90_5m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"}) * on (channel_id) group_left(channel_name) newapi_channel_info{cluster=\"$cluster\",job=\"new-api\"}",
+          "legendFormat": "渠道 {{channel_name}}（ID {{channel_id}}） / P90",
           "range": true,
           "refId": "A"
         },
@@ -789,8 +806,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "newapi:channel_duration_seconds:p95_5m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"}",
-          "legendFormat": "渠道 {{channel_id}} / P95",
+          "expr": "(newapi:channel_duration_seconds:p95_5m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"}) * on (channel_id) group_left(channel_name) newapi_channel_info{cluster=\"$cluster\",job=\"new-api\"}",
+          "legendFormat": "渠道 {{channel_name}}（ID {{channel_id}}） / P95",
           "range": true,
           "refId": "B"
         }
@@ -844,8 +861,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "newapi:channel_ttft_seconds:p95_5m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"}",
-          "legendFormat": "渠道 {{channel_id}} / TTFT",
+          "expr": "(newapi:channel_ttft_seconds:p95_5m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"}) * on (channel_id) group_left(channel_name) newapi_channel_info{cluster=\"$cluster\",job=\"new-api\"}",
+          "legendFormat": "渠道 {{channel_name}}（ID {{channel_id}}） / TTFT",
           "range": true,
           "refId": "A"
         },
@@ -855,8 +872,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "newapi:channel_first_byte_seconds:p95_5m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"}",
-          "legendFormat": "渠道 {{channel_id}} / 上游首字节",
+          "expr": "(newapi:channel_first_byte_seconds:p95_5m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"}) * on (channel_id) group_left(channel_name) newapi_channel_info{cluster=\"$cluster\",job=\"new-api\"}",
+          "legendFormat": "渠道 {{channel_name}}（ID {{channel_id}}） / 上游首字节",
           "range": true,
           "refId": "B"
         }
@@ -910,8 +927,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "newapi:channel_cache_hit_ratio:5m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"}",
-          "legendFormat": "渠道 {{channel_id}}",
+          "expr": "(newapi:channel_cache_hit_ratio:5m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"}) * on (channel_id) group_left(channel_name) newapi_channel_info{cluster=\"$cluster\",job=\"new-api\"}",
+          "legendFormat": "渠道 {{channel_name}}（ID {{channel_id}}）",
           "range": true,
           "refId": "A"
         }
@@ -978,8 +995,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (channel_id, error_type) (rate(newapi_channel_attempts_total{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\",result=\"failure\"}[5m])) * 60",
-          "legendFormat": "渠道 {{channel_id}} / {{error_type}}",
+          "expr": "(sum by (channel_id, error_type) (rate(newapi_channel_attempts_total{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\",result=\"failure\"}[5m])) * 60) * on (channel_id) group_left(channel_name) newapi_channel_info{cluster=\"$cluster\",job=\"new-api\"}",
+          "legendFormat": "渠道 {{channel_name}}（ID {{channel_id}}） / {{error_type}}",
           "range": true,
           "refId": "A"
         }
@@ -1033,8 +1050,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (channel_id, reason) (rate(newapi_channel_retries_total{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"}[5m])) * 60",
-          "legendFormat": "渠道 {{channel_id}} / {{reason}}",
+          "expr": "(sum by (channel_id, reason) (rate(newapi_channel_retries_total{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\"}[5m])) * 60) * on (channel_id) group_left(channel_name) newapi_channel_info{cluster=\"$cluster\",job=\"new-api\"}",
+          "legendFormat": "渠道 {{channel_name}}（ID {{channel_id}}） / {{reason}}",
           "range": true,
           "refId": "A"
         }
@@ -1088,8 +1105,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (channel_id) (rate(newapi_channel_attempts_total{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\",stream=\"true\",result=\"failure\",error_type!=\"client_cancelled\"}[5m])) * 60",
-          "legendFormat": "渠道 {{channel_id}} / 流式中断",
+          "expr": "(sum by (channel_id) (rate(newapi_channel_attempts_total{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\",stream=\"true\",result=\"failure\",error_type!=\"client_cancelled\"}[5m])) * 60) * on (channel_id) group_left(channel_name) newapi_channel_info{cluster=\"$cluster\",job=\"new-api\"}",
+          "legendFormat": "渠道 {{channel_name}}（ID {{channel_id}}） / 流式中断",
           "range": true,
           "refId": "A"
         },
@@ -1099,8 +1116,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (channel_id) (rate(newapi_channel_attempts_total{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\",result=\"failure\",error_type=\"client_cancelled\"}[5m])) * 60",
-          "legendFormat": "渠道 {{channel_id}} / 客户端取消",
+          "expr": "(sum by (channel_id) (rate(newapi_channel_attempts_total{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\",result=\"failure\",error_type=\"client_cancelled\"}[5m])) * 60) * on (channel_id) group_left(channel_name) newapi_channel_info{cluster=\"$cluster\",job=\"new-api\"}",
+          "legendFormat": "渠道 {{channel_name}}（ID {{channel_id}}） / 客户端取消",
           "range": true,
           "refId": "B"
         }
@@ -1167,8 +1184,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "newapi:channel_tokens_per_minute:5m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\",token_type=\"input\"}",
-          "legendFormat": "渠道 {{channel_id}}",
+          "expr": "(newapi:channel_tokens_per_minute:5m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\",token_type=\"input\"}) * on (channel_id) group_left(channel_name) newapi_channel_info{cluster=\"$cluster\",job=\"new-api\"}",
+          "legendFormat": "渠道 {{channel_name}}（ID {{channel_id}}）",
           "range": true,
           "refId": "A"
         }
@@ -1222,8 +1239,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "newapi:channel_tokens_per_minute:5m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\",token_type=\"output\"}",
-          "legendFormat": "渠道 {{channel_id}}",
+          "expr": "(newapi:channel_tokens_per_minute:5m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\",token_type=\"output\"}) * on (channel_id) group_left(channel_name) newapi_channel_info{cluster=\"$cluster\",job=\"new-api\"}",
+          "legendFormat": "渠道 {{channel_name}}（ID {{channel_id}}）",
           "range": true,
           "refId": "A"
         }
@@ -1277,8 +1294,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "newapi:channel_tokens_per_minute:5m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\",token_type=\"cache_read\"}",
-          "legendFormat": "渠道 {{channel_id}}",
+          "expr": "(newapi:channel_tokens_per_minute:5m{cluster=\"$cluster\",job=\"new-api\",channel_id=~\"$channel_id\",token_type=\"cache_read\"}) * on (channel_id) group_left(channel_name) newapi_channel_info{cluster=\"$cluster\",job=\"new-api\"}",
+          "legendFormat": "渠道 {{channel_name}}（ID {{channel_id}}）",
           "range": true,
           "refId": "A"
         }
@@ -1325,19 +1342,19 @@
           "type": "prometheus",
           "uid": "prometheus"
         },
-        "definition": "label_values({__name__=~\"newapi_channel_(attempts_total|enabled|tokens_total)\",cluster=\"$cluster\",job=\"new-api\"}, channel_id)",
+        "definition": "query_result(max by (channel_id, channel_name) (newapi_channel_info{cluster=\"$cluster\",job=\"new-api\"}))",
         "hide": 0,
         "includeAll": true,
-        "label": "渠道 ID",
+        "label": "渠道",
         "multi": true,
         "name": "channel_id",
         "options": [],
         "query": {
-          "query": "label_values({__name__=~\"newapi_channel_(attempts_total|enabled|tokens_total)\",cluster=\"$cluster\",job=\"new-api\"}, channel_id)",
+          "query": "query_result(max by (channel_id, channel_name) (newapi_channel_info{cluster=\"$cluster\",job=\"new-api\"}))",
           "refId": "PrometheusVariableQueryEditor-channel_id"
         },
         "refresh": 1,
-        "regex": "",
+        "regex": "/channel_id=\"(?<value>[^\"]+)\",channel_name=\"(?<text>[^\"]+)\"/",
         "sort": 1,
         "type": "query"
       }

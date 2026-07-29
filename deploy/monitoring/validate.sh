@@ -580,8 +580,8 @@ jq -e '
 }
 
 rg -q '^apiVersion: 1$' "$monitoring_dir/grafana/provisioning/dashboards/default.yml"
-rg -q '^    folder: new-api 监控$' "$monitoring_dir/grafana/provisioning/dashboards/default.yml"
-rg -q '^    folder: new-api 扩展监控$' "$monitoring_dir/grafana/provisioning/dashboards/default.yml"
+rg -q '^    folder: 测试环境-new-api 监控$' "$monitoring_dir/grafana/provisioning/dashboards/default.yml"
+rg -q '^    folder: 测试环境-new-api 扩展监控$' "$monitoring_dir/grafana/provisioning/dashboards/default.yml"
 rg -q '^      path: /var/lib/grafana/dashboards/core$' "$monitoring_dir/grafana/provisioning/dashboards/default.yml"
 rg -q '^      path: /var/lib/grafana/dashboards/extended$' "$monitoring_dir/grafana/provisioning/dashboards/default.yml"
 
@@ -653,6 +653,9 @@ jq -e '
   ([.panels[] | select(.id == 2 and .type == "table")] | length) == 1 and
   ([.panels[] | select(.id == 2) | .targets[] | select(.instant != true or .format != "table")] | length == 0) and
   ([.panels[].targets[]? | select((.expr | test("newapi(_|:)channel")) and (.expr | contains("channel_id") | not))] | length == 0) and
+  ([.templating.list[] | select(.name == "channel_id") | .query.query | contains("newapi_channel_info")] | all) and
+  ([.panels[] | select(.id != 2 and .type != "row") | .targets[]? | select((.expr | test("newapi(_|:)channel")) and (.expr | contains("group_left(channel_name)") | not))] | length == 0) and
+  ([.panels[] | select(.type != "row") | .targets[]? | select(.legendFormat? | contains("{{channel_id}}")) | select(.legendFormat | contains("{{channel_name}}") | not)] | length == 0) and
   ([.panels[].title] | index("上游缓存命中率") != null) and
   ([.panels[].title] | index("TTFT 与上游首字节 P95") != null) and
   ([.panels[].title] | index("流式中断与客户端取消") != null)

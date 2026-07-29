@@ -128,7 +128,7 @@ func main() {
 		prometheusmetrics.WithChannelStateSource(func() ([]prometheusmetrics.ChannelState, error) {
 			states := make([]prometheusmetrics.ChannelState, 0)
 			err := model.DB.Model(&model.Channel{}).
-				Select("id", "type", "status").
+				Select("id", "name", "type", "status").
 				Find(&states).Error
 			return states, err
 		}),

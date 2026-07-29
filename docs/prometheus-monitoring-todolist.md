@@ -74,7 +74,7 @@
 1. 在发布环境使用受信任的镜像仓库或离线导入相同固定版本镜像，复现本地已通过的启动、抓取和告警联调。
 2. 在测试环境代入实际路由数 `R`、渠道数 `N`，完成基数、安全抓取和多实例聚合验收。
 3. 在发布环境验证 Node、PostgreSQL、Redis Exporter 与 new-api target 全部 `UP`，MySQL profile 未启用时不产生假 `DOWN` target。
-4. 验证 Grafana 两个中文文件夹和 6 个 dashboard 自动加载，并用真实多渠道流量确认 RPM、P90/P95、TTFT、上游首字节、缓存率和 Token 吞吐按 `channel_id` 分开。
+4. 验证 Grafana 两个中文文件夹和 6 个 dashboard 自动加载，并用真实多渠道流量确认 RPM、P90/P95、TTFT、上游首字节、缓存率和 Token 吞吐按渠道名称和 `channel_id` 分开。
 5. 上线后使用真实积压、完成率、poll 错误率以及按 `relay_format` 的 P95/P99 耗时和 inflight 分布校准候选阈值；生产积压、Relay 延迟与并发阈值保持未校准状态，不能仅凭本地样本宣称完成。
 
 ### 运行验收状态记录（2026-07-28）
@@ -286,7 +286,7 @@ clamp_min(sum by (job, channel_id) (rate(newapi_channel_attempts_total[5m])), 0.
 - [x] `newapi_channel_retries_total.reason` 复用固定 `error_type` 分类，表示触发下一次 attempt 的上一次失败原因，不使用完整错误码或文本。
 - [x] P0 的 Relay/渠道指标不包含 `model` 标签。
 - [ ] P1 如需模型维度，只允许配置中已存在且通过规范化的模型名称；未知、超长或用户动态模型统一归入 `other`。
-- [x] 已实现的 P0 指标不使用用户 ID、Token ID、IP、Request ID、渠道名称、渠道 Key、完整错误文本、任务 ID、订单号作为标签。
+- [x] 高频 P0 指标不使用用户 ID、Token ID、IP、Request ID、渠道名称、渠道 Key、完整错误文本、任务 ID、订单号作为标签；仅 Master DB collector 导出的低频静态映射 `newapi_channel_info` 使用 `channel_name`，供 Grafana 显示名称。
 - [x] 应用代码不主动添加 `instance` 标签，由 Prometheus target/relabel 配置注入。
 - [x] 已建立 P0/P1 指标字典，记类型、单位、标签、记录点和集群聚合函数。
 - [x] 已补充 P0 高基数指标的时间序列预算公式，Histogram 计入 `_bucket`、`_sum` 和 `_count`。
@@ -440,11 +440,12 @@ PROMETHEUS_DISABLE_CHANNEL_HISTOGRAM
 | `newapi_channel_duration_seconds` | Histogram/秒 | `channel_id,channel_type,stream,result` | 统一渠道 attempt 完成点 | `histogram_quantile` |
 | `newapi_channel_first_byte_seconds` | Histogram/秒 | `channel_id,channel_type` | 共享 HTTP、AWS SDK 与 Gorilla WebSocket Upgrade 请求上下文中的 `httptrace.GetConn` → `GotFirstResponseByte` | bucket 先按 `le,channel_id,channel_type` 聚合再算分位数 |
 | `newapi_channel_enabled` | Gauge/布尔 | `channel_id,channel_type` | Master DB collector | `max`，正常仅一份 |
+| `newapi_channel_info` | Gauge/静态映射 | `channel_id,channel_name,channel_type` | Master DB collector | 仅用于 Grafana 将渠道 ID 显示为名称，不参与请求速率或告警聚合 |
 
 - [x] HTTP、Relay、流式与渠道 attempt/retry/inflight/duration 指标已注册并接入记录点。
 - [x] `newapi_channel_duration_seconds` 和 `newapi_channel_first_byte_seconds` 在 `PROMETHEUS_DISABLE_CHANNEL_HISTOGRAM=true` 时不注册；渠道 attempts/retries/inflight 不受影响。
 - [x] `newapi_channel_enabled` 与 `newapi_shared_collector_up{collector="channel_state"}` 已作为 Master-only collector 落地。
-- [x] 渠道状态 collector 只查询 `id,type,status`；空渠道表时 `shared_collector_up=1`，查询失败时置 `0`、增加 `collector_errors_total{collector="channel_state"}` 并记录限频日志。
+- [x] 渠道状态 collector 查询 `id,name,type,status`；空渠道表时 `shared_collector_up=1`，查询失败时置 `0`、增加 `collector_errors_total{collector="channel_state"}` 并记录限频日志。`newapi_channel_info` 是低频静态映射，不能把 `channel_name` 复制到高频请求指标。
 
 ### P0 Runtime、Build 和数据库指标
 
@@ -755,7 +756,7 @@ completion 与计费生命周期必须保持解耦：终态 CAS 获胜就记录�
 - [x] P1 DB 等待面板：System Overview 展示单实例/单数据库的 5 分钟等待次数和平均等待时长；`0` 表示窗口内无等待，No data 表示原始 DB 指标缺失。
 - [x] P1 Relay 延迟阈值线：System Overview 在原有 P50/P95/P99 上叠加按 `cluster/job/relay_format` 配置的 P95/P99 虚线；默认阈值文件为空时显示 No data，不解释为 0 秒。
 - [x] 6 个 dashboard 均提供 `cluster` 与各自所需的 `instance`、`device`、`database`、`relay_format`、`channel_id`、`billing_source` 或 `platform` 变量。Task Dashboard 的 Master-only 队列面板故意忽略 `instance` 变量。
-- [x] Grafana 12.1 临时容器已真实验证 6 个 dashboard provisioning，4 个核心页进入 `new-api 监控`，计费/任务进入 `new-api 扩展监控`；生产环境仍需复现加载。
+- [x] Grafana 12.1 临时容器已真实验证 6 个 dashboard provisioning，4 个核心页进入 `测试环境-new-api 监控`，计费/任务进入 `测试环境-new-api 扩展监控`；生产环境仍需复现加载。
 
 ### Recording Rules
 
@@ -1345,7 +1346,7 @@ git diff --check
 - [x] D11-3：Token 只在最终结算点记录，文本使用 `billingUsage`，音频使用归一化 `Usage`；不在预扣费、失败路径或重试中间态重复记录。Usage 存在时会显式导出固定的三种 Token 类型，因此零缓存命中显示 `0%`而不是 No data。
 - [x] D11-4：新增 11 条渠道 Recording Rules，提供 1 分钟 attempt/失败/重试 RPM、成功率/超时率，以及 5 分钟 P90/P95、TTFT P95、上游首字节 P95、`cache_read / input` 上游缓存率和 Token 每分钟吞吐。
 - [x] D11-5：监控 Compose 新增固定版本 Node Exporter、PostgreSQL Exporter、MySQL Exporter 和 Redis Exporter；Exporter 不发布公网端口，通过外部业务 Docker 网络和运行时 Secret 连接，MySQL target 默认为空。Redis Secret 使用官方要求的地址到密码 JSON 映射，校验脚本拒绝原始密码文本。
-- [x] D11-6：Grafana 重构为 `new-api 监控` 下的主机/程序/中间件/渠道总览，以及 `new-api 扩展监控` 下的计费/任务总览；6 页标题、行、面板和说明均为中文，刷新周期统一为 15 秒。
+- [x] D11-6：Grafana 重构为 `测试环境-new-api 监控` 下的主机/程序/中间件/渠道总览，以及 `测试环境-new-api 扩展监控` 下的计费/任务总览；6 页标题、行、面板和说明均为中文，刷新周期统一为 15 秒。
 - [x] D11-7：Grafana 12.1 临时容器已真实验证双文件夹和 6 个 dashboard provisioning；108 条 Dashboard PromQL 已通过 Prometheus 语法校验。
 - [x] D11-8：当前静态验收口径为 46 条 Recording Rules、28 条告警、108 条 Dashboard PromQL；Go 定向测试覆盖指标注册、渠道 attempt 归因、RelayInfo 与最终结算路径。
 - [x] D11-9：生产 PostgreSQL profile 已启动，new-api、Node、PostgreSQL、Redis target 均为 `UP`，且未破坏现有数据卷。
@@ -1355,7 +1356,7 @@ git diff --check
 
 - [x] new-api 应用镜像基于 `6712fbc2f`构建并健康运行；PostgreSQL、Redis 业务容器和 7 个原有数据卷原样保留。
 - [x] Prometheus 的 `new-api`、`node-exporter`、`postgres-exporter`、`redis-exporter` 四个 target 均为 `UP`；46 条 Recording Rules 和 28 条告警的 rule health 均为 `ok`。
-- [x] Grafana 只保留 `new-api 监控`、`new-api 扩展监控` 两个中文文件夹，6 个 dashboard UID 已通过 API 确认。
+- [x] Grafana 只保留 `测试环境-new-api 监控`、`测试环境-new-api 扩展监控` 两个中文文件夹，6 个 dashboard UID 已通过 API 确认。
 - [x] `channel_id=1` 真实成功流量已验证 1 分钟 attempt RPM `1.33`、成功率 `100%`、TTFT P95 `1.95s`、Token 吞吐以及上游缓存命中率 `0%`；零缓存命中已不再显示 No data。
 - [ ] 多渠道对比的生产数据证据待第二个渠道实际启用后补齐，不为了验收人为伪造渠道。
 

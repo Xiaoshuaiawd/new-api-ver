@@ -20,8 +20,8 @@ func TestChannelStateCollectorExportsEnabledStateAndHealth(t *testing.T) {
 	collector := newChannelStateCollector(
 		func() ([]ChannelState, error) {
 			return []ChannelState{
-				{ID: 7, Type: 1, Status: common.ChannelStatusEnabled},
-				{ID: 9, Type: 14, Status: common.ChannelStatusManuallyDisabled},
+				{ID: 7, Name: "测试渠道 A", Type: 1, Status: common.ChannelStatusEnabled},
+				{ID: 9, Name: "测试渠道 B", Type: 14, Status: common.ChannelStatusManuallyDisabled},
 			}, nil
 		},
 		collectorErrors,
@@ -35,6 +35,10 @@ func TestChannelStateCollectorExportsEnabledStateAndHealth(t *testing.T) {
 # TYPE newapi_channel_enabled gauge
 newapi_channel_enabled{channel_id="7",channel_type="1"} 1
 newapi_channel_enabled{channel_id="9",channel_type="14"} 0
+# HELP newapi_channel_info Static channel metadata used to map a channel ID to its display name.
+# TYPE newapi_channel_info gauge
+newapi_channel_info{channel_id="7",channel_name="测试渠道 A",channel_type="1"} 1
+newapi_channel_info{channel_id="9",channel_name="测试渠道 B",channel_type="14"} 1
 # HELP newapi_shared_collector_up Whether a shared database collector completed successfully.
 # TYPE newapi_shared_collector_up gauge
 newapi_shared_collector_up{collector="channel_state"} 1
@@ -43,6 +47,7 @@ newapi_shared_collector_up{collector="channel_state"} 1
 		registry,
 		expected,
 		"newapi_channel_enabled",
+		"newapi_channel_info",
 		"newapi_shared_collector_up",
 	))
 }

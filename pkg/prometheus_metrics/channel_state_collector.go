@@ -15,6 +15,7 @@ const channelStateErrorLogInterval = time.Minute
 
 type ChannelState struct {
 	ID     int
+	Name   string
 	Type   int
 	Status int
 }
@@ -28,6 +29,7 @@ type channelStateCollector struct {
 	logError        func(string)
 
 	enabled *prometheus.Desc
+	info    *prometheus.Desc
 	up      *prometheus.Desc
 
 	logMu        sync.Mutex
@@ -51,6 +53,12 @@ func newChannelStateCollector(
 			[]string{"channel_id", "channel_type"},
 			nil,
 		),
+		info: prometheus.NewDesc(
+			"newapi_channel_info",
+			"Static channel metadata used to map a channel ID to its display name.",
+			[]string{"channel_id", "channel_name", "channel_type"},
+			nil,
+		),
 		up: prometheus.NewDesc(
 			"newapi_shared_collector_up",
 			"Whether a shared database collector completed successfully.",
@@ -62,6 +70,7 @@ func newChannelStateCollector(
 
 func (c *channelStateCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.enabled
+	ch <- c.info
 	ch <- c.up
 }
 
@@ -87,6 +96,14 @@ func (c *channelStateCollector) Collect(ch chan<- prometheus.Metric) {
 			prometheus.GaugeValue,
 			enabled,
 			strconv.Itoa(state.ID),
+			strconv.Itoa(state.Type),
+		)
+		ch <- prometheus.MustNewConstMetric(
+			c.info,
+			prometheus.GaugeValue,
+			1,
+			strconv.Itoa(state.ID),
+			state.Name,
 			strconv.Itoa(state.Type),
 		)
 	}
