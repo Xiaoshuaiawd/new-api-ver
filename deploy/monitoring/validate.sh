@@ -169,6 +169,21 @@ else
 	echo "warning: amtool unavailable; Alertmanager received YAML and contract validation only" >&2
 fi
 
+ruby -e '
+  require "yaml"
+
+  config = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
+  unless config.fetch("route").fetch("group_by").include?("relay_format")
+    abort "relay_format missing from Alertmanager group_by"
+  end
+  matched = config.fetch("inhibit_rules").any? do |rule|
+    rule.fetch("source_matchers").include?(%q{alertname="NewAPIRelayP99LatencyHigh"}) &&
+      rule.fetch("target_matchers").include?(%q{alertname="NewAPIRelayP95LatencyHigh"}) &&
+      rule.fetch("equal").sort == %w[cluster job relay_format].sort
+  end
+  abort "missing Relay latency inhibition" unless matched
+' "$monitoring_dir/alertmanager.yml.example"
+
 rg -q '^  scrape_interval: 15s$' "$monitoring_dir/prometheus.yml"
 rg -q '^  scrape_timeout: 10s$' "$monitoring_dir/prometheus.yml"
 rg -q '^    cluster: default$' "$monitoring_dir/prometheus.yml"
@@ -258,6 +273,31 @@ validate_dashboard \
 	12 \
 	cluster instance relay_format
 
+jq -e '
+  [.panels[] | select(.id == 6)] as $panels |
+  ($panels | length) == 1 and
+  ([
+    $panels[0].targets[]
+    | select(
+        (.expr | contains("newapi_relay_latency_threshold_seconds")) and
+        (.expr | contains("quantile=\"p95\"")) and
+        (.expr | contains("$instance") | not)
+      )
+  ] | length) == 1 and
+  ([
+    $panels[0].targets[]
+    | select(
+        (.expr | contains("newapi_relay_latency_threshold_seconds")) and
+        (.expr | contains("quantile=\"p99\"")) and
+        (.expr | contains("$instance") | not)
+      )
+  ] | length) == 1 and
+  ([
+    $panels[0].fieldConfig.overrides[]
+    | select(.matcher.id == "byRegexp" and .matcher.options == "/threshold/")
+  ] | length) == 1
+' "$monitoring_dir/grafana/dashboards/system-overview.json" >/dev/null
+
 validate_dashboard \
 	"$monitoring_dir/grafana/dashboards/channel-overview.json" \
 	"newapi-channel-overview" \
@@ -311,8 +351,8 @@ jq -s '
 	>"$tmp_dir/dashboard-rules.json"
 
 dashboard_query_count=$(jq '.groups[0].rules | length' "$tmp_dir/dashboard-rules.json")
-if [ "$dashboard_query_count" -ne 70 ]; then
-	echo "expected 70 dashboard PromQL expressions, got $dashboard_query_count" >&2
+if [ "$dashboard_query_count" -ne 72 ]; then
+	echo "expected 72 dashboard PromQL expressions, got $dashboard_query_count" >&2
 	exit 1
 fi
 

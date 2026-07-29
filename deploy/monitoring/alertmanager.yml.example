@@ -1,0 +1,67 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: new-api-webhook-warning
+  group_by:
+    - alertname
+    - cluster
+    - job
+    - relay_format
+    - channel_id
+    - instance
+    - database
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - receiver: new-api-webhook-critical
+      matchers:
+        - severity="critical"
+      repeat_interval: 1h
+    - receiver: new-api-webhook-warning
+      matchers:
+        - severity="warning"
+      repeat_interval: 4h
+
+inhibit_rules:
+  - source_matchers:
+      - alertname="NewAPIServiceSuccessRateCritical"
+      - severity="critical"
+    target_matchers:
+      - alertname="NewAPIServiceSuccessRateLow"
+      - severity="warning"
+    equal:
+      - cluster
+      - job
+  - source_matchers:
+      - alertname="NewAPIDBPoolUtilizationCritical"
+      - severity="critical"
+    target_matchers:
+      - alertname="NewAPIDBPoolUtilizationHigh"
+      - severity="warning"
+    equal:
+      - cluster
+      - job
+      - instance
+      - database
+  - source_matchers:
+      - alertname="NewAPIRelayP99LatencyHigh"
+      - severity="critical"
+    target_matchers:
+      - alertname="NewAPIRelayP95LatencyHigh"
+      - severity="warning"
+    equal:
+      - cluster
+      - job
+      - relay_format
+
+receivers:
+  - name: new-api-webhook-warning
+    webhook_configs:
+      - url_file: /run/secrets/alertmanager_webhook_url
+        send_resolved: true
+  - name: new-api-webhook-critical
+    webhook_configs:
+      - url_file: /run/secrets/alertmanager_webhook_url
+        send_resolved: true
