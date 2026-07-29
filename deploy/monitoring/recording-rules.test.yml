@@ -96,6 +96,144 @@ tests:
           - labels: '{__name__="newapi:db_pool_utilization:instance",cluster="test",database="main",instance="app-1",job="new-api"}'
             value: 0.5
 
+  - name: per-channel realtime rates latency and token aggregations
+    interval: 15s
+    input_series:
+      - series: 'newapi_channel_attempts_total{cluster="test",job="new-api",instance="app-1",channel_id="7",channel_type="1",stream="true",result="success",error_type="none"}'
+        values: '0+3x24'
+      - series: 'newapi_channel_attempts_total{cluster="test",job="new-api",instance="app-1",channel_id="7",channel_type="1",stream="true",result="failure",error_type="timeout"}'
+        values: '0+1x24'
+      - series: 'newapi_channel_retries_total{cluster="test",job="new-api",instance="app-1",channel_id="7",channel_type="1",reason="timeout"}'
+        values: '0+0.5x24'
+      - series: 'newapi_channel_attempts_total{cluster="test",job="new-api",instance="app-2",channel_id="9",channel_type="2",stream="true",result="success",error_type="none"}'
+        values: '0+1x24'
+      - series: 'newapi_channel_attempts_total{cluster="test",job="new-api",instance="app-2",channel_id="9",channel_type="2",stream="true",result="failure",error_type="timeout"}'
+        values: '0+1x24'
+      - series: 'newapi_channel_retries_total{cluster="test",job="new-api",instance="app-2",channel_id="9",channel_type="2",reason="timeout"}'
+        values: '0+0.25x24'
+      - series: 'newapi_channel_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",channel_id="7",channel_type="1",stream="true",result="success",le="1"}'
+        values: '0+3x24'
+      - series: 'newapi_channel_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",channel_id="7",channel_type="1",stream="true",result="success",le="+Inf"}'
+        values: '0+3x24'
+      - series: 'newapi_channel_duration_seconds_bucket{cluster="test",job="new-api",instance="app-2",channel_id="9",channel_type="2",stream="true",result="success",le="2"}'
+        values: '0+1x24'
+      - series: 'newapi_channel_duration_seconds_bucket{cluster="test",job="new-api",instance="app-2",channel_id="9",channel_type="2",stream="true",result="success",le="+Inf"}'
+        values: '0+1x24'
+      - series: 'newapi_channel_ttft_seconds_bucket{cluster="test",job="new-api",instance="app-1",channel_id="7",channel_type="1",le="0.5"}'
+        values: '0+3x24'
+      - series: 'newapi_channel_ttft_seconds_bucket{cluster="test",job="new-api",instance="app-1",channel_id="7",channel_type="1",le="+Inf"}'
+        values: '0+3x24'
+      - series: 'newapi_channel_ttft_seconds_bucket{cluster="test",job="new-api",instance="app-2",channel_id="9",channel_type="2",le="1"}'
+        values: '0+1x24'
+      - series: 'newapi_channel_ttft_seconds_bucket{cluster="test",job="new-api",instance="app-2",channel_id="9",channel_type="2",le="+Inf"}'
+        values: '0+1x24'
+      - series: 'newapi_channel_first_byte_seconds_bucket{cluster="test",job="new-api",instance="app-1",channel_id="7",channel_type="1",le="0.25"}'
+        values: '0+3x24'
+      - series: 'newapi_channel_first_byte_seconds_bucket{cluster="test",job="new-api",instance="app-1",channel_id="7",channel_type="1",le="+Inf"}'
+        values: '0+3x24'
+      - series: 'newapi_channel_first_byte_seconds_bucket{cluster="test",job="new-api",instance="app-2",channel_id="9",channel_type="2",le="0.5"}'
+        values: '0+1x24'
+      - series: 'newapi_channel_first_byte_seconds_bucket{cluster="test",job="new-api",instance="app-2",channel_id="9",channel_type="2",le="+Inf"}'
+        values: '0+1x24'
+      - series: 'newapi_channel_tokens_total{cluster="test",job="new-api",instance="app-1",channel_id="7",channel_type="1",token_type="input"}'
+        values: '0+25x24'
+      - series: 'newapi_channel_tokens_total{cluster="test",job="new-api",instance="app-1",channel_id="7",channel_type="1",token_type="output"}'
+        values: '0+10x24'
+      - series: 'newapi_channel_tokens_total{cluster="test",job="new-api",instance="app-1",channel_id="7",channel_type="1",token_type="cache_read"}'
+        values: '0+5x24'
+      - series: 'newapi_channel_tokens_total{cluster="test",job="new-api",instance="app-2",channel_id="9",channel_type="2",token_type="input"}'
+        values: '0+10x24'
+      - series: 'newapi_channel_tokens_total{cluster="test",job="new-api",instance="app-2",channel_id="9",channel_type="2",token_type="output"}'
+        values: '0+5x24'
+      - series: 'newapi_channel_tokens_total{cluster="test",job="new-api",instance="app-2",channel_id="9",channel_type="2",token_type="cache_read"}'
+        values: '0+2.5x24'
+    promql_expr_test:
+      - expr: newapi:channel_attempt_rpm:1m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_attempt_rpm:1m",channel_id="7",cluster="test",job="new-api"}'
+            value: 15.999999999999996
+          - labels: '{__name__="newapi:channel_attempt_rpm:1m",channel_id="9",cluster="test",job="new-api"}'
+            value: 7.999999999999998
+      - expr: newapi:channel_failure_rpm:1m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_failure_rpm:1m",channel_id="7",cluster="test",job="new-api"}'
+            value: 3.999999999999999
+          - labels: '{__name__="newapi:channel_failure_rpm:1m",channel_id="9",cluster="test",job="new-api"}'
+            value: 3.999999999999999
+      - expr: newapi:channel_retry_rpm:1m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_retry_rpm:1m",channel_id="7",cluster="test",job="new-api"}'
+            value: 1.9999999999999996
+          - labels: '{__name__="newapi:channel_retry_rpm:1m",channel_id="9",cluster="test",job="new-api"}'
+            value: 0.9999999999999998
+      - expr: newapi:channel_success_ratio:1m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_success_ratio:1m",channel_id="7",cluster="test",job="new-api"}'
+            value: 0.75
+          - labels: '{__name__="newapi:channel_success_ratio:1m",channel_id="9",cluster="test",job="new-api"}'
+            value: 0.5
+      - expr: newapi:channel_timeout_ratio:1m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_timeout_ratio:1m",channel_id="7",cluster="test",job="new-api"}'
+            value: 0.25
+          - labels: '{__name__="newapi:channel_timeout_ratio:1m",channel_id="9",cluster="test",job="new-api"}'
+            value: 0.5
+      - expr: newapi:channel_duration_seconds:p90_5m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_duration_seconds:p90_5m",channel_id="7",cluster="test",job="new-api"}'
+            value: 0.9
+          - labels: '{__name__="newapi:channel_duration_seconds:p90_5m",channel_id="9",cluster="test",job="new-api"}'
+            value: 1.8
+      - expr: newapi:channel_duration_seconds:p95_5m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_duration_seconds:p95_5m",channel_id="7",cluster="test",job="new-api"}'
+            value: 0.95
+          - labels: '{__name__="newapi:channel_duration_seconds:p95_5m",channel_id="9",cluster="test",job="new-api"}'
+            value: 1.9
+      - expr: newapi:channel_ttft_seconds:p95_5m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_ttft_seconds:p95_5m",channel_id="7",cluster="test",job="new-api"}'
+            value: 0.475
+          - labels: '{__name__="newapi:channel_ttft_seconds:p95_5m",channel_id="9",cluster="test",job="new-api"}'
+            value: 0.95
+      - expr: newapi:channel_first_byte_seconds:p95_5m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_first_byte_seconds:p95_5m",channel_id="7",cluster="test",job="new-api"}'
+            value: 0.2375
+          - labels: '{__name__="newapi:channel_first_byte_seconds:p95_5m",channel_id="9",cluster="test",job="new-api"}'
+            value: 0.475
+      - expr: newapi:channel_cache_hit_ratio:5m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_cache_hit_ratio:5m",channel_id="7",cluster="test",job="new-api"}'
+            value: 0.2
+          - labels: '{__name__="newapi:channel_cache_hit_ratio:5m",channel_id="9",cluster="test",job="new-api"}'
+            value: 0.25
+      - expr: newapi:channel_tokens_per_minute:5m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_tokens_per_minute:5m",channel_id="7",cluster="test",job="new-api",token_type="cache_read"}'
+            value: 20
+          - labels: '{__name__="newapi:channel_tokens_per_minute:5m",channel_id="7",cluster="test",job="new-api",token_type="input"}'
+            value: 100
+          - labels: '{__name__="newapi:channel_tokens_per_minute:5m",channel_id="7",cluster="test",job="new-api",token_type="output"}'
+            value: 40
+          - labels: '{__name__="newapi:channel_tokens_per_minute:5m",channel_id="9",cluster="test",job="new-api",token_type="cache_read"}'
+            value: 10
+          - labels: '{__name__="newapi:channel_tokens_per_minute:5m",channel_id="9",cluster="test",job="new-api",token_type="input"}'
+            value: 40
+          - labels: '{__name__="newapi:channel_tokens_per_minute:5m",channel_id="9",cluster="test",job="new-api",token_type="output"}'
+            value: 20
+
   - name: billing operation failure rejection and saturation aggregations
     interval: 1m
     input_series:
