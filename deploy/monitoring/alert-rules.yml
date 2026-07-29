@@ -7,8 +7,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: new-api service success ratio is below 95%
-          description: Investigate upstream health and error_type metrics for cluster {{ $labels.cluster }} job {{ $labels.job }}.
+          summary: new-api 服务成功率低于 95%
+          description: 请检查集群 {{ $labels.cluster }}、任务 {{ $labels.job }} 的上游健康状态和 error_type 指标。
 
       - alert: NewAPIServiceSuccessRateCritical
         expr: (newapi:relay_success_ratio:5m < 0.80) and on (cluster, job) (newapi:relay_request_increase:5m >= 100)
@@ -16,8 +16,8 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: new-api service success ratio is below 80%
-          description: Immediate investigation is required for cluster {{ $labels.cluster }} job {{ $labels.job }}.
+          summary: new-api 服务成功率低于 80%
+          description: 请立即检查集群 {{ $labels.cluster }}、任务 {{ $labels.job }} 的服务和上游状态。
 
       - alert: NewAPIRelayP95LatencyHigh
         expr: (newapi:relay_duration_seconds:p95_5m > on (cluster, job, relay_format) newapi_relay_latency_threshold_seconds{quantile="p95"}) and on (cluster, job, relay_format) (newapi:relay_request_increase_by_format:5m >= 50)
@@ -25,8 +25,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: new-api Relay P95 latency exceeds the configured threshold
-          description: Relay format {{ $labels.relay_format }} P95 latency is above its calibrated threshold in cluster {{ $labels.cluster }} job {{ $labels.job }}. Check upstream latency, retries, and format-specific load.
+          summary: new-api Relay P95 延迟超过已配置阈值
+          description: 集群 {{ $labels.cluster }}、任务 {{ $labels.job }} 中 Relay 格式 {{ $labels.relay_format }} 的 P95 延迟超过校准阈值，请检查上游延迟、重试和该格式的负载。
 
       - alert: NewAPIRelayP99LatencyHigh
         expr: (newapi:relay_duration_seconds:p99_5m > on (cluster, job, relay_format) newapi_relay_latency_threshold_seconds{quantile="p99"}) and on (cluster, job, relay_format) (newapi:relay_request_increase_by_format:5m >= 100)
@@ -34,8 +34,8 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: new-api Relay P99 latency exceeds the configured threshold
-          description: Relay format {{ $labels.relay_format }} P99 latency is above its calibrated threshold in cluster {{ $labels.cluster }} job {{ $labels.job }}. Investigate upstream saturation, network latency, and long-running requests.
+          summary: new-api Relay P99 延迟超过已配置阈值
+          description: 集群 {{ $labels.cluster }}、任务 {{ $labels.job }} 中 Relay 格式 {{ $labels.relay_format }} 的 P99 延迟超过校准阈值，请检查上游饱和、网络延迟和长时间请求。
 
       - alert: NewAPIRelayInflightHigh
         expr: newapi:relay_inflight_by_format > on (cluster, job, relay_format) newapi_relay_inflight_threshold{severity="warning"}
@@ -43,8 +43,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: new-api Relay inflight exceeds the calibrated warning threshold
-          description: Relay format {{ $labels.relay_format }} inflight is above its calibrated warning threshold in cluster {{ $labels.cluster }} job {{ $labels.job }}. Check long-lived streams, upstream latency, request accumulation, instance distribution, and scaling needs; this threshold is not an application hard limit.
+          summary: new-api Relay 并发超过已校准的 warning 阈值
+          description: 集群 {{ $labels.cluster }}、任务 {{ $labels.job }} 中 Relay 格式 {{ $labels.relay_format }} 的 inflight 超过已校准的 warning 阈值。请检查长连接流、上游延迟、请求积压、实例分布和扩容需求；该阈值不是应用硬限制。
 
       - alert: NewAPIRelayInflightCritical
         expr: newapi:relay_inflight_by_format > on (cluster, job, relay_format) newapi_relay_inflight_threshold{severity="critical"}
@@ -52,8 +52,8 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: new-api Relay inflight exceeds the calibrated critical threshold
-          description: Relay format {{ $labels.relay_format }} inflight is above its calibrated critical threshold in cluster {{ $labels.cluster }} job {{ $labels.job }}. Check long-lived streams, upstream latency, request accumulation, instance distribution, and scaling needs; this threshold is not an application hard limit.
+          summary: new-api Relay 并发超过已校准的 critical 阈值
+          description: 集群 {{ $labels.cluster }}、任务 {{ $labels.job }} 中 Relay 格式 {{ $labels.relay_format }} 的 inflight 超过已校准的 critical 阈值。请检查长连接流、上游延迟、请求积压、实例分布和扩容需求；该阈值不是应用硬限制。
 
       - alert: NewAPIRelayRateLimitErrorsHigh
         expr: (newapi:relay_error_ratio:5m{error_type="rate_limit"} > 0.10) and on (cluster, job) (newapi:relay_request_increase:5m >= 100) and on (cluster, job, error_type) (newapi:relay_error_increase:5m{error_type="rate_limit"} >= 10)
@@ -61,8 +61,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: new-api relay rate-limit errors are elevated
-          description: Inspect upstream 429 responses and channel routing for cluster {{ $labels.cluster }} job {{ $labels.job }}.
+          summary: new-api Relay 限流错误持续偏高
+          description: 请检查集群 {{ $labels.cluster }}、任务 {{ $labels.job }} 的上游 429 响应和渠道路由。
 
       - alert: NewAPIUpstream5xxErrorsHigh
         expr: (newapi:relay_error_ratio:5m{error_type="upstream_5xx"} > 0.05) and on (cluster, job) (newapi:relay_request_increase:5m >= 100) and on (cluster, job, error_type) (newapi:relay_error_increase:5m{error_type="upstream_5xx"} >= 10)
@@ -70,8 +70,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: new-api upstream 5xx errors are elevated
-          description: Inspect upstream availability and channel error distribution for cluster {{ $labels.cluster }} job {{ $labels.job }}.
+          summary: new-api 上游 5xx 错误持续偏高
+          description: 请检查集群 {{ $labels.cluster }}、任务 {{ $labels.job }} 的上游可用性和渠道错误分布。
 
       - alert: NewAPIRelayTimeoutsHigh
         expr: (newapi:relay_error_ratio:5m{error_type="timeout"} > 0.05) and on (cluster, job) (newapi:relay_request_increase:5m >= 50) and on (cluster, job, error_type) (newapi:relay_error_increase:5m{error_type="timeout"} >= 5)
@@ -79,8 +79,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: new-api relay timeouts are elevated
-          description: Inspect upstream latency, network connectivity, and timeout settings for cluster {{ $labels.cluster }} job {{ $labels.job }}.
+          summary: new-api Relay 超时持续偏高
+          description: 请检查集群 {{ $labels.cluster }}、任务 {{ $labels.job }} 的上游延迟、网络连接和超时设置。
 
       - alert: NewAPILocalRateLimitRejectionsHigh
         expr: sum by (cluster, job) (increase(newapi_rate_limit_rejections_total[5m])) >= 20
@@ -88,8 +88,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: new-api local rate-limit rejections are sustained
-          description: Inspect rejection scope and reason metrics for cluster {{ $labels.cluster }} job {{ $labels.job }} before changing rate limits.
+          summary: new-api 本地限流拒绝持续发生
+          description: 调整限流阈值前，请先检查集群 {{ $labels.cluster }}、任务 {{ $labels.job }} 的 scope 和 reason 指标。
 
       - alert: NewAPIInstanceDown
         expr: up{job="new-api"} == 0
@@ -97,8 +97,8 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: new-api instance is down
-          description: Prometheus cannot scrape instance {{ $labels.instance }} in cluster {{ $labels.cluster }}.
+          summary: new-api 实例不可达
+          description: Prometheus 无法抓取集群 {{ $labels.cluster }} 中的实例 {{ $labels.instance }}。
 
       - alert: NewAPIMasterCollectorAbsent
         expr: absent(newapi_shared_collector_up{job="new-api",cluster="default",collector="channel_state"})
@@ -106,8 +106,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: new-api Master channel collector is absent
-          description: Verify that one Master instance exports channel_state for cluster default.
+          summary: new-api Master 渠道 collector 缺失
+          description: 请确认 default 集群中有一个 Master 实例导出 channel_state 指标。
 
   - name: newapi-channel-alerts
     rules:
@@ -117,8 +117,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: new-api channel failure ratio is above 20%
-          description: Inspect channel {{ $labels.channel_id }} upstream errors and availability in cluster {{ $labels.cluster }}.
+          summary: new-api 渠道失败率高于 20%
+          description: 请检查集群 {{ $labels.cluster }} 中渠道 {{ $labels.channel_id }} 的上游错误和可用性。
 
       - alert: NewAPIChannelRetryRatioHigh
         expr: (newapi:channel_retry_ratio:5m > 0.20) and on (cluster, job, channel_id) (newapi:channel_attempt_increase:5m >= 50)
@@ -126,8 +126,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: new-api channel retry ratio is above 20%
-          description: Inspect routing and upstream stability for channel {{ $labels.channel_id }} in cluster {{ $labels.cluster }}.
+          summary: new-api 渠道重试率高于 20%
+          description: 请检查集群 {{ $labels.cluster }} 中渠道 {{ $labels.channel_id }} 的路由和上游稳定性。
 
       - alert: NewAPIChannelNoSuccess
         expr: (newapi:channel_attempt_increase:5m >= 20) unless on (cluster, job, channel_id) (newapi:channel_success_increase:5m > 0)
@@ -135,8 +135,8 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: new-api channel has no successful attempts
-          description: Channel {{ $labels.channel_id }} had at least 20 attempts and no success in the last 5 minutes.
+          summary: new-api 渠道在窗口内无成功请求
+          description: 渠道 {{ $labels.channel_id }} 在最近 5 分钟内至少尝试 20 次但没有一次成功。
 
   - name: newapi-database-alerts
     rules:
@@ -146,8 +146,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: new-api database pool utilization is above 80%
-          description: Check database latency and pool sizing for {{ $labels.instance }} database {{ $labels.database }}.
+          summary: new-api 数据库连接池利用率高于 80%
+          description: 请检查实例 {{ $labels.instance }} 的 {{ $labels.database }} 数据库延迟和连接池容量。
 
       - alert: NewAPIDBPoolUtilizationCritical
         expr: newapi:db_pool_utilization:instance > 0.95
@@ -155,8 +155,8 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: new-api database pool utilization is above 95%
-          description: Database pool exhaustion is imminent on {{ $labels.instance }} database {{ $labels.database }}.
+          summary: new-api 数据库连接池利用率高于 95%
+          description: 实例 {{ $labels.instance }} 的 {{ $labels.database }} 数据库连接池即将耗尽，请立即检查。
 
       - alert: NewAPIDBConnectionWaitHigh
         expr: (newapi:db_wait_average_seconds:5m > 0.10) and on (cluster, job, instance, database) (newapi:db_wait_increase:5m >= 20)
@@ -164,8 +164,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: new-api database connection waits are sustained
-          description: Check pool sizing, slow SQL or transactions, and database response time for {{ $labels.instance }} database {{ $labels.database }}.
+          summary: new-api 数据库连接等待持续偏高
+          description: 请检查实例 {{ $labels.instance }} 的 {{ $labels.database }} 数据库连接池容量、慢 SQL、事务和响应时间。
 
   - name: newapi-runtime-alerts
     rules:
@@ -175,8 +175,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: new-api goroutine count is growing continuously
-          description: Instance {{ $labels.instance }} has at least 500 goroutines and a 30-minute growth rate above 0.05 goroutines/s. Check stuck streams, retries, polling loops, and goroutine profiles.
+          summary: new-api goroutine 数量持续增长
+          description: 实例 {{ $labels.instance }} 至少有 500 个 goroutine，且 30 分钟增长速率高于 0.05 goroutines/s。请检查卡住的流式请求、重试、轮询循环和 goroutine profile。
 
       - alert: NewAPIGoHeapGrowing
         expr: (newapi:go_heap_alloc_bytes_growth_per_second:30m > 131072) and on (cluster, job, instance) (max by (cluster, job, instance) (go_memstats_heap_alloc_bytes) >= 536870912) and on (cluster, job, instance) ((time() - max by (cluster, job, instance) (process_start_time_seconds)) >= 1800)
@@ -184,8 +184,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: new-api Go heap is growing continuously
-          description: Instance {{ $labels.instance }} has at least 512 MiB heap allocation and a 30-minute growth rate above 128 KiB/s. Check heap profiles, retained request data, caches, and task state.
+          summary: new-api Go 堆内存持续增长
+          description: 实例 {{ $labels.instance }} 的堆内存分配至少为 512 MiB，且 30 分钟增长速率高于 128 KiB/s。请检查 heap profile、长期保留的请求数据、缓存和任务状态。
 
   - name: newapi-redis-alerts
     rules:
@@ -195,8 +195,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: new-api Redis operation errors are sustained
-          description: Check Redis connectivity and latency for instance {{ $labels.instance }} in cluster {{ $labels.cluster }}.
+          summary: new-api Redis 操作错误持续发生
+          description: 请检查集群 {{ $labels.cluster }} 中实例 {{ $labels.instance }} 的 Redis 连接和延迟。
 
       - alert: NewAPIRedisDegradationsHigh
         expr: sum by (cluster, job, instance) (increase(newapi_redis_degradations_total[5m])) >= 5
@@ -204,8 +204,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: new-api Redis degradations are sustained
-          description: Check fallback behavior and Redis health for instance {{ $labels.instance }} in cluster {{ $labels.cluster }}.
+          summary: new-api Redis 降级持续发生
+          description: 请检查集群 {{ $labels.cluster }} 中实例 {{ $labels.instance }} 的降级行为和 Redis 健康状态。
 
   - name: newapi-billing-alerts
     rules:
@@ -215,8 +215,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: new-api billing failure ratio is elevated
-          description: Inspect billing operation, source, and fixed failure reason metrics for cluster {{ $labels.cluster }} job {{ $labels.job }}.
+          summary: new-api 计费失败率持续偏高
+          description: 请检查集群 {{ $labels.cluster }}、任务 {{ $labels.job }} 的计费操作、来源和固定失败原因指标。
 
       - alert: NewAPISubscriptionRejectionsHigh
         expr: sum by (cluster, job) (newapi:subscription_rejection_increase:15m) >= 5
@@ -224,8 +224,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: new-api subscription rejections are sustained
-          description: Inspect subscription availability, expiry, and quota for cluster {{ $labels.cluster }} job {{ $labels.job }}.
+          summary: new-api 订阅拒绝持续发生
+          description: 请检查集群 {{ $labels.cluster }}、任务 {{ $labels.job }} 的订阅可用性、到期时间和额度。
 
       - alert: NewAPIQuotaSaturationDetected
         expr: sum by (cluster, job) (newapi:quota_saturation_increase:15m) >= 2
@@ -233,8 +233,8 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: new-api quota saturation events were detected
-          description: Investigate quota conversion audit logs before processing further billing traffic in cluster {{ $labels.cluster }} job {{ $labels.job }}.
+          summary: new-api 检测到 quota saturation 事件
+          description: 继续处理集群 {{ $labels.cluster }}、任务 {{ $labels.job }} 的计费流量前，请先检查额度转换审计日志。
 
   - name: newapi-task-alerts
     rules:
@@ -262,8 +262,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: new-api asynchronous task backlog is above the candidate threshold
-          description: Platform {{ $labels.platform }} has more than 100 unfinished tasks for 15 minutes in cluster {{ $labels.cluster }}; calibrate this threshold with production traffic.
+          summary: new-api 异步任务积压超过候选阈值
+          description: 集群 {{ $labels.cluster }} 中平台 {{ $labels.platform }} 的未完成任务已连续 15 分钟超过 100 个，请使用生产流量校准该阈值。
 
       - alert: NewAPITaskQueueCollectorDown
         expr: max by (cluster, job, collector) (newapi_shared_collector_up{collector="task_queue"}) == 0
@@ -271,8 +271,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: new-api task queue collector is failing
-          description: Check the Master database connection and grouped task queue queries for cluster {{ $labels.cluster }}.
+          summary: new-api 任务队列 collector 失败
+          description: 请检查集群 {{ $labels.cluster }} 的 Master 数据库连接和分组任务队列查询。
 
       - alert: NewAPITaskQueueCollectorAbsent
         expr: absent(newapi_shared_collector_up{job="new-api",cluster="default",collector="task_queue"})
@@ -280,8 +280,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: new-api Master task queue collector is absent
-          description: Verify that one Master instance exports task_queue for cluster default.
+          summary: new-api Master 任务队列 collector 缺失
+          description: 请确认 default 集群中有一个 Master 实例导出 task_queue 指标。
 
   - name: newapi-monitoring-alerts
     rules:

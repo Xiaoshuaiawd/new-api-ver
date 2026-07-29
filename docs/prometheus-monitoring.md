@@ -96,7 +96,7 @@ authorization:
 | --- | --- |
 | `PROMETHEUS_BEARER_TOKEN_FILE` | 与应用 `PROMETHEUS_BEARER_TOKEN` 完全相同的随机值 |
 | `GRAFANA_ADMIN_PASSWORD_FILE` | Grafana 管理员强密码 |
-| `ALERTMANAGER_WEBHOOK_URL_FILE` | 接收 Alertmanager webhook 的完整 HTTPS URL |
+| `FEISHU_WEBHOOK_URL_FILE` | 飞书自定义机器人的完整 Webhook URL |
 | `POSTGRES_EXPORTER_PASSWORD_FILE` | PostgreSQL Exporter 只读监控账号密码 |
 | `REDIS_EXPORTER_PASSWORD_FILE` | Redis 地址到密码的 JSON 映射；键必须与 `REDIS_EXPORTER_ADDR` 一致并包含 `redis://` 或 `rediss://`，无密码时值使用空字符串 |
 | `MYSQL_EXPORTER_CONFIG_FILE` | MySQL Exporter 的 `[client]` 配置；仅启用 MySQL profile 时使用 |
@@ -106,7 +106,7 @@ authorization:
 ```bash
 export PROMETHEUS_BEARER_TOKEN_FILE=/opt/new-api-monitoring/secrets/new-api-bearer-token
 export GRAFANA_ADMIN_PASSWORD_FILE=/opt/new-api-monitoring/secrets/grafana-admin-password
-export ALERTMANAGER_WEBHOOK_URL_FILE=/opt/new-api-monitoring/secrets/alertmanager-webhook-url
+export FEISHU_WEBHOOK_URL_FILE=/data/new-api-ver/runtime/secrets/feishu-webhook-url
 export POSTGRES_EXPORTER_PASSWORD_FILE=/opt/new-api-monitoring/secrets/postgres-exporter-password
 export REDIS_EXPORTER_PASSWORD_FILE=/opt/new-api-monitoring/secrets/redis-exporter-password
 export MYSQL_EXPORTER_CONFIG_FILE=/opt/new-api-monitoring/secrets/mysql-exporter.cnf
@@ -120,7 +120,29 @@ Redis Exporter 密码文件示例：
 }
 ```
 
-建议 Secret 使用 `0600` 权限，并确保固定镜像的运行用户能读取。当前 PostgreSQL Exporter `v0.17.1` 使用 UID/GID `65534:65534`，Redis Exporter `v1.67.0` 使用 `59000:59000`；若宿主机 Secret 保持 root 所有且 `0600`，Exporter 会因 `permission denied` 退出。轮换 Bearer Token 时应先同步更新应用和 Prometheus 文件，再重载两端，避免产生抓取空窗。
+建议普通 Secret 使用 `0600` 权限，并确保固定镜像的运行用户能读取。当前飞书转换服务使用 UID/GID `65532:65532`，飞书 Secret 必须使用 `root:65532` 和 `0640`；PostgreSQL Exporter `v0.17.1` 使用 UID/GID `65534:65534`，Redis Exporter `v1.67.0` 使用 `59000:59000`。若宿主机 Secret 保持 root 所有且 `0600`，这些非 root 容器会因 `permission denied` 退出。轮换 Bearer Token 时应先同步更新应用和 Prometheus 文件，再重载两端，避免产生抓取空窗。
+
+### 飞书机器人 Secret
+
+在飞书群中创建“自定义机器人”，安全设置选择 IP 白名单，并加入服务器出口 IP `198.44.181.187`。不需要配置签名密钥。生产环境必须使用飞书生成的完整 URL，不得把仓库中的 `.example` 文件当作生产 Secret。
+
+在服务器上以不回显方式写入 Secret：
+
+```bash
+export FEISHU_WEBHOOK_URL_FILE=/data/new-api-ver/runtime/secrets/feishu-webhook-url
+install -d -o root -g 65532 -m 0750 /data/new-api-ver/runtime/secrets
+install -o root -g 65532 -m 0640 /dev/null "$FEISHU_WEBHOOK_URL_FILE"
+read -rsp '飞书 Webhook URL: ' FEISHU_WEBHOOK_URL; printf '\n'
+printf '%s\n' "$FEISHU_WEBHOOK_URL" >"$FEISHU_WEBHOOK_URL_FILE"
+unset FEISHU_WEBHOOK_URL
+```
+
+写入后可以检查权限和 URL 格式，不要在终端或日志中输出完整 URL：
+
+```bash
+stat -c '%U:%G %a' "$FEISHU_WEBHOOK_URL_FILE"
+test "$(sed -n 's#^https://open.feishu.cn/open-apis/bot/v2/hook/[^/][^/]*$#ok#p' "$FEISHU_WEBHOOK_URL_FILE")" = ok
+```
 
 ## 三、配置抓取目标
 
@@ -225,9 +247,10 @@ deploy/monitoring/validate.sh
 
 校验内容包括：
 
-- Prometheus 配置、47 条基础 Recording Rules、72 条告警规则，以及默认 0 条 Relay/渠道延迟与并发阈值规则。
+- Prometheus 配置、47 条基础 Recording Rules、72 条告警规则，告警中文注释和非注释字段不变式，以及默认 0 条 Relay/渠道延迟与并发阈值规则。
 - Recording/告警固定输入测试。
-- Alertmanager route、恢复通知和 warning/critical 抑制配置。
+- Alertmanager route、恢复通知、warning/critical 抑制配置和飞书内网 Webhook receiver。
+- 飞书转换服务的非 root、只读容器、Secret 和 Prometheus target 约束。
 - PostgreSQL/MySQL 两种 Compose profile、固定镜像版本、外部业务网络、Exporter 内网端口和运行时 Secret。
 - Grafana 双文件夹 provisioning、6 个中文 dashboard JSON、变量、面板 ID、渠道维度保留和 108 条 PromQL 语法检查。
 
@@ -252,7 +275,10 @@ docker compose -f docker-compose.monitoring.yml --profile mysql config
 确认应用已启用 `/metrics`、Secret 路径、业务网络和 PostgreSQL/Redis 连接参数已设置后：
 
 ```bash
+export NEW_API_DOCKER_NETWORK=new-api-ver_new-api-network
+docker compose -f docker-compose.monitoring.yml build feishu-alert-webhook
 docker compose -f docker-compose.monitoring.yml --profile postgres up -d
+docker compose -f docker-compose.monitoring.yml up -d feishu-alert-webhook alertmanager prometheus
 docker compose -f docker-compose.monitoring.yml ps
 ```
 
@@ -262,16 +288,17 @@ docker compose -f docker-compose.monitoring.yml ps
 curl -fsS http://localhost:9090/-/ready
 curl -fsS http://localhost:3001/api/health
 curl -fsS http://localhost:9093/-/ready
+docker compose -f docker-compose.monitoring.yml exec -T feishu-alert-webhook /feishu-alert-webhook healthcheck
 ```
 
 然后检查：
 
-1. Prometheus `Status → Targets` 中 `new-api`、`node-exporter`、`postgres-exporter` 和 `redis-exporter` target 为 `UP`。
+1. Prometheus `Status → Targets` 中 `new-api`、`node-exporter`、`postgres-exporter`、`redis-exporter` 和 `feishu-alert-webhook` target 为 `UP`。
 2. Prometheus `Status → Rules` 中 Recording/Alert Rules 加载成功。
 3. Grafana 自动出现两个文件夹：
    - `new-api 监控`：`new-api / 主机总览`、`new-api / 程序总览`、`new-api / 中间件总览`、`new-api / 渠道总览`
    - `new-api 扩展监控`：`new-api / 计费总览`、`new-api / 任务总览`
-4. Alertmanager `Status` 页面能看到当前配置和运行状态。
+4. Alertmanager `Status` 页面能看到当前配置和运行状态，两个 receiver 都指向内网的 `feishu-alert-webhook`。
 
 Grafana provisioning 设置为不可直接保存 UI 修改。需要改面板时修改仓库中的 JSON，等待最多 30 秒自动重新加载。
 
@@ -495,6 +522,28 @@ Counter 必须通过 `rate()` 或 `increase()` 使用，不能把各实例当前
 - 本地限流拒绝：5 分钟事件数 `>= 20`，持续 10 分钟。处理前先按 `scope/reason` 下钻，不应仅因告警触发就直接放宽限额。
 
 Alertmanager 的 webhook receiver 设置 `send_resolved: true`，告警恢复后会发送恢复通知。
+
+### 飞书告警通知
+
+Alertmanager 不直接请求飞书，而是把 Webhook v4 消息发给同一 Docker 内网中的 `feishu-alert-webhook:8080`。转换服务只读取固定标签白名单，将告警转成中文彩色卡片后再投递给飞书：
+
+- critical firing：红色卡片，并使用 `<at id=all></at>` 提醒所有人。
+- warning firing：橙色卡片，不 @ 所有人。
+- resolved：绿色卡片，不 @ 所有人。
+
+每张卡片最多展示 10 条告警，最终请求体小于 20 KiB。飞书返回非 HTTP 2xx 或业务 `code != 0` 时，转换服务向 Alertmanager 返回 502，由 Alertmanager 按原机制重试。Webhook token 不会进入日志、指标标签或 HTTP 错误响应。
+
+上线后使用以下命令检查通知链路：
+
+```bash
+docker compose -f docker-compose.monitoring.yml ps feishu-alert-webhook alertmanager prometheus
+docker compose -f docker-compose.monitoring.yml logs --since=15m feishu-alert-webhook alertmanager
+curl -fsS 'http://localhost:9090/api/v1/targets' | jq -e '.data.activeTargets[] | select(.labels.job == "feishu-alert-webhook" and .health == "up")'
+docker compose -f docker-compose.monitoring.yml exec -T prometheus \
+  wget -q -O - 'http://feishu-alert-webhook:8080/metrics' | grep '^newapi_feishu_alert_'
+```
+
+生产验收必须分别触发受控的 critical firing、warning firing 和 resolved，确认卡片颜色、提醒策略、渠道信息、摘要和中国时区时间正确。仅看到容器健康不代表飞书真实投递已验收。
 
 抑制规则：
 

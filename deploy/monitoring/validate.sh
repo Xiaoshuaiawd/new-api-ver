@@ -404,14 +404,36 @@ ruby -e '
 "$promtool_bin" test rules "$monitoring_dir/recording-rules.test.yml"
 "$promtool_bin" test rules "$monitoring_dir/alert-rules.test.yml"
 ruby -e '
+  require "digest"
+  require "json"
   require "yaml"
 
   recording = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
   alerts = YAML.safe_load(File.read(ARGV.fetch(1)), aliases: true)
   recording_count = recording.fetch("groups").sum { |group| group.fetch("rules").length }
-  alert_count = alerts.fetch("groups").sum { |group| group.fetch("rules").length }
+  alert_rules = alerts.fetch("groups").flat_map { |group| group.fetch("rules") }
+  alert_count = alert_rules.length
   abort "expected 47 recording rules, got #{recording_count}" unless recording_count == 47
   abort "expected 72 alert rules, got #{alert_count}" unless alert_count == 72
+
+  alert_rules.each do |rule|
+    annotations = rule.fetch("annotations")
+    %w[summary description].each do |name|
+      value = annotations.fetch(name).to_s.strip
+      abort "#{rule.fetch("alert")} must have a non-empty #{name}" if value.empty?
+      abort "#{rule.fetch("alert")} #{name} must contain Chinese text" unless value.match?(/\p{Han}/)
+    end
+  end
+
+  alert_contract = alerts.fetch("groups").map do |group|
+    {
+      "name" => group.fetch("name"),
+      "rules" => group.fetch("rules").map { |rule| rule.reject { |name, _| name == "annotations" } }
+    }
+  end
+  contract_digest = Digest::SHA256.hexdigest(JSON.generate(alert_contract))
+  expected_digest = "5e7a8cb56ef2f923f8b0db5723447292571c53ce6279c8baee0f24cc2100535f"
+  abort "alert names or non-annotation fields changed" unless contract_digest == expected_digest
 ' "$monitoring_dir/recording-rules.yml" "$monitoring_dir/alert-rules.yml"
 if command -v "$amtool_bin" >/dev/null 2>&1 || [ -x "$amtool_bin" ]; then
 	"$amtool_bin" check-config "$monitoring_dir/alertmanager.yml.example"

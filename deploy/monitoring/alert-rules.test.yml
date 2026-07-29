@@ -21,8 +21,8 @@ tests:
               job: new-api
               severity: warning
             exp_annotations:
-              summary: new-api service success ratio is below 95%
-              description: Investigate upstream health and error_type metrics for cluster test job new-api.
+              summary: new-api 服务成功率低于 95%
+              description: 请检查集群 test、任务 new-api 的上游健康状态和 error_type 指标。
       - eval_time: 16m
         alertname: NewAPIServiceSuccessRateCritical
         exp_alerts: []
@@ -58,8 +58,8 @@ tests:
               job: new-api
               severity: critical
             exp_annotations:
-              summary: new-api service success ratio is below 80%
-              description: Immediate investigation is required for cluster test job new-api.
+              summary: new-api 服务成功率低于 80%
+              description: 请立即检查集群 test、任务 new-api 的服务和上游状态。
 
   - name: channel failure retry and no-success alerts
     interval: 1m
@@ -82,8 +82,8 @@ tests:
               job: new-api
               severity: warning
             exp_annotations:
-              summary: new-api channel failure ratio is above 20%
-              description: Inspect channel 7 upstream errors and availability in cluster test.
+              summary: new-api 渠道失败率高于 20%
+              description: 请检查集群 test 中渠道 7 的上游错误和可用性。
       - eval_time: 16m
         alertname: NewAPIChannelRetryRatioHigh
         exp_alerts:
@@ -93,8 +93,8 @@ tests:
               job: new-api
               severity: warning
             exp_annotations:
-              summary: new-api channel retry ratio is above 20%
-              description: Inspect routing and upstream stability for channel 7 in cluster test.
+              summary: new-api 渠道重试率高于 20%
+              description: 请检查集群 test 中渠道 7 的路由和上游稳定性。
       - eval_time: 11m
         alertname: NewAPIChannelNoSuccess
         exp_alerts:
@@ -104,8 +104,8 @@ tests:
               job: new-api
               severity: critical
             exp_annotations:
-              summary: new-api channel has no successful attempts
-              description: Channel 8 had at least 20 attempts and no success in the last 5 minutes.
+              summary: new-api 渠道在窗口内无成功请求
+              description: 渠道 8 在最近 5 分钟内至少尝试 20 次但没有一次成功。
 
   - name: database utilization excludes unlimited pools and separates severity
     interval: 1m
@@ -133,8 +133,8 @@ tests:
               job: new-api
               severity: warning
             exp_annotations:
-              summary: new-api database pool utilization is above 80%
-              description: Check database latency and pool sizing for app-critical database main.
+              summary: new-api 数据库连接池利用率高于 80%
+              description: 请检查实例 app-critical 的 main 数据库延迟和连接池容量。
           - exp_labels:
               cluster: test
               database: main
@@ -142,8 +142,8 @@ tests:
               job: new-api
               severity: warning
             exp_annotations:
-              summary: new-api database pool utilization is above 80%
-              description: Check database latency and pool sizing for app-warning database main.
+              summary: new-api 数据库连接池利用率高于 80%
+              description: 请检查实例 app-warning 的 main 数据库延迟和连接池容量。
       - eval_time: 12m
         alertname: NewAPIDBPoolUtilizationCritical
         exp_alerts:
@@ -154,8 +154,8 @@ tests:
               job: new-api
               severity: critical
             exp_annotations:
-              summary: new-api database pool utilization is above 95%
-              description: Database pool exhaustion is imminent on app-critical database main.
+              summary: new-api 数据库连接池利用率高于 95%
+              description: 实例 app-critical 的 main 数据库连接池即将耗尽，请立即检查。
 
   - name: database waits require sustained count and average duration
     interval: 1m
@@ -175,8 +175,8 @@ tests:
               job: new-api
               severity: warning
             exp_annotations:
-              summary: new-api database connection waits are sustained
-              description: Check pool sizing, slow SQL or transactions, and database response time for app-high database main.
+              summary: new-api 数据库连接等待持续偏高
+              description: 请检查实例 app-high 的 main 数据库连接池容量、慢 SQL、事务和响应时间。
 
   - name: mature instance with sustained runtime growth alerts
     interval: 1m
@@ -197,8 +197,8 @@ tests:
               job: new-api
               severity: warning
             exp_annotations:
-              summary: new-api goroutine count is growing continuously
-              description: Instance app-high has at least 500 goroutines and a 30-minute growth rate above 0.05 goroutines/s. Check stuck streams, retries, polling loops, and goroutine profiles.
+              summary: new-api goroutine 数量持续增长
+              description: 实例 app-high 至少有 500 个 goroutine，且 30 分钟增长速率高于 0.05 goroutines/s。请检查卡住的流式请求、重试、轮询循环和 goroutine profile。
       - eval_time: 46m
         alertname: NewAPIGoHeapGrowing
         exp_alerts:
@@ -208,8 +208,8 @@ tests:
               job: new-api
               severity: warning
             exp_annotations:
-              summary: new-api Go heap is growing continuously
-              description: Instance app-high has at least 512 MiB heap allocation and a 30-minute growth rate above 128 KiB/s. Check heap profiles, retained request data, caches, and task state.
+              summary: new-api Go 堆内存持续增长
+              description: 实例 app-high 的堆内存分配至少为 512 MiB，且 30 分钟增长速率高于 128 KiB/s。请检查 heap profile、长期保留的请求数据、缓存和任务状态。
 
   - name: stable high runtime values do not alert
     interval: 1m
@@ -301,8 +301,8 @@ tests:
               job: new-api
               severity: critical
             exp_annotations:
-              summary: new-api instance is down
-              description: Prometheus cannot scrape instance app-1 in cluster test.
+              summary: new-api 实例不可达
+              description: Prometheus 无法抓取集群 test 中的实例 app-1。
       - eval_time: 6m
         alertname: NewAPIMasterCollectorAbsent
         exp_alerts:
@@ -312,8 +312,8 @@ tests:
               job: new-api
               severity: warning
             exp_annotations:
-              summary: new-api Master channel collector is absent
-              description: Verify that one Master instance exports channel_state for cluster default.
+              summary: new-api Master 渠道 collector 缺失
+              description: 请确认 default 集群中有一个 Master 实例导出 channel_state 指标。
 
   - name: redis errors and degradations require sustained event volume
     interval: 1m
@@ -336,8 +336,8 @@ tests:
               job: new-api
               severity: warning
             exp_annotations:
-              summary: new-api Redis operation errors are sustained
-              description: Check Redis connectivity and latency for instance app-high in cluster test.
+              summary: new-api Redis 操作错误持续发生
+              description: 请检查集群 test 中实例 app-high 的 Redis 连接和延迟。
       - eval_time: 11m
         alertname: NewAPIRedisDegradationsHigh
         exp_alerts:
@@ -347,8 +347,8 @@ tests:
               job: new-api
               severity: warning
             exp_annotations:
-              summary: new-api Redis degradations are sustained
-              description: Check fallback behavior and Redis health for instance app-high in cluster test.
+              summary: new-api Redis 降级持续发生
+              description: 请检查集群 test 中实例 app-high 的降级行为和 Redis 健康状态。
 
   - name: billing alerts require sustained minimum event volume
     interval: 1m
@@ -372,8 +372,8 @@ tests:
               job: new-api
               severity: warning
             exp_annotations:
-              summary: new-api billing failure ratio is elevated
-              description: Inspect billing operation, source, and fixed failure reason metrics for cluster test job new-api.
+              summary: new-api 计费失败率持续偏高
+              description: 请检查集群 test、任务 new-api 的计费操作、来源和固定失败原因指标。
       - eval_time: 21m
         alertname: NewAPISubscriptionRejectionsHigh
         exp_alerts:
@@ -382,8 +382,8 @@ tests:
               job: new-api
               severity: warning
             exp_annotations:
-              summary: new-api subscription rejections are sustained
-              description: Inspect subscription availability, expiry, and quota for cluster test job new-api.
+              summary: new-api 订阅拒绝持续发生
+              description: 请检查集群 test、任务 new-api 的订阅可用性、到期时间和额度。
       - eval_time: 21m
         alertname: NewAPIQuotaSaturationDetected
         exp_alerts:
@@ -392,8 +392,8 @@ tests:
               job: new-api
               severity: critical
             exp_annotations:
-              summary: new-api quota saturation events were detected
-              description: Investigate quota conversion audit logs before processing further billing traffic in cluster test job new-api.
+              summary: new-api 检测到 quota saturation 事件
+              description: 继续处理集群 test、任务 new-api 的计费流量前，请先检查额度转换审计日志。
 
   - name: isolated billing events do not trigger alerts
     interval: 1m
@@ -440,8 +440,8 @@ tests:
               platform: video
               severity: warning
             exp_annotations:
-              summary: new-api asynchronous task backlog is above the candidate threshold
-              description: Platform video has more than 100 unfinished tasks for 15 minutes in cluster test; calibrate this threshold with production traffic.
+              summary: new-api 异步任务积压超过候选阈值
+              description: 集群 test 中平台 video 的未完成任务已连续 15 分钟超过 100 个，请使用生产流量校准该阈值。
       - eval_time: 6m
         alertname: NewAPITaskQueueCollectorDown
         exp_alerts:
@@ -451,8 +451,8 @@ tests:
               job: new-api
               severity: warning
             exp_annotations:
-              summary: new-api task queue collector is failing
-              description: Check the Master database connection and grouped task queue queries for cluster test.
+              summary: new-api 任务队列 collector 失败
+              description: 请检查集群 test 的 Master 数据库连接和分组任务队列查询。
       - eval_time: 6m
         alertname: NewAPITaskQueueCollectorAbsent
         exp_alerts:
@@ -462,8 +462,8 @@ tests:
               job: new-api
               severity: warning
             exp_annotations:
-              summary: new-api Master task queue collector is absent
-              description: Verify that one Master instance exports task_queue for cluster default.
+              summary: new-api Master 任务队列 collector 缺失
+              description: 请确认 default 集群中有一个 Master 实例导出 task_queue 指标。
 
   - name: task queue at candidate boundary does not alert
     interval: 1m
@@ -504,8 +504,8 @@ tests:
               job: new-api
               severity: warning
             exp_annotations:
-              summary: new-api relay rate-limit errors are elevated
-              description: Inspect upstream 429 responses and channel routing for cluster test job new-api.
+              summary: new-api Relay 限流错误持续偏高
+              description: 请检查集群 test、任务 new-api 的上游 429 响应和渠道路由。
       - eval_time: 16m
         alertname: NewAPIUpstream5xxErrorsHigh
         exp_alerts:
@@ -515,8 +515,8 @@ tests:
               job: new-api
               severity: warning
             exp_annotations:
-              summary: new-api upstream 5xx errors are elevated
-              description: Inspect upstream availability and channel error distribution for cluster test job new-api.
+              summary: new-api 上游 5xx 错误持续偏高
+              description: 请检查集群 test、任务 new-api 的上游可用性和渠道错误分布。
       - eval_time: 16m
         alertname: NewAPIRelayTimeoutsHigh
         exp_alerts:
@@ -526,8 +526,8 @@ tests:
               job: new-api
               severity: warning
             exp_annotations:
-              summary: new-api relay timeouts are elevated
-              description: Inspect upstream latency, network connectivity, and timeout settings for cluster test job new-api.
+              summary: new-api Relay 超时持续偏高
+              description: 请检查集群 test、任务 new-api 的上游延迟、网络连接和超时设置。
       - eval_time: 16m
         alertname: NewAPILocalRateLimitRejectionsHigh
         exp_alerts:
@@ -536,8 +536,8 @@ tests:
               job: new-api
               severity: warning
             exp_annotations:
-              summary: new-api local rate-limit rejections are sustained
-              description: Inspect rejection scope and reason metrics for cluster test job new-api before changing rate limits.
+              summary: new-api 本地限流拒绝持续发生
+              description: 调整限流阈值前，请先检查集群 test、任务 new-api 的 scope 和 reason 指标。
 
   - name: low error and rejection volume does not trigger anomaly alerts
     interval: 1m
@@ -589,8 +589,8 @@ tests:
               relay_format: openai
               severity: warning
             exp_annotations:
-              summary: new-api Relay P95 latency exceeds the configured threshold
-              description: Relay format openai P95 latency is above its calibrated threshold in cluster test job new-api. Check upstream latency, retries, and format-specific load.
+              summary: new-api Relay P95 延迟超过已配置阈值
+              description: 集群 test、任务 new-api 中 Relay 格式 openai 的 P95 延迟超过校准阈值，请检查上游延迟、重试和该格式的负载。
 
   - name: configured P99 latency threshold requires sufficient traffic
     interval: 1m
@@ -615,8 +615,8 @@ tests:
               relay_format: openai_image
               severity: critical
             exp_annotations:
-              summary: new-api Relay P99 latency exceeds the configured threshold
-              description: Relay format openai_image P99 latency is above its calibrated threshold in cluster test job new-api. Investigate upstream saturation, network latency, and long-running requests.
+              summary: new-api Relay P99 延迟超过已配置阈值
+              description: 集群 test、任务 new-api 中 Relay 格式 openai_image 的 P99 延迟超过校准阈值，请检查上游饱和、网络延迟和长时间请求。
 
   - name: stream first token waiters alert by channel and severity
     interval: 1m
@@ -865,8 +865,8 @@ tests:
               relay_format: openai
               severity: critical
             exp_annotations:
-              summary: new-api Relay inflight exceeds the calibrated critical threshold
-              description: Relay format openai inflight is above its calibrated critical threshold in cluster test job new-api. Check long-lived streams, upstream latency, request accumulation, instance distribution, and scaling needs; this threshold is not an application hard limit.
+              summary: new-api Relay 并发超过已校准的 critical 阈值
+              description: 集群 test、任务 new-api 中 Relay 格式 openai 的 inflight 超过已校准的 critical 阈值。请检查长连接流、上游延迟、请求积压、实例分布和扩容需求；该阈值不是应用硬限制。
       - eval_time: 11m
         alertname: NewAPIRelayInflightHigh
         exp_alerts:
@@ -876,8 +876,8 @@ tests:
               relay_format: openai
               severity: warning
             exp_annotations:
-              summary: new-api Relay inflight exceeds the calibrated warning threshold
-              description: Relay format openai inflight is above its calibrated warning threshold in cluster test job new-api. Check long-lived streams, upstream latency, request accumulation, instance distribution, and scaling needs; this threshold is not an application hard limit.
+              summary: new-api Relay 并发超过已校准的 warning 阈值
+              description: 集群 test、任务 new-api 中 Relay 格式 openai 的 inflight 超过已校准的 warning 阈值。请检查长连接流、上游延迟、请求积压、实例分布和扩容需求；该阈值不是应用硬限制。
 
   - name: relay inflight equal to threshold does not alert
     interval: 1m

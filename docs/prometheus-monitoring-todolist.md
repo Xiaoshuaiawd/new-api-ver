@@ -21,7 +21,7 @@
 
 ---
 
-> 状态（2026-07-29）：P0-A、P0-B 已完成；P0-C 的规则、Alertmanager 示例、Grafana provisioning/dashboard、Prometheus 配置、独立 Compose 和部署文档已完成静态实现与本地联调，发布验收仍保留生产基数校准、活动 Relay inflight 多实例下钻等环境项。P1 D1-D10 能力保留；D11 已将默认展示重构为主机、程序、中间件、渠道四层中文监控，新增 Node/PostgreSQL/MySQL/Redis Exporter、渠道 TTFT/Token 指标和 1 分钟/5 分钟实时聚合规则。D12 新增实时流式首字等待、主机/进程/Exporter/中间件告警以及渠道阈值基础设施。当前共 47 条基础 Recording Rules、72 条告警、0 条默认 Relay/渠道延迟与并发阈值规则和 108 条 Dashboard PromQL。DB 等待、Goroutine/heap 增长、任务积压、Relay/渠道延迟与并发阈值都需要生产校准，生产证据完成前不视为最终值。
+> 状态（2026-07-29）：P0-A、P0-B 已完成；P0-C 的规则、Alertmanager 示例、Grafana provisioning/dashboard、Prometheus 配置、独立 Compose 和部署文档已完成静态实现与本地联调，发布验收仍保留生产基数校准、活动 Relay inflight 多实例下钻等环境项。P1 D1-D10 能力保留；D11 已将默认展示重构为主机、程序、中间件、渠道四层中文监控，新增 Node/PostgreSQL/MySQL/Redis Exporter、渠道 TTFT/Token 指标和 1 分钟/5 分钟实时聚合规则。D12 新增实时流式首字等待、主机/进程/Exporter/中间件告警以及渠道阈值基础设施。D13 已增加飞书 IP 白名单机器人转换服务、中文彩色卡片和内网投递链路，待提供生产 Webhook URL 后完成真实 firing/resolved 验收。当前共 47 条基础 Recording Rules、72 条告警、0 条默认 Relay/渠道延迟与并发阈值规则和 108 条 Dashboard PromQL。DB 等待、Goroutine/heap 增长、任务积压、Relay/渠道延迟与并发阈值都需要生产校准，生产证据完成前不视为最终值。
 >
 > 勾选规则：只有代码、测试、配置或文档已经落地并通过对应验收时，才允许把条目标记为 `[x]`。仅完成设计、创建空文件或本地手工观察不算完成。
 
@@ -31,7 +31,7 @@
 | --- | --- | --- | --- |
 | P0-A 基础接入 | 代码与自动测试已完成 | 独立 Registry、安全 `/metrics`、Go/Process/Build Info、DB 连接池 | 部署环境手工抓取纳入 P0-C 联调 |
 | P0-B 流量与渠道 | 代码与自动测试已完成 | HTTP、Relay、流式、渠道 attempt/retry/inflight/duration、固定错误分类及 `ErrorType` 兜底、Master-only `channel_enabled`/collector 健康状态、渠道 Histogram 关闭开关、客户端取消与 deadline 传播、异常流失败、clean EOF 成功回归、Prometheus/性能看板统一最终成功判定、Midjourney controller 成功边界 | 生产 `R/N` 基数验收归 P0-C 发布联调 |
-| P0-C 可视化与告警 | 进行中 | Recording/告警规则、Prometheus/Alertmanager 配置、Grafana 双文件夹 provisioning 与 6 个中文 dashboard、独立 Compose、静态验证脚本、部署文档和本地运行联调 | 生产基数校准、活动 Relay inflight 的多实例下钻、四层 dashboard 的发布环境容器加载和完整发布验收 |
+| P0-C 可视化与告警 | 进行中 | Recording/告警规则、Prometheus/Alertmanager 配置、Grafana 双文件夹 provisioning 与 6 个中文 dashboard、飞书彩色卡片转换服务、独立 Compose、静态验证脚本、部署文档和本地运行联调 | 生产 Webhook 真实投递验收、生产基数校准、活动 Relay inflight 的多实例下钻、四层 dashboard 的发布环境容器加载和完整发布验收 |
 | P1 业务监控 | 进行中 | D1-D10 限流、Redis/缓存、计费、异步任务、transport 首字节、固定错误、DB 等待、Runtime 增长和 Relay 阈值基础设施；D11 渠道 TTFT、Token 吞吐、上游缓存率、1 分钟实时渠道口径和四层中文看板 | 发布环境加载验收与生产阈值校准 |
 
 注：本文中“口径已确定”与“代码已实现”是两种状态。规范性条目可因文档决策已落地而勾选；指标、collector 和验收条目必须有对应代码与测试依据。
@@ -64,6 +64,7 @@
 | 计费、Token 与实际额度 | `pkg/prometheus_metrics/billing.go`、`model/log.go`、`service/billing.go`、`service/billing_session.go`、`service/task_billing.go` | `pkg/prometheus_metrics/billing_test.go`、`service/billing_metrics_test.go`、`service/task_billing_test.go` 及对应计费会话测试 |
 | 异步任务提交、poll、首次终态与队列 | `pkg/prometheus_metrics/task.go`、`task_queue_collector.go`、`controller/relay.go`、`service/task_polling.go`、`controller/midjourney.go`、`relay/relay_task.go`、`relay/mjproxy_handler.go` | `task_test.go`、`task_queue_collector_test.go`、`controller/relay_metrics_test.go`、`service/task_polling_test.go`、`controller/midjourney_metrics_test.go`、`relay/relay_task_metrics_test.go`、`relay/mjproxy_handler_test.go`、`model/task_cas_test.go` |
 | Recording/Alert Rules | `deploy/monitoring/recording-rules.yml`、`alert-rules.yml` | `recording-rules.test.yml`、`alert-rules.test.yml` |
+| 飞书告警通知 | `pkg/feishualert/`、`cmd/feishu-alert-webhook/`、`deploy/monitoring/feishu-webhook/`、`alertmanager.yml.example` | `pkg/feishualert/*_test.go`、`cmd/feishu-alert-webhook/main_test.go`、`deploy/monitoring/validate.sh` |
 | P0-C/P1 静态部署产物 | `docker-compose.monitoring.yml`、`deploy/monitoring/prometheus.yml`、Exporter、Alertmanager/Grafana 配置、`core/` 四层 dashboard、`extended/` 计费/任务 dashboard、`docs/prometheus-monitoring.md` | `deploy/monitoring/validate.sh`：Prometheus/rules、PostgreSQL/MySQL profile、Compose、YAML/JSON、47 条基础 Recording Rules、72 条告警、0 条默认 Relay/渠道延迟与并发阈值规则和 108 条 dashboard PromQL 静态校验 |
 
 证据索引只说明“在哪里验证”，不替代对应批次的验收命令。测试名称或文件调整时必须同步更新本表，避免文档中的完成状态失去来源。
@@ -1376,6 +1377,18 @@ git diff --check
 - [x] D12-5：Alertmanager 增加渠道、主机和中间件 warning/critical 抑制，新增规则 annotation 使用中文。
 - [x] D12-6：当前静态口径为 47 条 Recording Rules、72 条告警、0 条默认 Relay/渠道延迟与并发阈值规则；固定输入测试覆盖实时首字、主机资源、PostgreSQL/Redis、任务成功率/轮询错误和渠道阈值匹配。
 - [ ] D12-7：发布到生产并观察告警噪声；生产阈值和外部通知链路验收完成后勾选。
+
+### 批次 D13：飞书自定义机器人告警
+
+**文件：** `pkg/feishualert/`、`cmd/feishu-alert-webhook/`、`deploy/monitoring/feishu-webhook/`、`docker-compose.monitoring.yml`、`prometheus.yml`、`alertmanager.yml.example`、`alert-rules.yml`、`alert-rules.test.yml`、`validate.sh` 和监控文档。
+
+- [x] D13-1：新增独立 Go 转换服务，解析 Alertmanager Webhook v4，严格校验飞书官方 HTTPS Webhook URL，上游非 2xx 或 `code != 0` 时返回 502 交由 Alertmanager 重试。
+- [x] D13-2：critical firing 使用红色卡片并 @所有人，warning firing 使用橙色卡片，resolved 使用绿色卡片；卡片为中文，最多展示 10 条，消息体严格小于 20 KiB。
+- [x] D13-3：只展示固定低基数标签，过滤未知标签和 annotation 中的 `<at>` 注入；Webhook token 不进入镜像、配置、环境变量值、日志、指标标签或 HTTP 错误响应。
+- [x] D13-4：转换服务提供 `/healthz`、`/readyz`、`/metrics`，以 UID/GID `65532:65532` 在只读、无宿主机端口的容器内运行，Alertmanager 仅通过 Docker 内网访问。
+- [x] D13-5：现有 72 条告警的 `summary`/`description` 已中文化；静态契约通过 SHA-256 固定非注释字段，防止误改 alertname、expr、for、labels 和阈值。
+- [x] D13-6：定向测试、race 测试、Prometheus/Alertmanager/Compose 静态校验、告警固定输入测试和文档检查已纳入验收流程。
+- [ ] D13-7：在飞书机器人 IP 白名单中加入 `198.44.181.187`，以用户提供的真实 Webhook URL 部署，并完成 critical firing、warning firing、resolved 三种真实卡片验收。
 
 ### 批次 E：生产校准
 
