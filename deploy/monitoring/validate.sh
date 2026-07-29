@@ -19,6 +19,7 @@ $monitoring_dir/relay-concurrency-thresholds.yml
 $monitoring_dir/channel-latency-thresholds.yml
 $monitoring_dir/channel-concurrency-thresholds.yml
 $monitoring_dir/alertmanager.yml.example
+$monitoring_dir/feishu-webhook/Dockerfile
 $monitoring_dir/targets/postgres-exporter.yml
 $monitoring_dir/targets/mysql-exporter.yml
 $monitoring_dir/grafana/provisioning/datasources/prometheus.yml
@@ -30,6 +31,7 @@ $monitoring_dir/grafana/dashboards/core/channel-overview.json
 $monitoring_dir/grafana/dashboards/extended/billing-overview.json
 $monitoring_dir/grafana/dashboards/extended/task-overview.json
 $monitoring_dir/secrets/.gitignore
+$monitoring_dir/secrets/feishu-webhook-url.example
 $monitoring_dir/secrets/postgres-exporter-password.example
 $monitoring_dir/secrets/redis-exporter-password.example
 $monitoring_dir/secrets/mysql-exporter.cnf.example
@@ -53,10 +55,25 @@ ruby -e '
   abort "Redis exporter password file example must be a non-empty redis URI to password JSON object" unless valid
 ' "$monitoring_dir/secrets/redis-exporter-password.example"
 
+ruby -e '
+  require "uri"
+
+  value = File.read(ARGV.fetch(0)).strip
+  uri = URI.parse(value)
+  valid = uri.scheme == "https" &&
+    uri.host == "open.feishu.cn" &&
+    uri.port == 443 &&
+    uri.userinfo.nil? &&
+    uri.query.nil? &&
+    uri.fragment.nil? &&
+    uri.path.match?(%r{\A/open-apis/bot/v2/hook/[^/]+\z})
+  abort "Feishu webhook example must be a complete official custom-bot URL" unless valid
+' "$monitoring_dir/secrets/feishu-webhook-url.example"
+
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
 	PROMETHEUS_BEARER_TOKEN_FILE="$monitoring_dir/secrets/new-api-bearer-token.example" \
 	GRAFANA_ADMIN_PASSWORD_FILE="$monitoring_dir/secrets/grafana-admin-password.example" \
-	ALERTMANAGER_WEBHOOK_URL_FILE="$monitoring_dir/secrets/alertmanager-webhook-url.example" \
+	FEISHU_WEBHOOK_URL_FILE="$monitoring_dir/secrets/feishu-webhook-url.example" \
 	POSTGRES_EXPORTER_PASSWORD_FILE="$monitoring_dir/secrets/postgres-exporter-password.example" \
 	REDIS_EXPORTER_PASSWORD_FILE="$monitoring_dir/secrets/redis-exporter-password.example" \
 	MYSQL_EXPORTER_CONFIG_FILE="$monitoring_dir/secrets/mysql-exporter.cnf.example" \
@@ -68,7 +85,7 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
 
 	PROMETHEUS_BEARER_TOKEN_FILE="$monitoring_dir/secrets/new-api-bearer-token.example" \
 	GRAFANA_ADMIN_PASSWORD_FILE="$monitoring_dir/secrets/grafana-admin-password.example" \
-	ALERTMANAGER_WEBHOOK_URL_FILE="$monitoring_dir/secrets/alertmanager-webhook-url.example" \
+	FEISHU_WEBHOOK_URL_FILE="$monitoring_dir/secrets/feishu-webhook-url.example" \
 	POSTGRES_EXPORTER_PASSWORD_FILE="$monitoring_dir/secrets/postgres-exporter-password.example" \
 	REDIS_EXPORTER_PASSWORD_FILE="$monitoring_dir/secrets/redis-exporter-password.example" \
 	MYSQL_EXPORTER_CONFIG_FILE="$monitoring_dir/secrets/mysql-exporter.cnf.example" \
@@ -415,6 +432,19 @@ ruby -e '
   unless config.fetch("route").fetch("group_by").include?("relay_format")
     abort "relay_format missing from Alertmanager group_by"
   end
+  expected_receiver_names = %w[new-api-webhook-warning new-api-webhook-critical]
+  receivers = config.fetch("receivers").select { |receiver| expected_receiver_names.include?(receiver.fetch("name")) }
+  abort "missing Feishu Alertmanager receivers" unless receivers.length == expected_receiver_names.length
+  receivers.each do |receiver|
+    webhooks = receiver.fetch("webhook_configs")
+    abort "Feishu receiver must contain exactly one webhook" unless webhooks.length == 1
+    webhook = webhooks.first
+    unless webhook.fetch("url") == "http://feishu-alert-webhook:8080/api/v1/alerts" &&
+        webhook.fetch("send_resolved") == true &&
+        webhook.fetch("timeout") == "15s"
+      abort "Feishu receiver webhook contract is invalid"
+    end
+  end
   matched = config.fetch("inhibit_rules").any? do |rule|
     rule.fetch("source_matchers").include?(%q{alertname="NewAPIRelayP99LatencyHigh"}) &&
       rule.fetch("target_matchers").include?(%q{alertname="NewAPIRelayP95LatencyHigh"}) &&
@@ -439,6 +469,8 @@ rg -q '^  scrape_interval: 15s$' "$monitoring_dir/prometheus.yml"
 rg -q '^  scrape_timeout: 10s$' "$monitoring_dir/prometheus.yml"
 rg -q '^    cluster: default$' "$monitoring_dir/prometheus.yml"
 rg -q '^  - job_name: new-api$' "$monitoring_dir/prometheus.yml"
+rg -q '^  - job_name: feishu-alert-webhook$' "$monitoring_dir/prometheus.yml"
+rg -q '^          - feishu-alert-webhook:8080$' "$monitoring_dir/prometheus.yml"
 rg -q '^      credentials_file: /etc/prometheus/secrets/new-api-bearer-token$' "$monitoring_dir/prometheus.yml"
 rg -q 'relay-latency-thresholds.yml:/etc/prometheus/rules/relay-latency-thresholds.yml:ro' "$repo_dir/docker-compose.monitoring.yml"
 rg -q 'relay-concurrency-thresholds.yml:/etc/prometheus/rules/relay-concurrency-thresholds.yml:ro' "$repo_dir/docker-compose.monitoring.yml"
@@ -446,6 +478,11 @@ rg -q 'channel-latency-thresholds.yml:/etc/prometheus/rules/channel-latency-thre
 rg -q 'channel-concurrency-thresholds.yml:/etc/prometheus/rules/channel-concurrency-thresholds.yml:ro' "$repo_dir/docker-compose.monitoring.yml"
 rg -q '^inhibit_rules:$' "$monitoring_dir/alertmanager.yml.example"
 rg -q '^        send_resolved: true$' "$monitoring_dir/alertmanager.yml.example"
+rg -q '^      - url: http://feishu-alert-webhook:8080/api/v1/alerts$' "$monitoring_dir/alertmanager.yml.example"
+if rg -q 'url_file: /run/secrets/alertmanager_webhook_url' "$monitoring_dir/alertmanager.yml.example"; then
+	echo "Alertmanager must send to the internal Feishu alert bridge" >&2
+	exit 1
+fi
 rg -q '^!\*\.example$' "$monitoring_dir/secrets/.gitignore"
 
 ruby -e '
@@ -479,7 +516,7 @@ ruby -e '
 
 PROMETHEUS_BEARER_TOKEN_FILE="$monitoring_dir/secrets/new-api-bearer-token.example" \
 GRAFANA_ADMIN_PASSWORD_FILE="$monitoring_dir/secrets/grafana-admin-password.example" \
-ALERTMANAGER_WEBHOOK_URL_FILE="$monitoring_dir/secrets/alertmanager-webhook-url.example" \
+FEISHU_WEBHOOK_URL_FILE="$monitoring_dir/secrets/feishu-webhook-url.example" \
 	POSTGRES_EXPORTER_PASSWORD_FILE="$monitoring_dir/secrets/postgres-exporter-password.example" \
 	REDIS_EXPORTER_PASSWORD_FILE="$monitoring_dir/secrets/redis-exporter-password.example" \
 	MYSQL_EXPORTER_CONFIG_FILE="$monitoring_dir/secrets/mysql-exporter.cnf.example" \
@@ -489,9 +526,16 @@ ALERTMANAGER_WEBHOOK_URL_FILE="$monitoring_dir/secrets/alertmanager-webhook-url.
 	NEW_API_DOCKER_NETWORK=example \
 		docker compose -f "$repo_dir/docker-compose.monitoring.yml" config --format json >"$tmp_dir/compose.json"
 jq -e '
-  (.services | keys | sort) == ["alertmanager", "grafana", "node-exporter", "prometheus", "redis-exporter"] and
+  (.services | keys | sort) == ["alertmanager", "feishu-alert-webhook", "grafana", "node-exporter", "prometheus", "redis-exporter"] and
   ([.services[].image | endswith(":latest")] | any | not) and
-  ([.services.prometheus, .services.grafana, .services.alertmanager] | map(has("healthcheck")) | all) and
+  ([.services.prometheus, .services.grafana, .services.alertmanager, .services["feishu-alert-webhook"]] | map(has("healthcheck")) | all) and
+  (.services["feishu-alert-webhook"] | has("ports") | not) and
+  (.services["feishu-alert-webhook"].read_only == true) and
+  (.services["feishu-alert-webhook"].networks | has("monitoring")) and
+  ([.services["feishu-alert-webhook"].secrets[].source] | index("feishu_webhook_url") != null) and
+  (.services.alertmanager.depends_on["feishu-alert-webhook"].condition == "service_healthy") and
+  (.secrets | has("feishu_webhook_url")) and
+  (.secrets | has("alertmanager_webhook_url") | not) and
   (.services["node-exporter"] | has("ports") | not) and
   (.services["redis-exporter"] | has("ports") | not) and
   (.services["redis-exporter"].networks | has("application")) and

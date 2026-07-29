@@ -38,6 +38,29 @@ services:
       retries: 3
       start_period: 15s
 
+  feishu-alert-webhook:
+    build:
+      context: .
+      dockerfile: deploy/monitoring/feishu-webhook/Dockerfile
+    image: new-api-feishu-alert-webhook:local
+    restart: unless-stopped
+    read_only: true
+    environment:
+      FEISHU_WEBHOOK_URL_FILE: /run/secrets/feishu_webhook_url
+      FEISHU_ALERT_TIMEZONE: Asia/Shanghai
+    secrets:
+      - feishu_webhook_url
+    networks:
+      - monitoring
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/feishu-alert-webhook", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   alertmanager:
     image: prom/alertmanager:v0.28.1
     restart: unless-stopped
@@ -49,8 +72,9 @@ services:
     volumes:
       - ./deploy/monitoring/alertmanager.yml.example:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager_data:/alertmanager
-    secrets:
-      - alertmanager_webhook_url
+    depends_on:
+      feishu-alert-webhook:
+        condition: service_healthy
     networks:
       - monitoring
     security_opt:
@@ -174,8 +198,8 @@ networks:
 secrets:
   grafana_admin_password:
     file: "${GRAFANA_ADMIN_PASSWORD_FILE:?set GRAFANA_ADMIN_PASSWORD_FILE}"
-  alertmanager_webhook_url:
-    file: "${ALERTMANAGER_WEBHOOK_URL_FILE:?set ALERTMANAGER_WEBHOOK_URL_FILE}"
+  feishu_webhook_url:
+    file: "${FEISHU_WEBHOOK_URL_FILE:?set FEISHU_WEBHOOK_URL_FILE}"
   postgres_exporter_password:
     file: "${POSTGRES_EXPORTER_PASSWORD_FILE:?set POSTGRES_EXPORTER_PASSWORD_FILE}"
   redis_exporter_password:

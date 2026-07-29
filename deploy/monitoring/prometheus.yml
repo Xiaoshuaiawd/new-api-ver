@@ -41,6 +41,14 @@ scrape_configs:
           cluster: default
           instance: new-api-1
 
+  - job_name: feishu-alert-webhook
+    static_configs:
+      - targets:
+          - feishu-alert-webhook:8080
+        labels:
+          cluster: default
+          instance: feishu-alert-webhook
+
   - job_name: node-exporter
     static_configs:
       - targets:

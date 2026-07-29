@@ -210,9 +210,11 @@ inhibit_rules:
 receivers:
   - name: new-api-webhook-warning
     webhook_configs:
-      - url_file: /run/secrets/alertmanager_webhook_url
+      - url: http://feishu-alert-webhook:8080/api/v1/alerts
         send_resolved: true
+        timeout: 15s
   - name: new-api-webhook-critical
     webhook_configs:
-      - url_file: /run/secrets/alertmanager_webhook_url
+      - url: http://feishu-alert-webhook:8080/api/v1/alerts
         send_resolved: true
+        timeout: 15s
