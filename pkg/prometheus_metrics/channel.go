@@ -125,15 +125,9 @@ func RecordChannelTokens(channelID, channelType int, usage ChannelTokenUsage) {
 
 	channelIDLabel := strconv.Itoa(channelID)
 	channelTypeLabel := strconv.Itoa(channelType)
-	if usage.Input > 0 {
-		runtime.channel.tokens.WithLabelValues(channelIDLabel, channelTypeLabel, ChannelTokenTypeInput).Add(float64(usage.Input))
-	}
-	if usage.Output > 0 {
-		runtime.channel.tokens.WithLabelValues(channelIDLabel, channelTypeLabel, ChannelTokenTypeOutput).Add(float64(usage.Output))
-	}
-	if usage.CacheRead > 0 {
-		runtime.channel.tokens.WithLabelValues(channelIDLabel, channelTypeLabel, ChannelTokenTypeCacheRead).Add(float64(usage.CacheRead))
-	}
+	runtime.channel.tokens.WithLabelValues(channelIDLabel, channelTypeLabel, ChannelTokenTypeInput).Add(float64(usage.Input))
+	runtime.channel.tokens.WithLabelValues(channelIDLabel, channelTypeLabel, ChannelTokenTypeOutput).Add(float64(usage.Output))
+	runtime.channel.tokens.WithLabelValues(channelIDLabel, channelTypeLabel, ChannelTokenTypeCacheRead).Add(float64(usage.CacheRead))
 }
 
 func ObserveChannelFirstByte(channelID, channelType int, duration time.Duration) {

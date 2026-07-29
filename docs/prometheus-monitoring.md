@@ -309,7 +309,7 @@ Goroutine 和 Go heap 增长使用 `deriv(...[30m])` 按单实例计算每秒线
 - `instance`
 - `channel_id`
 
-上游缓存命中率定义为 `cache_read Token / input Token`，不是 Redis 命中率，也不是按请求条数统计。TTFT 从当前渠道 attempt 开始计时，只记录该渠道到第一个可交付内容的时间，不包含前一个失败渠道的耗时。Provider 没有返回 Usage 时，缓存命中率和 Token 吞吐面板显示“暂无数据”，不伪造为 `0`。
+上游缓存命中率定义为 `cache_read Token / input Token`，不是 Redis 命中率，也不是按请求条数统计。TTFT 从当前渠道 attempt 开始计时，只记录该渠道到第一个可交付内容的时间，不包含前一个失败渠道的耗时。Provider 已返回 Usage 且 `cache_read=0` 时显示 `0%`；Provider 完全没有返回 Usage 时，缓存命中率和 Token 吞吐面板显示“暂无数据”，不伪造为 `0`。
 
 渠道 Histogram 被关闭时，P90/P95、TTFT 和上游首字节面板显示 `No data`；attempt、retry、inflight、成功率和 Token Counter 仍然可用。上游首字节指标使用 `httptrace.GetConn` → `GotFirstResponseByte` 口径，覆盖共享 HTTP、AWS Bedrock 原生 SDK 和已接入的 WebSocket Upgrade 路径；它不是完整握手或第一条应用消息耗时。鉴权、文件上传、模型管理和任务轮询等辅助请求不混入。
 

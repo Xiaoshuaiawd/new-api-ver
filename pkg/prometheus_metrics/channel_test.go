@@ -123,6 +123,14 @@ func TestRecordChannelTokensUsesFixedTokenTypesAndIgnoresInvalidValues(t *testin
 	assert.NotContains(t, metrics, ` 999`)
 }
 
+func TestRecordChannelTokensPublishesZeroCacheReadWhenUsageExists(t *testing.T) {
+	runtime := activateMetricsTestRuntime(t)
+	RecordChannelTokens(13, 5, ChannelTokenUsage{Input: 100, Output: 40})
+
+	metrics := scrapeMetrics(t, runtime)
+	assert.Contains(t, metrics, `newapi_channel_tokens_total{channel_id="13",channel_type="5",token_type="cache_read"} 0`)
+}
+
 func activateMetricsTestRuntime(t *testing.T) *Runtime {
 	t.Helper()
 	runtime, err := NewRuntime(Config{Enabled: true, AllowPublic: true}, "v-test", nil, nil)
