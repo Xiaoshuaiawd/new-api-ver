@@ -16,6 +16,8 @@ $monitoring_dir/alert-rules.yml
 $monitoring_dir/alert-rules.test.yml
 $monitoring_dir/relay-latency-thresholds.yml
 $monitoring_dir/relay-concurrency-thresholds.yml
+$monitoring_dir/channel-latency-thresholds.yml
+$monitoring_dir/channel-concurrency-thresholds.yml
 $monitoring_dir/alertmanager.yml.example
 $monitoring_dir/targets/postgres-exporter.yml
 $monitoring_dir/targets/mysql-exporter.yml
@@ -92,6 +94,8 @@ sed \
 	-e "s#/etc/prometheus/rules/alert-rules.yml#$monitoring_dir/alert-rules.yml#" \
 	-e "s#/etc/prometheus/rules/relay-latency-thresholds.yml#$monitoring_dir/relay-latency-thresholds.yml#" \
 	-e "s#/etc/prometheus/rules/relay-concurrency-thresholds.yml#$monitoring_dir/relay-concurrency-thresholds.yml#" \
+	-e "s#/etc/prometheus/rules/channel-latency-thresholds.yml#$monitoring_dir/channel-latency-thresholds.yml#" \
+	-e "s#/etc/prometheus/rules/channel-concurrency-thresholds.yml#$monitoring_dir/channel-concurrency-thresholds.yml#" \
 	-e "s#/etc/prometheus/secrets/new-api-bearer-token#$monitoring_dir/secrets/new-api-bearer-token.example#" \
 	-e "s#/etc/prometheus/targets/postgres-exporter.yml#$monitoring_dir/targets/postgres-exporter.yml#" \
 	-e "s#/etc/prometheus/targets/mysql-exporter.yml#$monitoring_dir/targets/mysql-exporter.yml#" \
@@ -102,7 +106,9 @@ sed \
 	"$monitoring_dir/recording-rules.yml" \
 	"$monitoring_dir/alert-rules.yml" \
 	"$monitoring_dir/relay-latency-thresholds.yml" \
-	"$monitoring_dir/relay-concurrency-thresholds.yml"
+	"$monitoring_dir/relay-concurrency-thresholds.yml" \
+	"$monitoring_dir/channel-latency-thresholds.yml" \
+	"$monitoring_dir/channel-concurrency-thresholds.yml"
 ruby -e '
   require "tmpdir"
   require "yaml"
@@ -319,6 +325,65 @@ ruby -e '
     validate.call(YAML.safe_load(File.read(critical_only_path), aliases: true))
   end
 ' "$monitoring_dir/relay-concurrency-thresholds.yml"
+ruby -e '
+  require "yaml"
+
+  latency = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
+  concurrency = YAML.safe_load(File.read(ARGV.fetch(1)), aliases: true)
+  allowed_metrics = %w[duration_p95 ttft_p95 first_byte_p95].freeze
+  allowed_severities = %w[warning critical].freeze
+
+  validate_rules = lambda do |document, expected_record, expected_keys, value_pattern|
+    seen = {}
+    document.fetch("groups").flat_map { |group| group.fetch("rules") }.each do |rule|
+      raise ArgumentError, "channel threshold record name is invalid" unless rule.fetch("record") == expected_record
+      labels = rule.fetch("labels")
+      raise ArgumentError, "channel threshold labels are invalid" unless labels.keys.sort == expected_keys.sort
+      raise ArgumentError, "channel threshold cluster/job must be non-empty" if labels.fetch("cluster").to_s.empty? || labels.fetch("job").to_s.empty?
+      raise ArgumentError, "channel threshold channel_id is invalid" unless /\A[1-9][0-9]*\z/.match?(labels.fetch("channel_id").to_s)
+      raise ArgumentError, "channel threshold severity is invalid" unless allowed_severities.include?(labels.fetch("severity"))
+      if labels.key?("metric")
+        raise ArgumentError, "channel latency metric is invalid" unless allowed_metrics.include?(labels.fetch("metric"))
+      end
+      match = value_pattern.match(rule.fetch("expr").to_s.strip)
+      raise ArgumentError, "channel threshold must use vector(<positive value>)" unless match
+      value = Float(match[1], exception: false)
+      raise ArgumentError, "channel threshold must be finite and positive" unless value&.finite? && value.positive?
+      key = expected_keys.map { |name| labels.fetch(name) }
+      raise ArgumentError, "duplicate channel threshold #{key.join("/")}" if seen[key]
+      seen[key] = true
+    end
+  end
+
+  validate_rules.call(
+    latency,
+    "newapi_channel_latency_threshold_seconds",
+    %w[channel_id cluster job metric severity],
+    /\Avector\(([^()]+)\)\z/
+  )
+  validate_rules.call(
+    concurrency,
+    "newapi_channel_inflight_threshold",
+    %w[channel_id cluster job severity],
+    /\Avector\(([1-9][0-9]*)\)\z/
+  )
+
+  [latency, concurrency].each do |document|
+    thresholds = Hash.new { |hash, key| hash[key] = {} }
+    document.fetch("groups").flat_map { |group| group.fetch("rules") }.each do |rule|
+      labels = rule.fetch("labels")
+      key = labels.reject { |name, _| name == "severity" }.sort
+      value = Float(/\Avector\(([^()]+)\)\z/.match(rule.fetch("expr").to_s.strip)[1])
+      thresholds[key][labels.fetch("severity")] = value
+    end
+    thresholds.each do |key, values|
+      next unless values.key?("warning") && values.key?("critical")
+      unless values.fetch("critical") > values.fetch("warning")
+        raise ArgumentError, "critical channel threshold must exceed warning for #{key.inspect}"
+      end
+    end
+  end
+' "$monitoring_dir/channel-latency-thresholds.yml" "$monitoring_dir/channel-concurrency-thresholds.yml"
 "$promtool_bin" test rules "$monitoring_dir/recording-rules.test.yml"
 "$promtool_bin" test rules "$monitoring_dir/alert-rules.test.yml"
 ruby -e '
@@ -328,8 +393,8 @@ ruby -e '
   alerts = YAML.safe_load(File.read(ARGV.fetch(1)), aliases: true)
   recording_count = recording.fetch("groups").sum { |group| group.fetch("rules").length }
   alert_count = alerts.fetch("groups").sum { |group| group.fetch("rules").length }
-  abort "expected 46 recording rules, got #{recording_count}" unless recording_count == 46
-  abort "expected 28 alert rules, got #{alert_count}" unless alert_count == 28
+  abort "expected 47 recording rules, got #{recording_count}" unless recording_count == 47
+  abort "expected 72 alert rules, got #{alert_count}" unless alert_count == 72
 ' "$monitoring_dir/recording-rules.yml" "$monitoring_dir/alert-rules.yml"
 if command -v "$amtool_bin" >/dev/null 2>&1 || [ -x "$amtool_bin" ]; then
 	"$amtool_bin" check-config "$monitoring_dir/alertmanager.yml.example"
@@ -362,6 +427,12 @@ ruby -e '
       rule.fetch("equal").sort == %w[cluster job relay_format].sort
   end
   abort "missing Relay inflight inhibition" unless matched
+  matched = config.fetch("inhibit_rules").any? do |rule|
+    rule.fetch("source_matchers").include?(%q{alertname="NewAPIChannelFirstTokenWaitingCritical"}) &&
+      rule.fetch("target_matchers").include?(%q{alertname="NewAPIChannelFirstTokenWaitingHigh"}) &&
+      rule.fetch("equal").sort == %w[channel_id cluster job].sort
+  end
+  abort "missing channel first-token inhibition" unless matched
 ' "$monitoring_dir/alertmanager.yml.example"
 
 rg -q '^  scrape_interval: 15s$' "$monitoring_dir/prometheus.yml"
@@ -371,6 +442,8 @@ rg -q '^  - job_name: new-api$' "$monitoring_dir/prometheus.yml"
 rg -q '^      credentials_file: /etc/prometheus/secrets/new-api-bearer-token$' "$monitoring_dir/prometheus.yml"
 rg -q 'relay-latency-thresholds.yml:/etc/prometheus/rules/relay-latency-thresholds.yml:ro' "$repo_dir/docker-compose.monitoring.yml"
 rg -q 'relay-concurrency-thresholds.yml:/etc/prometheus/rules/relay-concurrency-thresholds.yml:ro' "$repo_dir/docker-compose.monitoring.yml"
+rg -q 'channel-latency-thresholds.yml:/etc/prometheus/rules/channel-latency-thresholds.yml:ro' "$repo_dir/docker-compose.monitoring.yml"
+rg -q 'channel-concurrency-thresholds.yml:/etc/prometheus/rules/channel-concurrency-thresholds.yml:ro' "$repo_dir/docker-compose.monitoring.yml"
 rg -q '^inhibit_rules:$' "$monitoring_dir/alertmanager.yml.example"
 rg -q '^        send_resolved: true$' "$monitoring_dir/alertmanager.yml.example"
 rg -q '^!\*\.example$' "$monitoring_dir/secrets/.gitignore"

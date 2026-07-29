@@ -47,6 +47,19 @@ func TestChannelAttemptTimingKeepsFirstResponseWithinAttempt(t *testing.T) {
 	assert.Equal(t, started.Add(200*time.Millisecond), info.FirstResponseTime)
 }
 
+func TestRelayInfoNotifiesCurrentChannelAttemptOnFirstResponse(t *testing.T) {
+	started := time.Date(2026, time.July, 29, 0, 0, 0, 0, time.UTC)
+	info := &RelayInfo{StartTime: started, isFirstResponse: true}
+	info.beginChannelAttempt(started)
+
+	called := 0
+	info.SetChannelAttemptFirstTokenObserver(func() { called++ })
+	info.setFirstResponseTime(started.Add(200 * time.Millisecond))
+	info.setFirstResponseTime(started.Add(500 * time.Millisecond))
+
+	assert.Equal(t, 1, called)
+}
+
 func TestRelayInfoFinalSuccess(t *testing.T) {
 	tests := []struct {
 		name           string

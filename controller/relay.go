@@ -269,14 +269,15 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if relayInfo.LastError != nil {
 			retryReason = prometheusmetrics.ClassifyNewAPIError(relayInfo.LastError)
 		}
-		service.TrackChannelAttempt(service.ChannelAttemptMeta{
+		service.TrackChannelAttemptWithFirstTokenObserver(service.ChannelAttemptMeta{
 			ChannelID:   channel.Id,
 			ChannelType: channel.Type,
 			Stream:      relayInfo.IsStream,
 			RetryIndex:  relayInfo.RetryIndex,
 			RetryReason: retryReason,
-		}, func() service.ChannelAttemptOutcome {
+		}, func(markFirstToken func()) service.ChannelAttemptOutcome {
 			relayInfo.BeginChannelAttempt()
+			relayInfo.SetChannelAttemptFirstTokenObserver(markFirstToken)
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				newAPIError = relay.WssHelper(c, relayInfo)

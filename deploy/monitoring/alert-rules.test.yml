@@ -618,6 +618,170 @@ tests:
               summary: new-api Relay P99 latency exceeds the configured threshold
               description: Relay format openai_image P99 latency is above its calibrated threshold in cluster test job new-api. Investigate upstream saturation, network latency, and long-running requests.
 
+  - name: stream first token waiters alert by channel and severity
+    interval: 1m
+    input_series:
+      - series: 'newapi_channel_stream_first_token_waiting{cluster="test",job="new-api",instance="app-1",channel_id="7",channel_type="1",threshold_seconds="30"}'
+        values: '3x8'
+      - series: 'newapi_channel_stream_first_token_waiting{cluster="test",job="new-api",instance="app-1",channel_id="7",channel_type="1",threshold_seconds="60"}'
+        values: '5x8'
+      - series: 'newapi_channel_stream_first_token_waiting{cluster="test",job="new-api",instance="app-1",channel_id="8",channel_type="1",threshold_seconds="30"}'
+        values: '2x8'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: NewAPIChannelFirstTokenWaitingHigh
+        exp_alerts:
+          - exp_labels:
+              channel_id: "7"
+              cluster: test
+              job: new-api
+              severity: warning
+              threshold_seconds: "30"
+            exp_annotations:
+              summary: 渠道流式首字等待堆积
+              description: 渠道 7 有至少 3 个流式请求等待首字超过 30 秒，请检查上游连接、首字延迟和请求积压。
+      - eval_time: 3m
+        alertname: NewAPIChannelFirstTokenWaitingCritical
+        exp_alerts:
+          - exp_labels:
+              channel_id: "7"
+              cluster: test
+              job: new-api
+              severity: critical
+              threshold_seconds: "60"
+            exp_annotations:
+              summary: 渠道流式首字严重阻塞
+              description: 渠道 7 有至少 5 个流式请求等待首字超过 60 秒，需要立即检查上游和网络。
+
+  - name: host middleware and exporter alerts use explicit thresholds
+    interval: 1m
+    input_series:
+      - series: 'up{cluster="test",job="node-exporter",instance="host-1"}'
+        values: '0x10'
+      - series: 'up{cluster="test",job="postgres-exporter",instance="postgres-1"}'
+        values: '0x10'
+      - series: 'up{cluster="test",job="redis-exporter",instance="redis-1"}'
+        values: '0x10'
+      - series: 'node_cpu_seconds_total{cluster="test",job="node-exporter",instance="host-2",cpu="0",mode="idle"}'
+        values: '0x10'
+      - series: 'node_memory_MemAvailable_bytes{cluster="test",job="node-exporter",instance="host-2"}'
+        values: '4x10'
+      - series: 'node_memory_MemTotal_bytes{cluster="test",job="node-exporter",instance="host-2"}'
+        values: '100x10'
+      - series: 'node_filesystem_avail_bytes{cluster="test",job="node-exporter",instance="host-2",device="sda",fstype="ext4",mountpoint="/"}'
+        values: '4x10'
+      - series: 'node_filesystem_size_bytes{cluster="test",job="node-exporter",instance="host-2",device="sda",fstype="ext4",mountpoint="/"}'
+        values: '100x10'
+      - series: 'node_filesystem_readonly{cluster="test",job="node-exporter",instance="host-2",device="sda",fstype="ext4",mountpoint="/"}'
+        values: '1x10'
+      - series: 'pg_stat_database_numbackends{cluster="test",job="postgres-exporter",instance="postgres-2",datname="new-api"}'
+        values: '96x10'
+      - series: 'pg_settings_max_connections{cluster="test",job="postgres-exporter",instance="postgres-2"}'
+        values: '100x10'
+      - series: 'redis_memory_used_bytes{cluster="test",job="redis-exporter",instance="redis-2"}'
+        values: '96x10'
+      - series: 'redis_memory_max_bytes{cluster="test",job="redis-exporter",instance="redis-2"}'
+        values: '100x10'
+      - series: 'redis_evicted_keys_total{cluster="test",job="redis-exporter",instance="redis-2"}'
+        values: '0+1x10'
+      - series: 'redis_rejected_connections_total{cluster="test",job="redis-exporter",instance="redis-2"}'
+        values: '0+1x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: NewAPIHostCPUCritical
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              instance: host-2
+              job: node-exporter
+              severity: critical
+            exp_annotations:
+              summary: 主机 CPU 使用率过高
+              description: 主机 host-2 的 CPU 使用率持续超过 95%，请检查高负载进程、上游重试和扩容需求。
+      - eval_time: 6m
+        alertname: NewAPIHostMemoryCritical
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              instance: host-2
+              job: node-exporter
+              severity: critical
+            exp_annotations:
+              summary: 主机可用内存不足
+              description: 主机 host-2 的可用内存持续低于 5%，请检查内存占用和 OOM 风险。
+      - eval_time: 6m
+        alertname: NewAPIHostFilesystemSpaceCritical
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              device: sda
+              fstype: ext4
+              instance: host-2
+              job: node-exporter
+              mountpoint: /
+              severity: critical
+            exp_annotations:
+              summary: 主机磁盘空间不足
+              description: 主机 host-2 的文件系统 / 可用空间持续低于 5%，请立即清理或扩容磁盘。
+      - eval_time: 2m
+        alertname: NewAPIHostFilesystemReadOnly
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              device: sda
+              fstype: ext4
+              instance: host-2
+              job: node-exporter
+              mountpoint: /
+              severity: critical
+            exp_annotations:
+              summary: 主机文件系统变为只读
+              description: 主机 host-2 的文件系统 / 已变为只读，请立即检查磁盘和宿主机。
+      - eval_time: 6m
+        alertname: NewAPIPostgresConnectionsCritical
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              instance: postgres-2
+              job: postgres-exporter
+              severity: critical
+            exp_annotations:
+              summary: PostgreSQL 连接数接近上限
+              description: PostgreSQL 实例 postgres-2 的连接数持续超过最大连接数的 95%，请检查慢查询、连接泄漏和连接池设置。
+      - eval_time: 6m
+        alertname: NewAPIRedisMemoryCritical
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              instance: redis-2
+              job: redis-exporter
+              severity: critical
+            exp_annotations:
+              summary: Redis 内存接近上限
+              description: Redis 实例 redis-2 的内存使用持续超过 maxmemory 的 95%，请检查淘汰策略和容量。
+      - eval_time: 6m
+        alertname: NewAPIRedisEvictionsHigh
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              instance: redis-2
+              job: redis-exporter
+              severity: warning
+            exp_annotations:
+              summary: Redis 正在淘汰键
+              description: Redis 实例 redis-2 在最近 5 分钟持续发生键淘汰，请检查内存上限和缓存容量。
+      - eval_time: 3m
+        alertname: NewAPIRedisRejectedConnections
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              instance: redis-2
+              job: redis-exporter
+              severity: critical
+            exp_annotations:
+              summary: Redis 拒绝客户端连接
+              description: Redis 实例 redis-2 持续拒绝客户端连接，请立即检查 maxclients、连接泄漏和服务负载。
+
   - name: missing latency threshold keeps alerts dormant
     interval: 1m
     input_series:
@@ -772,3 +936,103 @@ tests:
       - eval_time: 11m
         alertname: NewAPIRelayInflightHigh
         exp_alerts: []
+
+  - name: configured channel latency and inflight thresholds require matching channel
+    interval: 1m
+    input_series:
+      - series: 'newapi_channel_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",channel_id="9",channel_type="1",stream="true",result="success",le="5"}'
+        values: '0+10x22'
+      - series: 'newapi_channel_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",channel_id="9",channel_type="1",stream="true",result="success",le="10"}'
+        values: '0+100x22'
+      - series: 'newapi_channel_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",channel_id="9",channel_type="1",stream="true",result="success",le="+Inf"}'
+        values: '0+100x22'
+      - series: 'newapi_channel_duration_seconds_count{cluster="test",job="new-api",instance="app-1",channel_id="9",channel_type="1",stream="true",result="success"}'
+        values: '0+100x22'
+      - series: 'newapi_channel_latency_threshold_seconds{cluster="test",job="new-api",channel_id="9",metric="duration_p95",severity="warning"}'
+        values: '8x22'
+      - series: 'newapi_channel_inflight{cluster="test",job="new-api",instance="app-1",channel_id="9",channel_type="1"}'
+        values: '15x22'
+      - series: 'newapi_channel_inflight_threshold{cluster="test",job="new-api",channel_id="9",severity="warning"}'
+        values: '10x22'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: NewAPIChannelDurationP95High
+        exp_alerts:
+          - exp_labels:
+              channel_id: "9"
+              cluster: test
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: 渠道 P95 总耗时过高
+              description: 渠道 9 的 P95 attempt 总耗时超过已配置阈值，请检查上游响应、重试和请求类型。
+      - eval_time: 16m
+        alertname: NewAPIChannelInflightHigh
+        exp_alerts:
+          - exp_labels:
+              channel_id: "9"
+              cluster: test
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: 渠道并发偏高
+              description: 渠道 9 的实际并发超过已配置 warning 阈值，请检查长连接、上游延迟和容量。
+
+  - name: process cpu alerts normalize usage by gomaxprocs
+    interval: 1m
+    input_series:
+      - series: 'process_cpu_seconds_total{cluster="test",job="new-api",instance="app-critical"}'
+        values: '0+470x16'
+      - series: 'go_sched_gomaxprocs_threads{cluster="test",job="new-api",instance="app-critical"}'
+        values: '8x16'
+      - series: 'process_cpu_seconds_total{cluster="test",job="new-api",instance="app-normal"}'
+        values: '0+230x16'
+      - series: 'go_sched_gomaxprocs_threads{cluster="test",job="new-api",instance="app-normal"}'
+        values: '8x16'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: NewAPIProcessCPUCritical
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              instance: app-critical
+              job: new-api
+              severity: critical
+            exp_annotations:
+              summary: new-api 进程 CPU 占用过高
+              description: 实例 app-critical 的进程 CPU 使用率持续超过 GOMAXPROCS 的 95%，请立即检查热点、死循环和扩容需求。
+
+  - name: task completion and polling alerts require meaningful volume
+    interval: 1m
+    input_series:
+      - series: 'newapi_task_completions_total{cluster="test",job="new-api",instance="app-1",platform="video",result="success"}'
+        values: '0+12x25'
+      - series: 'newapi_task_completions_total{cluster="test",job="new-api",instance="app-1",platform="video",result="failure"}'
+        values: '0+8x25'
+      - series: 'newapi_task_poll_total{cluster="test",job="new-api",instance="app-1",platform="video",result="success"}'
+        values: '0+70x25'
+      - series: 'newapi_task_poll_total{cluster="test",job="new-api",instance="app-1",platform="video",result="error"}'
+        values: '0+30x25'
+    alert_rule_test:
+      - eval_time: 21m
+        alertname: NewAPITaskCompletionRateLow
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              job: new-api
+              platform: video
+              severity: warning
+            exp_annotations:
+              summary: 异步任务完成成功率偏低
+              description: 平台 video 的 15 分钟任务完成成功率低于 90%，请检查上游任务结果、结算和状态回写。
+      - eval_time: 16m
+        alertname: NewAPITaskPollErrorsHigh
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              job: new-api
+              platform: video
+              severity: warning
+            exp_annotations:
+              summary: 异步任务轮询错误率偏高
+              description: 平台 video 的 5 分钟轮询错误率超过 20%，请检查上游任务查询接口、网络和凭据。

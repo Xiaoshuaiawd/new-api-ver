@@ -17,6 +17,8 @@ services:
       - ./deploy/monitoring/alert-rules.yml:/etc/prometheus/rules/alert-rules.yml:ro
       - ./deploy/monitoring/relay-latency-thresholds.yml:/etc/prometheus/rules/relay-latency-thresholds.yml:ro
       - ./deploy/monitoring/relay-concurrency-thresholds.yml:/etc/prometheus/rules/relay-concurrency-thresholds.yml:ro
+      - ./deploy/monitoring/channel-latency-thresholds.yml:/etc/prometheus/rules/channel-latency-thresholds.yml:ro
+      - ./deploy/monitoring/channel-concurrency-thresholds.yml:/etc/prometheus/rules/channel-concurrency-thresholds.yml:ro
       - ./deploy/monitoring/targets:/etc/prometheus/targets:ro
       - "${PROMETHEUS_BEARER_TOKEN_FILE:?set PROMETHEUS_BEARER_TOKEN_FILE}:/etc/prometheus/secrets/new-api-bearer-token:ro"
       - prometheus_data:/prometheus

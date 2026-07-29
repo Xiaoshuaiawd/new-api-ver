@@ -151,6 +151,32 @@ func TestTrackChannelAttemptUpdatesRuntimeAndPrometheusFromOneLifecycle(t *testi
 	assert.Contains(t, output, "newapi_channel_inflight{channel_id=\"920000001\",channel_type=\"8\"} 0")
 }
 
+func TestTrackChannelAttemptExposesFirstTokenObserver(t *testing.T) {
+	runtime, err := prometheusmetrics.NewRuntime(
+		prometheusmetrics.Config{Enabled: true, AllowPublic: true},
+		"v-test",
+		nil,
+		nil,
+	)
+	require.NoError(t, err)
+	prometheusmetrics.SetDefaultRuntime(runtime)
+	t.Cleanup(func() { prometheusmetrics.SetDefaultRuntime(nil) })
+
+	called := false
+	TrackChannelAttemptWithFirstTokenObserver(ChannelAttemptMeta{
+		ChannelID:   920_000_005,
+		ChannelType: 8,
+		Stream:      true,
+	}, func(markFirstToken func()) ChannelAttemptOutcome {
+		require.NotNil(t, markFirstToken)
+		markFirstToken()
+		called = true
+		return ChannelAttemptOutcome{Success: true}
+	})
+
+	assert.True(t, called)
+}
+
 func TestRecordChannelTokenMetricsUsesNormalizedUsageFields(t *testing.T) {
 	runtime, err := prometheusmetrics.NewRuntime(
 		prometheusmetrics.Config{Enabled: true, AllowPublic: true},

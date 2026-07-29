@@ -73,6 +73,9 @@ groups:
       - record: newapi:channel_tokens_per_minute:5m
         expr: sum by (cluster, job, channel_id, token_type) (rate(newapi_channel_tokens_total[5m])) * 60
 
+      - record: newapi:channel_first_token_waiting_overdue
+        expr: sum by (cluster, job, channel_id, threshold_seconds) (newapi_channel_stream_first_token_waiting)
+
       - record: newapi:relay_duration_seconds:p95_5m
         expr: histogram_quantile(0.95, sum by (cluster, job, relay_format, le) (rate(newapi_relay_duration_seconds_bucket[5m])))
 

@@ -13,6 +13,8 @@ var channelDurationBuckets = []float64{
 	0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60, 120, 300, 600,
 }
 
+var channelFirstTokenWaitThresholds = []time.Duration{30 * time.Second, 60 * time.Second}
+
 const (
 	ChannelTokenTypeInput     = "input"
 	ChannelTokenTypeOutput    = "output"
@@ -20,13 +22,14 @@ const (
 )
 
 type channelMetrics struct {
-	attempts  *prometheus.CounterVec
-	retries   *prometheus.CounterVec
-	inflight  *prometheus.GaugeVec
-	duration  *prometheus.HistogramVec
-	firstByte *prometheus.HistogramVec
-	ttft      *prometheus.HistogramVec
-	tokens    *prometheus.CounterVec
+	attempts          *prometheus.CounterVec
+	retries           *prometheus.CounterVec
+	inflight          *prometheus.GaugeVec
+	duration          *prometheus.HistogramVec
+	firstByte         *prometheus.HistogramVec
+	ttft              *prometheus.HistogramVec
+	tokens            *prometheus.CounterVec
+	firstTokenWaiters *channelFirstTokenWaitTracker
 }
 
 type ChannelAttemptMeta struct {
@@ -38,10 +41,11 @@ type ChannelAttemptMeta struct {
 }
 
 type ChannelAttempt struct {
-	runtime *Runtime
-	meta    ChannelAttemptMeta
-	started time.Time
-	done    sync.Once
+	runtime          *Runtime
+	meta             ChannelAttemptMeta
+	started          time.Time
+	done             sync.Once
+	firstTokenWaiter *channelFirstTokenWaiter
 }
 
 type ChannelAttemptOutcome struct {
@@ -54,6 +58,116 @@ type ChannelTokenUsage struct {
 	Input     int
 	Output    int
 	CacheRead int
+}
+
+type channelFirstTokenWaitKey struct {
+	channelID   int
+	channelType int
+	threshold   time.Duration
+}
+
+type channelFirstTokenWaiter struct {
+	tracker     *channelFirstTokenWaitTracker
+	channelID   int
+	channelType int
+	started     time.Time
+	done        sync.Once
+}
+
+type channelFirstTokenWaitTracker struct {
+	mu      sync.Mutex
+	now     func() time.Time
+	waiters map[*channelFirstTokenWaiter]struct{}
+}
+
+type channelFirstTokenWaitCollector struct {
+	desc    *prometheus.Desc
+	tracker *channelFirstTokenWaitTracker
+}
+
+func newChannelFirstTokenWaitTracker(now func() time.Time) *channelFirstTokenWaitTracker {
+	return &channelFirstTokenWaitTracker{
+		now:     now,
+		waiters: make(map[*channelFirstTokenWaiter]struct{}),
+	}
+}
+
+func (tracker *channelFirstTokenWaitTracker) Begin(channelID, channelType int) *channelFirstTokenWaiter {
+	if tracker == nil || channelID <= 0 {
+		return &channelFirstTokenWaiter{}
+	}
+	waiter := &channelFirstTokenWaiter{
+		tracker:     tracker,
+		channelID:   channelID,
+		channelType: channelType,
+		started:     tracker.now(),
+	}
+	tracker.mu.Lock()
+	tracker.waiters[waiter] = struct{}{}
+	tracker.mu.Unlock()
+	return waiter
+}
+
+func (tracker *channelFirstTokenWaitTracker) Snapshot() map[channelFirstTokenWaitKey]int {
+	if tracker == nil {
+		return nil
+	}
+	now := tracker.now()
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	counts := make(map[channelFirstTokenWaitKey]int)
+	for waiter := range tracker.waiters {
+		for _, threshold := range channelFirstTokenWaitThresholds {
+			if now.Sub(waiter.started) >= threshold {
+				counts[channelFirstTokenWaitKey{
+					channelID:   waiter.channelID,
+					channelType: waiter.channelType,
+					threshold:   threshold,
+				}]++
+			}
+		}
+	}
+	return counts
+}
+
+func (waiter *channelFirstTokenWaiter) Done() {
+	if waiter == nil || waiter.tracker == nil {
+		return
+	}
+	waiter.done.Do(func() {
+		waiter.tracker.mu.Lock()
+		delete(waiter.tracker.waiters, waiter)
+		waiter.tracker.mu.Unlock()
+	})
+}
+
+func newChannelFirstTokenWaitCollector(tracker *channelFirstTokenWaitTracker) *channelFirstTokenWaitCollector {
+	return &channelFirstTokenWaitCollector{
+		desc: prometheus.NewDesc(
+			"newapi_channel_stream_first_token_waiting",
+			"Current streaming channel attempts still waiting for their first valid response content beyond the threshold.",
+			[]string{"channel_id", "channel_type", "threshold_seconds"},
+			nil,
+		),
+		tracker: tracker,
+	}
+}
+
+func (collector *channelFirstTokenWaitCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- collector.desc
+}
+
+func (collector *channelFirstTokenWaitCollector) Collect(ch chan<- prometheus.Metric) {
+	for key, count := range collector.tracker.Snapshot() {
+		ch <- prometheus.MustNewConstMetric(
+			collector.desc,
+			prometheus.GaugeValue,
+			float64(count),
+			strconv.Itoa(key.channelID),
+			strconv.Itoa(key.channelType),
+			strconv.FormatInt(int64(key.threshold/time.Second), 10),
+		)
+	}
 }
 
 func registerChannelMetrics(registry prometheus.Registerer, histogramEnabled bool) (*channelMetrics, error) {
@@ -74,12 +188,14 @@ func registerChannelMetrics(registry prometheus.Registerer, histogramEnabled boo
 			Name: "newapi_channel_tokens_total",
 			Help: "Normalized channel token usage by fixed token type.",
 		}, []string{"channel_id", "channel_type", "token_type"}),
+		firstTokenWaiters: newChannelFirstTokenWaitTracker(time.Now),
 	}
 	for name, collector := range map[string]prometheus.Collector{
-		"channel attempts": metrics.attempts,
-		"channel retries":  metrics.retries,
-		"channel inflight": metrics.inflight,
-		"channel tokens":   metrics.tokens,
+		"channel attempts":                   metrics.attempts,
+		"channel retries":                    metrics.retries,
+		"channel inflight":                   metrics.inflight,
+		"channel tokens":                     metrics.tokens,
+		"channel stream first token waiting": newChannelFirstTokenWaitCollector(metrics.firstTokenWaiters),
 	} {
 		if err := registry.Register(collector); err != nil {
 			return nil, fmt.Errorf("register %s metric: %w", name, err)
@@ -132,7 +248,7 @@ func RecordChannelTokens(channelID, channelType int, usage ChannelTokenUsage) {
 
 func ObserveChannelFirstByte(channelID, channelType int, duration time.Duration) {
 	runtime := defaultRuntime.Load()
-	if runtime == nil || !runtime.Enabled || runtime.channel == nil || runtime.channel.firstByte == nil || channelID <= 0 || duration <= 0 {
+	if runtime == nil || !runtime.Enabled || runtime.channel == nil || runtime.channel.firstByte == nil || channelID <= 0 || duration < 0 {
 		return
 	}
 	runtime.channel.firstByte.WithLabelValues(
@@ -154,6 +270,9 @@ func BeginChannelAttempt(meta ChannelAttemptMeta) *ChannelAttempt {
 	channelID := strconv.Itoa(meta.ChannelID)
 	channelType := strconv.Itoa(meta.ChannelType)
 	runtime.channel.inflight.WithLabelValues(channelID, channelType).Inc()
+	if meta.Stream {
+		attempt.firstTokenWaiter = runtime.channel.firstTokenWaiters.Begin(meta.ChannelID, meta.ChannelType)
+	}
 	if meta.RetryIndex > 0 {
 		runtime.channel.retries.WithLabelValues(
 			channelID,
@@ -162,6 +281,13 @@ func BeginChannelAttempt(meta ChannelAttemptMeta) *ChannelAttempt {
 		).Inc()
 	}
 	return attempt
+}
+
+func (a *ChannelAttempt) MarkFirstToken() {
+	if a == nil {
+		return
+	}
+	a.firstTokenWaiter.Done()
 }
 
 func (a *ChannelAttempt) Done(outcome ChannelAttemptOutcome) {
@@ -174,6 +300,7 @@ func (a *ChannelAttempt) Done(outcome ChannelAttemptOutcome) {
 		stream := strconv.FormatBool(a.meta.Stream)
 		result, errorType := outcomeLabels(outcome.Success, outcome.Error)
 
+		a.MarkFirstToken()
 		a.runtime.channel.inflight.WithLabelValues(channelID, channelType).Dec()
 		a.runtime.channel.attempts.WithLabelValues(
 			channelID,

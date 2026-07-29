@@ -65,6 +65,147 @@ inhibit_rules:
       - cluster
       - job
       - relay_format
+  - source_matchers:
+      - alertname="NewAPIChannelFirstTokenWaitingCritical"
+      - severity="critical"
+    target_matchers:
+      - alertname="NewAPIChannelFirstTokenWaitingHigh"
+      - severity="warning"
+    equal:
+      - cluster
+      - job
+      - channel_id
+  - source_matchers:
+      - alertname="NewAPIStreamFirstTokenWaitingCritical"
+      - severity="critical"
+    target_matchers:
+      - alertname="NewAPIStreamFirstTokenWaitingHigh"
+      - severity="warning"
+    equal:
+      - cluster
+      - job
+  - source_matchers:
+      - alertname="NewAPIChannelDurationP95Critical"
+      - severity="critical"
+    target_matchers:
+      - alertname="NewAPIChannelDurationP95High"
+      - severity="warning"
+    equal:
+      - cluster
+      - job
+      - channel_id
+  - source_matchers:
+      - alertname="NewAPIChannelTTFTP95Critical"
+      - severity="critical"
+    target_matchers:
+      - alertname="NewAPIChannelTTFTP95High"
+      - severity="warning"
+    equal:
+      - cluster
+      - job
+      - channel_id
+  - source_matchers:
+      - alertname="NewAPIChannelFirstByteP95Critical"
+      - severity="critical"
+    target_matchers:
+      - alertname="NewAPIChannelFirstByteP95High"
+      - severity="warning"
+    equal:
+      - cluster
+      - job
+      - channel_id
+  - source_matchers:
+      - alertname="NewAPIChannelInflightCritical"
+      - severity="critical"
+    target_matchers:
+      - alertname="NewAPIChannelInflightHigh"
+      - severity="warning"
+    equal:
+      - cluster
+      - job
+      - channel_id
+  - source_matchers:
+      - alertname="NewAPIHostCPUCritical"
+      - severity="critical"
+    target_matchers:
+      - alertname="NewAPIHostCPUHigh"
+      - severity="warning"
+    equal:
+      - cluster
+      - job
+      - instance
+  - source_matchers:
+      - alertname="NewAPIHostMemoryCritical"
+      - severity="critical"
+    target_matchers:
+      - alertname="NewAPIHostMemoryHigh"
+      - severity="warning"
+    equal:
+      - cluster
+      - job
+      - instance
+  - source_matchers:
+      - alertname="NewAPIHostFilesystemSpaceCritical"
+      - severity="critical"
+    target_matchers:
+      - alertname="NewAPIHostFilesystemSpaceHigh"
+      - severity="warning"
+    equal:
+      - cluster
+      - job
+      - instance
+      - device
+      - mountpoint
+  - source_matchers:
+      - alertname="NewAPIProcessCPUCritical"
+      - severity="critical"
+    target_matchers:
+      - alertname="NewAPIProcessCPUHigh"
+      - severity="warning"
+    equal:
+      - cluster
+      - job
+      - instance
+  - source_matchers:
+      - alertname="NewAPIProcessFDCritical"
+      - severity="critical"
+    target_matchers:
+      - alertname="NewAPIProcessFDHigh"
+      - severity="warning"
+    equal:
+      - cluster
+      - job
+      - instance
+  - source_matchers:
+      - alertname="NewAPIPostgresConnectionsCritical"
+      - severity="critical"
+    target_matchers:
+      - alertname="NewAPIPostgresConnectionsHigh"
+      - severity="warning"
+    equal:
+      - cluster
+      - job
+      - instance
+  - source_matchers:
+      - alertname="NewAPIRedisMemoryCritical"
+      - severity="critical"
+    target_matchers:
+      - alertname="NewAPIRedisMemoryHigh"
+      - severity="warning"
+    equal:
+      - cluster
+      - job
+      - instance
+  - source_matchers:
+      - alertname="NewAPIMySQLConnectionsCritical"
+      - severity="critical"
+    target_matchers:
+      - alertname="NewAPIMySQLConnectionsHigh"
+      - severity="warning"
+    equal:
+      - cluster
+      - job
+      - instance
 
 receivers:
   - name: new-api-webhook-warning

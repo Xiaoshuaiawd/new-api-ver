@@ -86,18 +86,19 @@ type TokenCountMeta struct {
 }
 
 type RelayInfo struct {
-	TokenId                         int
-	TokenKey                        string
-	TokenGroup                      string
-	UserId                          int
-	UsingGroup                      string // 使用的分组，当auto跨分组重试时，会变动
-	UserGroup                       string // 用户所在分组
-	TokenUnlimited                  bool
-	StartTime                       time.Time
-	FirstResponseTime               time.Time
-	isFirstResponse                 bool
-	channelAttemptStartTime         time.Time
-	channelAttemptFirstResponseTime time.Time
+	TokenId                          int
+	TokenKey                         string
+	TokenGroup                       string
+	UserId                           int
+	UsingGroup                       string // 使用的分组，当auto跨分组重试时，会变动
+	UserGroup                        string // 用户所在分组
+	TokenUnlimited                   bool
+	StartTime                        time.Time
+	FirstResponseTime                time.Time
+	isFirstResponse                  bool
+	channelAttemptStartTime          time.Time
+	channelAttemptFirstResponseTime  time.Time
+	channelAttemptFirstTokenObserver func()
 	//SendLastReasoningResponse bool
 	IsStream               bool
 	IsGeminiBatchEmbedding bool
@@ -698,7 +699,18 @@ func (info *RelayInfo) setFirstResponseTime(now time.Time) {
 	}
 	if !info.channelAttemptStartTime.IsZero() && info.channelAttemptFirstResponseTime.IsZero() {
 		info.channelAttemptFirstResponseTime = now
+		if info.channelAttemptFirstTokenObserver != nil {
+			info.channelAttemptFirstTokenObserver()
+			info.channelAttemptFirstTokenObserver = nil
+		}
 	}
+}
+
+func (info *RelayInfo) SetChannelAttemptFirstTokenObserver(observer func()) {
+	if info == nil {
+		return
+	}
+	info.channelAttemptFirstTokenObserver = observer
 }
 
 func (info *RelayInfo) BeginChannelAttempt() {
@@ -708,6 +720,7 @@ func (info *RelayInfo) BeginChannelAttempt() {
 func (info *RelayInfo) beginChannelAttempt(now time.Time) {
 	info.channelAttemptStartTime = now
 	info.channelAttemptFirstResponseTime = time.Time{}
+	info.channelAttemptFirstTokenObserver = nil
 }
 
 func (info *RelayInfo) ChannelAttemptTTFT() time.Duration {

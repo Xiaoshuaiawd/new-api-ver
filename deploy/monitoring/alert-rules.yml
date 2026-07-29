@@ -238,6 +238,24 @@ groups:
 
   - name: newapi-task-alerts
     rules:
+      - alert: NewAPITaskCompletionRateLow
+        expr: (newapi:task_completion_success_ratio:15m < 0.90) and on (cluster, job, platform) (sum by (cluster, job, platform) (newapi:task_completion_increase:15m) >= 20)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 异步任务完成成功率偏低
+          description: 平台 {{ $labels.platform }} 的 15 分钟任务完成成功率低于 90%，请检查上游任务结果、结算和状态回写。
+
+      - alert: NewAPITaskPollErrorsHigh
+        expr: (newapi:task_poll_error_ratio:5m > 0.20) and on (cluster, job, platform) (sum by (cluster, job, platform) (increase(newapi_task_poll_total[5m])) >= 50) and on (cluster, job, platform) (sum by (cluster, job, platform) (increase(newapi_task_poll_total{result="error"}[5m])) >= 5)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 异步任务轮询错误率偏高
+          description: 平台 {{ $labels.platform }} 的 5 分钟轮询错误率超过 20%，请检查上游任务查询接口、网络和凭据。
+
       - alert: NewAPITaskQueueBacklogHigh
         expr: newapi:task_queue_total:platform > 100
         for: 15m
@@ -264,3 +282,391 @@ groups:
         annotations:
           summary: new-api Master task queue collector is absent
           description: Verify that one Master instance exports task_queue for cluster default.
+
+  - name: newapi-monitoring-alerts
+    rules:
+      - alert: NewAPINodeExporterDown
+        expr: up{job="node-exporter"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Node Exporter 不可达
+          description: 主机 {{ $labels.instance }} 的 Node Exporter 已连续 5 分钟不可抓取，主机资源监控存在盲区。
+
+      - alert: NewAPIPostgresExporterDown
+        expr: up{job="postgres-exporter"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: PostgreSQL Exporter 不可达
+          description: PostgreSQL Exporter {{ $labels.instance }} 已连续 5 分钟不可抓取，请检查 Exporter 与数据库连接。
+
+      - alert: NewAPIMySQLExporterDown
+        expr: up{job="mysql-exporter"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: MySQL Exporter 不可达
+          description: MySQL Exporter {{ $labels.instance }} 已连续 5 分钟不可抓取，请检查 Exporter 与数据库连接。
+
+      - alert: NewAPIRedisExporterDown
+        expr: up{job="redis-exporter"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Redis Exporter 不可达
+          description: Redis Exporter {{ $labels.instance }} 已连续 5 分钟不可抓取，请检查 Exporter 与 Redis 连接。
+
+      - alert: NewAPIPrometheusScrapeSlow
+        expr: scrape_duration_seconds / clamp_min(scrape_timeout_seconds, 0.001) > 0.80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Prometheus 抓取耗时接近超时
+          description: "{{ $labels.job }} 的 {{ $labels.instance }} 抓取耗时连续接近超时阈值，请检查目标负载、网络和指标基数。"
+
+      - alert: NewAPICollectorErrorsDetected
+        expr: sum by (cluster, job, instance, collector) (increase(newapi_collector_errors_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: new-api 指标采集发生错误
+          description: 实例 {{ $labels.instance }} 的 {{ $labels.collector }} 采集器持续报错，请检查对应数据库查询或指标注册。
+
+  - name: newapi-host-alerts
+    rules:
+      - alert: NewAPIHostCPUHigh
+        expr: 100 * (1 - avg by (cluster, job, instance) (rate(node_cpu_seconds_total{job="node-exporter",mode="idle"}[5m]))) > 85
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: 主机 CPU 使用率偏高
+          description: 主机 {{ $labels.instance }} 的 CPU 使用率持续超过 85%，请检查高负载进程、上游重试和扩容需求。
+
+      - alert: NewAPIHostCPUCritical
+        expr: 100 * (1 - avg by (cluster, job, instance) (rate(node_cpu_seconds_total{job="node-exporter",mode="idle"}[5m]))) > 95
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 主机 CPU 使用率过高
+          description: 主机 {{ $labels.instance }} 的 CPU 使用率持续超过 95%，请检查高负载进程、上游重试和扩容需求。
+
+      - alert: NewAPIHostMemoryHigh
+        expr: 100 * (1 - node_memory_MemAvailable_bytes{job="node-exporter"} / clamp_min(node_memory_MemTotal_bytes{job="node-exporter"}, 1)) > 85
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: 主机可用内存偏低
+          description: 主机 {{ $labels.instance }} 的可用内存持续低于 15%，请检查内存占用和容量。
+
+      - alert: NewAPIHostMemoryCritical
+        expr: 100 * (1 - node_memory_MemAvailable_bytes{job="node-exporter"} / clamp_min(node_memory_MemTotal_bytes{job="node-exporter"}, 1)) > 95
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 主机可用内存不足
+          description: 主机 {{ $labels.instance }} 的可用内存持续低于 5%，请检查内存占用和 OOM 风险。
+
+      - alert: NewAPIHostFilesystemSpaceHigh
+        expr: 100 * (1 - node_filesystem_avail_bytes{job="node-exporter",fstype!~"tmpfs|devtmpfs|overlay|squashfs|nsfs|tracefs|ramfs|autofs",mountpoint!~"/(dev|proc|sys|run)($|/).*"} / clamp_min(node_filesystem_size_bytes{job="node-exporter",fstype!~"tmpfs|devtmpfs|overlay|squashfs|nsfs|tracefs|ramfs|autofs",mountpoint!~"/(dev|proc|sys|run)($|/).*"}, 1)) > 85
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: 主机磁盘可用空间偏低
+          description: 主机 {{ $labels.instance }} 的文件系统 {{ $labels.mountpoint }} 可用空间持续低于 15%，请安排清理或扩容。
+
+      - alert: NewAPIHostFilesystemSpaceCritical
+        expr: 100 * (1 - node_filesystem_avail_bytes{job="node-exporter",fstype!~"tmpfs|devtmpfs|overlay|squashfs|nsfs|tracefs|ramfs|autofs",mountpoint!~"/(dev|proc|sys|run)($|/).*"} / clamp_min(node_filesystem_size_bytes{job="node-exporter",fstype!~"tmpfs|devtmpfs|overlay|squashfs|nsfs|tracefs|ramfs|autofs",mountpoint!~"/(dev|proc|sys|run)($|/).*"}, 1)) > 95
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 主机磁盘空间不足
+          description: 主机 {{ $labels.instance }} 的文件系统 {{ $labels.mountpoint }} 可用空间持续低于 5%，请立即清理或扩容磁盘。
+
+      - alert: NewAPIHostFilesystemReadOnly
+        expr: node_filesystem_readonly{job="node-exporter",fstype!~"tmpfs|devtmpfs|overlay|squashfs|nsfs|tracefs|ramfs|autofs",mountpoint!~"/(dev|proc|sys|run)($|/).*"} == 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 主机文件系统变为只读
+          description: 主机 {{ $labels.instance }} 的文件系统 {{ $labels.mountpoint }} 已变为只读，请立即检查磁盘和宿主机。
+
+      - alert: NewAPIHostDiskIOHigh
+        expr: avg by (cluster, job, instance, device) (rate(node_disk_io_time_seconds_total{job="node-exporter",device!~"loop.*|ram.*"}[5m])) > 0.80
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: 主机磁盘 I/O 持续繁忙
+          description: 主机 {{ $labels.instance }} 的磁盘 {{ $labels.device }} I/O 利用率持续超过 80%，请检查慢查询、日志写入和磁盘性能。
+
+      - alert: NewAPIHostSwapActivityHigh
+        expr: sum by (cluster, job, instance) (rate(node_vmstat_pswpin[5m]) + rate(node_vmstat_pswpout[5m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 主机持续发生交换内存
+          description: 主机 {{ $labels.instance }} 持续发生 swap in/out，请检查内存压力和进程占用。
+
+  - name: newapi-process-alerts
+    rules:
+      - alert: NewAPIProcessCPUHigh
+        expr: 100 * rate(process_cpu_seconds_total{job="new-api"}[5m]) / on (cluster, job, instance) clamp_min(go_sched_gomaxprocs_threads{job="new-api"}, 1) > 80
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: new-api 进程 CPU 占用偏高
+          description: 实例 {{ $labels.instance }} 的进程 CPU 使用率持续超过 GOMAXPROCS 的 80%，请检查流式积压、重试和热点请求。
+
+      - alert: NewAPIProcessCPUCritical
+        expr: 100 * rate(process_cpu_seconds_total{job="new-api"}[5m]) / on (cluster, job, instance) clamp_min(go_sched_gomaxprocs_threads{job="new-api"}, 1) > 95
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: new-api 进程 CPU 占用过高
+          description: 实例 {{ $labels.instance }} 的进程 CPU 使用率持续超过 GOMAXPROCS 的 95%，请立即检查热点、死循环和扩容需求。
+
+      - alert: NewAPIProcessFDHigh
+        expr: process_open_fds{job="new-api"} / clamp_min(process_max_fds{job="new-api"}, 1) > 0.80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: new-api 文件句柄接近上限
+          description: 实例 {{ $labels.instance }} 的文件句柄使用率持续超过 80%，请检查连接、文件和描述符泄漏。
+
+      - alert: NewAPIProcessFDCritical
+        expr: process_open_fds{job="new-api"} / clamp_min(process_max_fds{job="new-api"}, 1) > 0.95
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: new-api 文件句柄即将耗尽
+          description: 实例 {{ $labels.instance }} 的文件句柄使用率持续超过 95%，请立即处理连接或描述符泄漏。
+
+  - name: newapi-middleware-alerts
+    rules:
+      - alert: NewAPIPostgresUnavailable
+        expr: pg_up{job="postgres-exporter"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: PostgreSQL 不可用
+          description: PostgreSQL 实例 {{ $labels.instance }} 无法连接，请立即检查数据库服务、网络和凭据。
+
+      - alert: NewAPIPostgresConnectionsHigh
+        expr: sum by (cluster, job, instance) (pg_stat_database_numbackends{job="postgres-exporter",datname!~"template.*"}) / clamp_min(max by (cluster, job, instance) (pg_settings_max_connections{job="postgres-exporter"}), 1) > 0.80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: PostgreSQL 连接数偏高
+          description: PostgreSQL 实例 {{ $labels.instance }} 的连接数持续超过最大连接数的 80%，请检查慢查询和连接池设置。
+
+      - alert: NewAPIPostgresConnectionsCritical
+        expr: sum by (cluster, job, instance) (pg_stat_database_numbackends{job="postgres-exporter",datname!~"template.*"}) / clamp_min(max by (cluster, job, instance) (pg_settings_max_connections{job="postgres-exporter"}), 1) > 0.95
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: PostgreSQL 连接数接近上限
+          description: PostgreSQL 实例 {{ $labels.instance }} 的连接数持续超过最大连接数的 95%，请检查慢查询、连接泄漏和连接池设置。
+
+      - alert: NewAPIPostgresDeadlocksDetected
+        expr: sum by (cluster, job, instance) (increase(pg_stat_database_deadlocks{job="postgres-exporter",datname!~"template.*"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: PostgreSQL 发生死锁
+          description: PostgreSQL 实例 {{ $labels.instance }} 持续发生死锁，请检查事务顺序和锁竞争。
+
+      - alert: NewAPIMySQLConnectionsHigh
+        expr: mysql_global_status_threads_connected{job="mysql-exporter"} / clamp_min(mysql_global_variables_max_connections{job="mysql-exporter"}, 1) > 0.80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: MySQL 连接数偏高
+          description: MySQL 实例 {{ $labels.instance }} 的连接数持续超过最大连接数的 80%，请检查连接池和慢查询。
+
+      - alert: NewAPIMySQLConnectionsCritical
+        expr: mysql_global_status_threads_connected{job="mysql-exporter"} / clamp_min(mysql_global_variables_max_connections{job="mysql-exporter"}, 1) > 0.95
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: MySQL 连接数接近上限
+          description: MySQL 实例 {{ $labels.instance }} 的连接数持续超过最大连接数的 95%，请立即处理连接池和慢查询问题。
+
+      - alert: NewAPIRedisUnavailable
+        expr: redis_up{job="redis-exporter"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Redis 不可用
+          description: Redis 实例 {{ $labels.instance }} 无法连接；应用可能退化到本地缓存或限流回退，请检查 Redis 服务和网络。
+
+      - alert: NewAPIRedisMemoryHigh
+        expr: redis_memory_used_bytes{job="redis-exporter"} / clamp_min(redis_memory_max_bytes{job="redis-exporter"}, 1) > 0.80 and on (cluster, job, instance) redis_memory_max_bytes{job="redis-exporter"} > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Redis 内存使用偏高
+          description: Redis 实例 {{ $labels.instance }} 的内存使用持续超过 maxmemory 的 80%，请检查缓存容量和淘汰策略。
+
+      - alert: NewAPIRedisMemoryCritical
+        expr: redis_memory_used_bytes{job="redis-exporter"} / clamp_min(redis_memory_max_bytes{job="redis-exporter"}, 1) > 0.95 and on (cluster, job, instance) redis_memory_max_bytes{job="redis-exporter"} > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Redis 内存接近上限
+          description: Redis 实例 {{ $labels.instance }} 的内存使用持续超过 maxmemory 的 95%，请检查淘汰策略和容量。
+
+      - alert: NewAPIRedisEvictionsHigh
+        expr: increase(redis_evicted_keys_total{job="redis-exporter"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Redis 正在淘汰键
+          description: Redis 实例 {{ $labels.instance }} 在最近 5 分钟持续发生键淘汰，请检查内存上限和缓存容量。
+
+      - alert: NewAPIRedisRejectedConnections
+        expr: increase(redis_rejected_connections_total{job="redis-exporter"}[5m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Redis 拒绝客户端连接
+          description: Redis 实例 {{ $labels.instance }} 持续拒绝客户端连接，请立即检查 maxclients、连接泄漏和服务负载。
+
+  - name: newapi-channel-latency-alerts
+    rules:
+      - alert: NewAPIChannelFirstTokenWaitingHigh
+        expr: newapi:channel_first_token_waiting_overdue{threshold_seconds="30"} >= 3
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: 渠道流式首字等待堆积
+          description: 渠道 {{ $labels.channel_id }} 有至少 3 个流式请求等待首字超过 30 秒，请检查上游连接、首字延迟和请求积压。
+
+      - alert: NewAPIChannelFirstTokenWaitingCritical
+        expr: newapi:channel_first_token_waiting_overdue{threshold_seconds="60"} >= 5
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 渠道流式首字严重阻塞
+          description: 渠道 {{ $labels.channel_id }} 有至少 5 个流式请求等待首字超过 60 秒，需要立即检查上游和网络。
+
+      - alert: NewAPIStreamFirstTokenWaitingHigh
+        expr: sum by (cluster, job, threshold_seconds) (newapi:channel_first_token_waiting_overdue{threshold_seconds="30"}) >= 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: 集群流式首字等待堆积
+          description: 集群 {{ $labels.cluster }} 有至少 10 个流式请求等待首字超过 30 秒，请检查实例负载、网络和共同上游。
+
+      - alert: NewAPIStreamFirstTokenWaitingCritical
+        expr: sum by (cluster, job, threshold_seconds) (newapi:channel_first_token_waiting_overdue{threshold_seconds="60"}) >= 20
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 集群流式首字严重阻塞
+          description: 集群 {{ $labels.cluster }} 有至少 20 个流式请求等待首字超过 60 秒，需要立即排查全局网络、实例和上游状态。
+
+      - alert: NewAPIChannelDurationP95High
+        expr: (newapi:channel_duration_seconds:p95_5m > on (cluster, job, channel_id) newapi_channel_latency_threshold_seconds{metric="duration_p95",severity="warning"}) and on (cluster, job, channel_id) (sum by (cluster, job, channel_id) (increase(newapi_channel_duration_seconds_count[5m])) >= 30)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 渠道 P95 总耗时过高
+          description: 渠道 {{ $labels.channel_id }} 的 P95 attempt 总耗时超过已配置阈值，请检查上游响应、重试和请求类型。
+
+      - alert: NewAPIChannelDurationP95Critical
+        expr: (newapi:channel_duration_seconds:p95_5m > on (cluster, job, channel_id) newapi_channel_latency_threshold_seconds{metric="duration_p95",severity="critical"}) and on (cluster, job, channel_id) (sum by (cluster, job, channel_id) (increase(newapi_channel_duration_seconds_count[5m])) >= 50)
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 渠道 P95 总耗时严重过高
+          description: 渠道 {{ $labels.channel_id }} 的 P95 attempt 总耗时超过严重阈值，请立即检查上游、网络和请求积压。
+
+      - alert: NewAPIChannelTTFTP95High
+        expr: (newapi:channel_ttft_seconds:p95_5m > on (cluster, job, channel_id) newapi_channel_latency_threshold_seconds{metric="ttft_p95",severity="warning"}) and on (cluster, job, channel_id) (sum by (cluster, job, channel_id) (increase(newapi_channel_ttft_seconds_count[5m])) >= 30)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 渠道 TTFT P95 过高
+          description: 渠道 {{ $labels.channel_id }} 的流式 TTFT P95 超过已配置阈值，请检查首字延迟和上游负载。
+
+      - alert: NewAPIChannelTTFTP95Critical
+        expr: (newapi:channel_ttft_seconds:p95_5m > on (cluster, job, channel_id) newapi_channel_latency_threshold_seconds{metric="ttft_p95",severity="critical"}) and on (cluster, job, channel_id) (sum by (cluster, job, channel_id) (increase(newapi_channel_ttft_seconds_count[5m])) >= 50)
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 渠道 TTFT P95 严重过高
+          description: 渠道 {{ $labels.channel_id }} 的流式 TTFT P95 超过严重阈值，请立即检查上游、网络和流式连接积压。
+
+      - alert: NewAPIChannelFirstByteP95High
+        expr: (newapi:channel_first_byte_seconds:p95_5m > on (cluster, job, channel_id) newapi_channel_latency_threshold_seconds{metric="first_byte_p95",severity="warning"}) and on (cluster, job, channel_id) (sum by (cluster, job, channel_id) (increase(newapi_channel_first_byte_seconds_count[5m])) >= 30)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 渠道上游首字节 P95 过高
+          description: 渠道 {{ $labels.channel_id }} 的上游响应头首字节 P95 超过已配置阈值，请检查上游网络和连接建立。
+
+      - alert: NewAPIChannelFirstByteP95Critical
+        expr: (newapi:channel_first_byte_seconds:p95_5m > on (cluster, job, channel_id) newapi_channel_latency_threshold_seconds{metric="first_byte_p95",severity="critical"}) and on (cluster, job, channel_id) (sum by (cluster, job, channel_id) (increase(newapi_channel_first_byte_seconds_count[5m])) >= 50)
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 渠道上游首字节 P95 严重过高
+          description: 渠道 {{ $labels.channel_id }} 的上游响应头首字节 P95 超过严重阈值，请立即检查上游可用性、网络和连接池。
+
+      - alert: NewAPIChannelInflightHigh
+        expr: sum by (cluster, job, channel_id) (newapi_channel_inflight) > on (cluster, job, channel_id) newapi_channel_inflight_threshold{severity="warning"}
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 渠道并发偏高
+          description: 渠道 {{ $labels.channel_id }} 的实际并发超过已配置 warning 阈值，请检查长连接、上游延迟和容量。
+
+      - alert: NewAPIChannelInflightCritical
+        expr: sum by (cluster, job, channel_id) (newapi_channel_inflight) > on (cluster, job, channel_id) newapi_channel_inflight_threshold{severity="critical"}
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 渠道并发严重过高
+          description: 渠道 {{ $labels.channel_id }} 的实际并发超过已配置 critical 阈值，请立即检查积压和扩容需求。

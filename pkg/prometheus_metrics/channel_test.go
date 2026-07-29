@@ -83,6 +83,15 @@ func TestObserveChannelFirstByteRecordsOnlyValidSamples(t *testing.T) {
 
 	ObserveChannelFirstByte(12, 5, 250*time.Millisecond)
 	ObserveChannelFirstByte(0, 5, 250*time.Millisecond)
+	ObserveChannelFirstByte(12, 5, -time.Nanosecond)
+
+	metrics := scrapeMetrics(t, runtime)
+	assert.Contains(t, metrics, "newapi_channel_first_byte_seconds_count{channel_id=\"12\",channel_type=\"5\"} 1")
+}
+
+func TestObserveChannelFirstByteRecordsZeroDurationSample(t *testing.T) {
+	runtime := activateMetricsTestRuntime(t)
+
 	ObserveChannelFirstByte(12, 5, 0)
 
 	metrics := scrapeMetrics(t, runtime)
@@ -108,6 +117,28 @@ func TestChannelAttemptDoesNotRecordTTFTForFailureOrNonStream(t *testing.T) {
 
 	metrics := scrapeMetrics(t, runtime)
 	assert.NotContains(t, metrics, `newapi_channel_ttft_seconds_count{channel_id="12",channel_type="5"}`)
+}
+
+func TestChannelFirstTokenWaitTrackerCountsOnlyOverdueStreams(t *testing.T) {
+	now := time.Date(2026, time.July, 29, 0, 0, 0, 0, time.UTC)
+	tracker := newChannelFirstTokenWaitTracker(func() time.Time { return now })
+	waiter := tracker.Begin(12, 5)
+
+	assert.Empty(t, tracker.Snapshot())
+
+	now = now.Add(30 * time.Second)
+	assert.Equal(t, map[channelFirstTokenWaitKey]int{
+		{channelID: 12, channelType: 5, threshold: 30 * time.Second}: 1,
+	}, tracker.Snapshot())
+
+	now = now.Add(30 * time.Second)
+	assert.Equal(t, map[channelFirstTokenWaitKey]int{
+		{channelID: 12, channelType: 5, threshold: 30 * time.Second}: 1,
+		{channelID: 12, channelType: 5, threshold: 60 * time.Second}: 1,
+	}, tracker.Snapshot())
+
+	waiter.Done()
+	assert.Empty(t, tracker.Snapshot())
 }
 
 func TestRecordChannelTokensUsesFixedTokenTypesAndIgnoresInvalidValues(t *testing.T) {

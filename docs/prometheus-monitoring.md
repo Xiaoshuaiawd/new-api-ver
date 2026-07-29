@@ -225,7 +225,7 @@ deploy/monitoring/validate.sh
 
 校验内容包括：
 
-- Prometheus 配置、46 条基础 Recording Rules、28 条告警规则，以及默认 0 条 Relay 延迟阈值规则和 0 条 Relay 并发阈值规则。
+- Prometheus 配置、47 条基础 Recording Rules、72 条告警规则，以及默认 0 条 Relay/渠道延迟与并发阈值规则。
 - Recording/告警固定输入测试。
 - Alertmanager route、恢复通知和 warning/critical 抑制配置。
 - PostgreSQL/MySQL 两种 Compose profile、固定镜像版本、外部业务网络、Exporter 内网端口和运行时 Secret。
@@ -481,6 +481,11 @@ Counter 必须通过 `rate()` 或 `increase()` 使用，不能把各实例当前
 - 异步任务积压超过候选阈值并持续 15 分钟，以及 task_queue collector 查询失败或 Master collector 缺失。
 - 应用 target down。
 - Master-only 渠道 collector 缺失。
+- Node、PostgreSQL、MySQL、Redis Exporter 可用性，Prometheus 抓取接近超时和应用采集器错误。
+- 主机 CPU、可用内存、文件系统空间/只读、磁盘 I/O 与持续 swap。
+- 应用进程 CPU、文件句柄，PostgreSQL/MySQL 连接数、PostgreSQL 死锁，以及 Redis 不可用、内存上限、淘汰和拒绝连接。
+- 渠道流式首字实时等待：超过 30 秒的并发 `>= 3` 持续 2 分钟发 warning；超过 60 秒的并发 `>= 5` 持续 2 分钟发 critical。集群级门槛为 10/20。
+- 渠道 P95 总耗时、TTFT、上游首字节和渠道并发使用独立阈值文件；未配置渠道不会产生该类告警。
 
 错误异常告警的初始门槛：
 
@@ -497,6 +502,7 @@ Alertmanager 的 webhook receiver 设置 `send_resolved: true`，告警恢复后
 - `NewAPIDBPoolUtilizationCritical` 抑制同一 `cluster/job/instance/database` 的 `NewAPIDBPoolUtilizationHigh`。
 - `NewAPIRelayP99LatencyHigh` 抑制同一 `cluster/job/relay_format` 的 `NewAPIRelayP95LatencyHigh`。
 - `NewAPIRelayInflightCritical` 抑制同一 `cluster/job/relay_format` 的 `NewAPIRelayInflightHigh`。
+- 渠道 TTFT/首字节/总耗时/并发和流式首字等待的 critical 均抑制同一渠道的 warning；主机 CPU/内存、PostgreSQL 连接数与 Redis 内存同样按实例抑制 warning。
 
 维护窗口可使用 Alertmanager UI 创建 silence，或使用 `amtool`：
 
@@ -629,6 +635,36 @@ newapi_relay_inflight_threshold{cluster="default",job="new-api",relay_format="op
 ```
 
 并发阈值只是运维告警条件，不是应用硬限制，不会拒绝请求、修改路由、禁用渠道或改变 Relay、计费和退款行为。
+
+### 渠道阈值与流式首字等待
+
+`deploy/monitoring/channel-latency-thresholds.yml` 与 `deploy/monitoring/channel-concurrency-thresholds.yml` 默认都是空规则，因此渠道 P95 总耗时、TTFT、上游首字节和渠道并发告警默认休眠。它们必须按具体 `channel_id` 写入阈值，不能使用模型、用户、IP、Request ID 等高基数标签。
+
+```yaml
+groups:
+  - name: newapi-channel-latency-thresholds
+    rules:
+      - record: newapi_channel_latency_threshold_seconds
+        expr: vector(8)
+        labels:
+          cluster: default
+          job: new-api
+          channel_id: "1"
+          metric: ttft_p95
+          severity: warning
+      - record: newapi_channel_latency_threshold_seconds
+        expr: vector(15)
+        labels:
+          cluster: default
+          job: new-api
+          channel_id: "1"
+          metric: ttft_p95
+          severity: critical
+```
+
+`metric` 仅允许 `duration_p95`、`ttft_p95`、`first_byte_p95`；`severity` 仅允许 `warning`、`critical`。延迟 warning/critical 分别要求 5 分钟至少 30/50 个样本，持续 10/5 分钟。渠道并发阈值的记录名为 `newapi_channel_inflight_threshold`，标签为 `cluster/job/channel_id/severity`，值必须是正整数；warning/critical 分别持续 10/5 分钟。
+
+`newapi_channel_stream_first_token_waiting` 是实时 Gauge，不等待请求结束：它只统计当前仍未收到首个有效流式内容的渠道 attempt；收到首字、取消、失败、超时、panic 或正常结束后都会移除。该指标固定导出 `threshold_seconds="30"` 与 `"60"` 两个超过阈值的并发计数。它不把 HTTP 响应头当作首字，不受渠道 Histogram 开关影响。
 
 ## 九、无数据与常见故障
 

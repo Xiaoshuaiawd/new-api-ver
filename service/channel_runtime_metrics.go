@@ -252,6 +252,12 @@ func WithChannelFirstByteTrace(ctx context.Context, channelID, channelType int) 
 }
 
 func TrackChannelAttempt(meta ChannelAttemptMeta, operation func() ChannelAttemptOutcome) {
+	TrackChannelAttemptWithFirstTokenObserver(meta, func(func()) ChannelAttemptOutcome {
+		return operation()
+	})
+}
+
+func TrackChannelAttemptWithFirstTokenObserver(meta ChannelAttemptMeta, operation func(markFirstToken func()) ChannelAttemptOutcome) {
 	runtimeAttempt := defaultChannelRuntimeTracker.begin(meta.ChannelID)
 	prometheusAttempt := prometheusmetrics.BeginChannelAttempt(meta)
 	outcome := ChannelAttemptOutcome{}
@@ -264,7 +270,7 @@ func TrackChannelAttempt(meta ChannelAttemptMeta, operation func() ChannelAttemp
 		runtimeAttempt.Done(outcome.Success)
 		prometheusAttempt.Done(outcome)
 	}()
-	outcome = operation()
+	outcome = operation(prometheusAttempt.MarkFirstToken)
 }
 
 func GetChannelRuntimeMetrics(channelIDs []int) map[int]dto.ChannelRuntimeMetrics {

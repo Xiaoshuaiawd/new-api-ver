@@ -21,7 +21,7 @@
 
 ---
 
-> 状态（2026-07-29）：P0-A、P0-B 已完成；P0-C 的规则、Alertmanager 示例、Grafana provisioning/dashboard、Prometheus 配置、独立 Compose 和部署文档已完成静态实现与本地联调，发布验收仍保留生产基数校准、活动 Relay inflight 多实例下钻等环境项。P1 D1-D10 能力保留；D11 已将默认展示重构为主机、程序、中间件、渠道四层中文监控，新增 Node/PostgreSQL/MySQL/Redis Exporter、渠道 TTFT/Token 指标和 1 分钟/5 分钟实时聚合规则。当前共 46 条基础 Recording Rules、28 条告警、0 条默认延迟阈值规则、0 条默认并发阈值规则和 108 条 Dashboard PromQL。DB 等待、Goroutine/heap 增长、任务积压、Relay 延迟与并发阈值都需要生产校准，生产证据完成前不视为最终值。
+> 状态（2026-07-29）：P0-A、P0-B 已完成；P0-C 的规则、Alertmanager 示例、Grafana provisioning/dashboard、Prometheus 配置、独立 Compose 和部署文档已完成静态实现与本地联调，发布验收仍保留生产基数校准、活动 Relay inflight 多实例下钻等环境项。P1 D1-D10 能力保留；D11 已将默认展示重构为主机、程序、中间件、渠道四层中文监控，新增 Node/PostgreSQL/MySQL/Redis Exporter、渠道 TTFT/Token 指标和 1 分钟/5 分钟实时聚合规则。D12 新增实时流式首字等待、主机/进程/Exporter/中间件告警以及渠道阈值基础设施。当前共 47 条基础 Recording Rules、72 条告警、0 条默认 Relay/渠道延迟与并发阈值规则和 108 条 Dashboard PromQL。DB 等待、Goroutine/heap 增长、任务积压、Relay/渠道延迟与并发阈值都需要生产校准，生产证据完成前不视为最终值。
 >
 > 勾选规则：只有代码、测试、配置或文档已经落地并通过对应验收时，才允许把条目标记为 `[x]`。仅完成设计、创建空文件或本地手工观察不算完成。
 
@@ -64,7 +64,7 @@
 | 计费、Token 与实际额度 | `pkg/prometheus_metrics/billing.go`、`model/log.go`、`service/billing.go`、`service/billing_session.go`、`service/task_billing.go` | `pkg/prometheus_metrics/billing_test.go`、`service/billing_metrics_test.go`、`service/task_billing_test.go` 及对应计费会话测试 |
 | 异步任务提交、poll、首次终态与队列 | `pkg/prometheus_metrics/task.go`、`task_queue_collector.go`、`controller/relay.go`、`service/task_polling.go`、`controller/midjourney.go`、`relay/relay_task.go`、`relay/mjproxy_handler.go` | `task_test.go`、`task_queue_collector_test.go`、`controller/relay_metrics_test.go`、`service/task_polling_test.go`、`controller/midjourney_metrics_test.go`、`relay/relay_task_metrics_test.go`、`relay/mjproxy_handler_test.go`、`model/task_cas_test.go` |
 | Recording/Alert Rules | `deploy/monitoring/recording-rules.yml`、`alert-rules.yml` | `recording-rules.test.yml`、`alert-rules.test.yml` |
-| P0-C/P1 静态部署产物 | `docker-compose.monitoring.yml`、`deploy/monitoring/prometheus.yml`、Exporter、Alertmanager/Grafana 配置、`core/` 四层 dashboard、`extended/` 计费/任务 dashboard、`docs/prometheus-monitoring.md` | `deploy/monitoring/validate.sh`：Prometheus/rules、PostgreSQL/MySQL profile、Compose、YAML/JSON、46 条基础 Recording Rules、28 条告警、0 条默认延迟阈值规则、0 条默认并发阈值规则和 108 条 dashboard PromQL 静态校验 |
+| P0-C/P1 静态部署产物 | `docker-compose.monitoring.yml`、`deploy/monitoring/prometheus.yml`、Exporter、Alertmanager/Grafana 配置、`core/` 四层 dashboard、`extended/` 计费/任务 dashboard、`docs/prometheus-monitoring.md` | `deploy/monitoring/validate.sh`：Prometheus/rules、PostgreSQL/MySQL profile、Compose、YAML/JSON、47 条基础 Recording Rules、72 条告警、0 条默认 Relay/渠道延迟与并发阈值规则和 108 条 dashboard PromQL 静态校验 |
 
 证据索引只说明“在哪里验证”，不替代对应批次的验收命令。测试名称或文件调整时必须同步更新本表，避免文档中的完成状态失去来源。
 
@@ -902,7 +902,7 @@ groups:
 - [ ] 扩大到全部 `relay/helper` 测试的 race 验收尚未通过：现有大量 `t.Parallel()` 用例会触发 `logger/logger.go` 全局状态竞态；该问题与本批取消传播及流式成功判定无关，需单独修复后重跑。
 - [ ] 扩大到全部 `service` 测试的 race 验收尚未通过：当前被 `service/task_polling_test.go` 触发的既有 logger 全局状态和异步 Task 对象竞态阻塞，需单独修复后重跑。
 - [x] 使用 `promtool check rules --lint=all --lint-fatal` 和 `promtool test rules` 校验 Recording/告警规则。
-- [x] `deploy/monitoring/validate.sh` 校验 Prometheus 配置、46 条基础 Recording Rules、28 条告警、0 条默认延迟阈值规则、0 条默认并发阈值规则、PostgreSQL/MySQL 两种 Compose profile、Exporter target/Secret、YAML/JSON 与 6 个 dashboard 的 108 条 PromQL。
+- [x] `deploy/monitoring/validate.sh` 校验 Prometheus 配置、47 条基础 Recording Rules、72 条告警、0 条默认 Relay/渠道延迟与并发阈值规则、PostgreSQL/MySQL 两种 Compose profile、Exporter target/Secret、YAML/JSON 与 6 个 dashboard 的 108 条 PromQL。
 - [x] 已在本地测试环境启动应用、Prometheus、Grafana、Alertmanager，验证安全抓取、规则加载、dashboard provisioning、告警通知与恢复链路。
 - [x] 已补充指标口径、部署决策表、抓取示例、常用 PromQL、排障、基数、备份和升级文档。
 
@@ -1364,6 +1364,18 @@ PROMTOOL_BIN=/path/to/promtool deploy/monitoring/validate.sh
 jq empty deploy/monitoring/grafana/dashboards/core/*.json deploy/monitoring/grafana/dashboards/extended/*.json
 git diff --check
 ```
+
+### 批次 D12：完整告警体系与实时首字等待
+
+**文件：** `pkg/prometheus_metrics/channel.go`、`service/channel_runtime_metrics.go`、`relay/common/relay_info.go`、`controller/relay.go`、`deploy/monitoring/recording-rules.yml`、`alert-rules.yml`、渠道阈值文件、Prometheus/Alertmanager/Compose 配置、规则测试、`validate.sh` 和监控文档。
+
+- [x] D12-1：新增 `newapi_channel_stream_first_token_waiting` 实时 Gauge，固定统计等待首个有效流式内容超过 30/60 秒的当前渠道 attempt；首字、取消、失败、超时、panic 和正常结束都能归还。
+- [x] D12-2：新增渠道/集群首字等待 warning/critical，渠道默认门槛为 30 秒并发 `>=3`、60 秒并发 `>=5`，集群默认门槛为 10/20，均持续 2 分钟。
+- [x] D12-3：新增主机 CPU、内存、磁盘、只读、I/O、swap，应用进程 CPU/FD，Exporter/collector 可用性，PostgreSQL/MySQL 连接与 PostgreSQL 死锁，Redis 可用性、内存、淘汰和拒绝连接告警。
+- [x] D12-4：新增渠道 P95 总耗时、TTFT、上游首字节和 inflight 的独立阈值文件；默认空规则保证未校准渠道不会误报。
+- [x] D12-5：Alertmanager 增加渠道、主机和中间件 warning/critical 抑制，新增规则 annotation 使用中文。
+- [x] D12-6：当前静态口径为 47 条 Recording Rules、72 条告警、0 条默认 Relay/渠道延迟与并发阈值规则；固定输入测试覆盖实时首字、主机资源、PostgreSQL/Redis、任务成功率/轮询错误和渠道阈值匹配。
+- [ ] D12-7：发布到生产并观察告警噪声；生产阈值和外部通知链路验收完成后勾选。
 
 ### 批次 E：生产校准
 
