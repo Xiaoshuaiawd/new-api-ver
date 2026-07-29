@@ -17,6 +17,8 @@ $monitoring_dir/alert-rules.test.yml
 $monitoring_dir/relay-latency-thresholds.yml
 $monitoring_dir/relay-concurrency-thresholds.yml
 $monitoring_dir/alertmanager.yml.example
+$monitoring_dir/targets/postgres-exporter.yml
+$monitoring_dir/targets/mysql-exporter.yml
 $monitoring_dir/grafana/provisioning/datasources/prometheus.yml
 $monitoring_dir/grafana/provisioning/dashboards/default.yml
 $monitoring_dir/grafana/dashboards/system-overview.json
@@ -24,6 +26,9 @@ $monitoring_dir/grafana/dashboards/channel-overview.json
 $monitoring_dir/grafana/dashboards/billing-overview.json
 $monitoring_dir/grafana/dashboards/task-overview.json
 $monitoring_dir/secrets/.gitignore
+$monitoring_dir/secrets/postgres-exporter-password.example
+$monitoring_dir/secrets/redis-exporter-password.example
+$monitoring_dir/secrets/mysql-exporter.cnf.example
 $repo_dir/docs/prometheus-monitoring.md
 "
 
@@ -33,6 +38,34 @@ for required_file in $required_files; do
 		exit 1
 	fi
 done
+
+if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+	PROMETHEUS_BEARER_TOKEN_FILE="$monitoring_dir/secrets/new-api-bearer-token.example" \
+	GRAFANA_ADMIN_PASSWORD_FILE="$monitoring_dir/secrets/grafana-admin-password.example" \
+	ALERTMANAGER_WEBHOOK_URL_FILE="$monitoring_dir/secrets/alertmanager-webhook-url.example" \
+	POSTGRES_EXPORTER_PASSWORD_FILE="$monitoring_dir/secrets/postgres-exporter-password.example" \
+	REDIS_EXPORTER_PASSWORD_FILE="$monitoring_dir/secrets/redis-exporter-password.example" \
+	MYSQL_EXPORTER_CONFIG_FILE="$monitoring_dir/secrets/mysql-exporter.cnf.example" \
+	POSTGRES_EXPORTER_URI='postgres:5432/new-api?sslmode=disable' \
+	POSTGRES_EXPORTER_USER=example \
+	REDIS_EXPORTER_ADDR=redis://redis:6379 \
+	NEW_API_DOCKER_NETWORK=example \
+		docker compose -f "$repo_dir/docker-compose.monitoring.yml" --profile postgres config --quiet
+
+	PROMETHEUS_BEARER_TOKEN_FILE="$monitoring_dir/secrets/new-api-bearer-token.example" \
+	GRAFANA_ADMIN_PASSWORD_FILE="$monitoring_dir/secrets/grafana-admin-password.example" \
+	ALERTMANAGER_WEBHOOK_URL_FILE="$monitoring_dir/secrets/alertmanager-webhook-url.example" \
+	POSTGRES_EXPORTER_PASSWORD_FILE="$monitoring_dir/secrets/postgres-exporter-password.example" \
+	REDIS_EXPORTER_PASSWORD_FILE="$monitoring_dir/secrets/redis-exporter-password.example" \
+	MYSQL_EXPORTER_CONFIG_FILE="$monitoring_dir/secrets/mysql-exporter.cnf.example" \
+	POSTGRES_EXPORTER_URI='postgres:5432/new-api?sslmode=disable' \
+	POSTGRES_EXPORTER_USER=example \
+	REDIS_EXPORTER_ADDR=redis://redis:6379 \
+	NEW_API_DOCKER_NETWORK=example \
+		docker compose -f "$repo_dir/docker-compose.monitoring.yml" --profile mysql config --quiet
+else
+	echo "warning: docker compose unavailable; skipped monitoring Compose validation" >&2
+fi
 
 if ! command -v "$promtool_bin" >/dev/null 2>&1 && [ ! -x "$promtool_bin" ]; then
 	echo "promtool is required; set PROMTOOL_BIN to its executable path" >&2
@@ -48,6 +81,8 @@ sed \
 	-e "s#/etc/prometheus/rules/relay-latency-thresholds.yml#$monitoring_dir/relay-latency-thresholds.yml#" \
 	-e "s#/etc/prometheus/rules/relay-concurrency-thresholds.yml#$monitoring_dir/relay-concurrency-thresholds.yml#" \
 	-e "s#/etc/prometheus/secrets/new-api-bearer-token#$monitoring_dir/secrets/new-api-bearer-token.example#" \
+	-e "s#/etc/prometheus/targets/postgres-exporter.yml#$monitoring_dir/targets/postgres-exporter.yml#" \
+	-e "s#/etc/prometheus/targets/mysql-exporter.yml#$monitoring_dir/targets/mysql-exporter.yml#" \
 	"$monitoring_dir/prometheus.yml" >"$tmp_dir/prometheus.yml"
 
 "$promtool_bin" check config "$tmp_dir/prometheus.yml"
@@ -281,7 +316,7 @@ ruby -e '
   alerts = YAML.safe_load(File.read(ARGV.fetch(1)), aliases: true)
   recording_count = recording.fetch("groups").sum { |group| group.fetch("rules").length }
   alert_count = alerts.fetch("groups").sum { |group| group.fetch("rules").length }
-  abort "expected 35 recording rules, got #{recording_count}" unless recording_count == 35
+  abort "expected 46 recording rules, got #{recording_count}" unless recording_count == 46
   abort "expected 28 alert rules, got #{alert_count}" unless alert_count == 28
 ' "$monitoring_dir/recording-rules.yml" "$monitoring_dir/alert-rules.yml"
 if command -v "$amtool_bin" >/dev/null 2>&1 || [ -x "$amtool_bin" ]; then

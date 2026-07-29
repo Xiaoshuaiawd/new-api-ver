@@ -38,3 +38,29 @@ scrape_configs:
         labels:
           cluster: default
           instance: new-api-1
+
+  - job_name: node-exporter
+    static_configs:
+      - targets:
+          - node-exporter:9100
+        labels:
+          cluster: default
+          instance: host-1
+
+  - job_name: postgres-exporter
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/postgres-exporter.yml
+
+  - job_name: mysql-exporter
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/mysql-exporter.yml
+
+  - job_name: redis-exporter
+    static_configs:
+      - targets:
+          - redis-exporter:9121
+        labels:
+          cluster: default
+          instance: redis-1

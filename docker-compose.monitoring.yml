@@ -17,6 +17,7 @@ services:
       - ./deploy/monitoring/alert-rules.yml:/etc/prometheus/rules/alert-rules.yml:ro
       - ./deploy/monitoring/relay-latency-thresholds.yml:/etc/prometheus/rules/relay-latency-thresholds.yml:ro
       - ./deploy/monitoring/relay-concurrency-thresholds.yml:/etc/prometheus/rules/relay-concurrency-thresholds.yml:ro
+      - ./deploy/monitoring/targets:/etc/prometheus/targets:ro
       - "${PROMETHEUS_BEARER_TOKEN_FILE:?set PROMETHEUS_BEARER_TOKEN_FILE}:/etc/prometheus/secrets/new-api-bearer-token:ro"
       - prometheus_data:/prometheus
     extra_hosts:
@@ -91,6 +92,69 @@ services:
       retries: 3
       start_period: 30s
 
+  node-exporter:
+    image: prom/node-exporter:v1.9.1
+    restart: unless-stopped
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+|var/lib/containers/storage/.+)($|/)
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro,rslave
+    networks:
+      - monitoring
+    security_opt:
+      - no-new-privileges:true
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.17.1
+    restart: unless-stopped
+    profiles:
+      - postgres
+    environment:
+      DATA_SOURCE_URI: ${POSTGRES_EXPORTER_URI:?set POSTGRES_EXPORTER_URI}
+      DATA_SOURCE_USER: ${POSTGRES_EXPORTER_USER:?set POSTGRES_EXPORTER_USER}
+      DATA_SOURCE_PASS_FILE: /run/secrets/postgres_exporter_password
+    secrets:
+      - postgres_exporter_password
+    networks:
+      - monitoring
+      - application
+    security_opt:
+      - no-new-privileges:true
+
+  mysqld-exporter:
+    image: prom/mysqld-exporter:v0.17.2
+    restart: unless-stopped
+    profiles:
+      - mysql
+    command:
+      - --config.my-cnf=/run/secrets/mysql_exporter_cnf
+    secrets:
+      - mysql_exporter_cnf
+    networks:
+      - monitoring
+      - application
+    security_opt:
+      - no-new-privileges:true
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.67.0
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: ${REDIS_EXPORTER_ADDR:-redis://redis:6379}
+      REDIS_PASSWORD_FILE: /run/secrets/redis_exporter_password
+    secrets:
+      - redis_exporter_password
+    networks:
+      - monitoring
+      - application
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
   prometheus_data:
   alertmanager_data:
@@ -99,9 +163,18 @@ volumes:
 networks:
   monitoring:
     driver: bridge
+  application:
+    external: true
+    name: "${NEW_API_DOCKER_NETWORK:?set NEW_API_DOCKER_NETWORK}"
 
 secrets:
   grafana_admin_password:
     file: "${GRAFANA_ADMIN_PASSWORD_FILE:?set GRAFANA_ADMIN_PASSWORD_FILE}"
   alertmanager_webhook_url:
     file: "${ALERTMANAGER_WEBHOOK_URL_FILE:?set ALERTMANAGER_WEBHOOK_URL_FILE}"
+  postgres_exporter_password:
+    file: "${POSTGRES_EXPORTER_PASSWORD_FILE:?set POSTGRES_EXPORTER_PASSWORD_FILE}"
+  redis_exporter_password:
+    file: "${REDIS_EXPORTER_PASSWORD_FILE:?set REDIS_EXPORTER_PASSWORD_FILE}"
+  mysql_exporter_cnf:
+    file: "${MYSQL_EXPORTER_CONFIG_FILE:?set MYSQL_EXPORTER_CONFIG_FILE}"

@@ -1,0 +1,5 @@
+- targets:
+    - postgres-exporter:9187
+  labels:
+    cluster: default
+    instance: postgres-1
