@@ -679,3 +679,96 @@ tests:
       - eval_time: 16m
         alertname: NewAPIRelayP95LatencyHigh
         exp_alerts: []
+
+  - name: configured relay inflight warning and critical trigger after their durations
+    interval: 1m
+    input_series:
+      - series: 'newapi_relay_inflight{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false"}'
+        values: '20x16'
+      - series: 'newapi_relay_inflight{cluster="test",job="new-api",instance="app-2",relay_format="openai",stream="true"}'
+        values: '15x16'
+      - series: 'newapi_relay_inflight_threshold{cluster="test",job="new-api",relay_format="openai",severity="warning"}'
+        values: '30x16'
+      - series: 'newapi_relay_inflight_threshold{cluster="test",job="new-api",relay_format="openai",severity="critical"}'
+        values: '32x16'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: NewAPIRelayInflightCritical
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              job: new-api
+              relay_format: openai
+              severity: critical
+            exp_annotations:
+              summary: new-api Relay inflight exceeds the calibrated critical threshold
+              description: Relay format openai inflight is above its calibrated critical threshold in cluster test job new-api. Check long-lived streams, upstream latency, request accumulation, instance distribution, and scaling needs; this threshold is not an application hard limit.
+      - eval_time: 11m
+        alertname: NewAPIRelayInflightHigh
+        exp_alerts:
+          - exp_labels:
+              cluster: test
+              job: new-api
+              relay_format: openai
+              severity: warning
+            exp_annotations:
+              summary: new-api Relay inflight exceeds the calibrated warning threshold
+              description: Relay format openai inflight is above its calibrated warning threshold in cluster test job new-api. Check long-lived streams, upstream latency, request accumulation, instance distribution, and scaling needs; this threshold is not an application hard limit.
+
+  - name: relay inflight equal to threshold does not alert
+    interval: 1m
+    input_series:
+      - series: 'newapi_relay_inflight{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false"}'
+        values: '30x16'
+      - series: 'newapi_relay_inflight_threshold{cluster="test",job="new-api",relay_format="openai",severity="warning"}'
+        values: '30x16'
+      - series: 'newapi_relay_inflight_threshold{cluster="test",job="new-api",relay_format="openai",severity="critical"}'
+        values: '30x16'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: NewAPIRelayInflightHigh
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: NewAPIRelayInflightCritical
+        exp_alerts: []
+
+  - name: missing relay inflight thresholds keep alerts dormant
+    interval: 1m
+    input_series:
+      - series: 'newapi_relay_inflight{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false"}'
+        values: '100x16'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: NewAPIRelayInflightHigh
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: NewAPIRelayInflightCritical
+        exp_alerts: []
+
+  - name: relay inflight thresholds do not cross cluster job or relay format labels
+    interval: 1m
+    input_series:
+      - series: 'newapi_relay_inflight{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false"}'
+        values: '100x16'
+      - series: 'newapi_relay_inflight_threshold{cluster="other",job="new-api",relay_format="openai",severity="warning"}'
+        values: '10x16'
+      - series: 'newapi_relay_inflight_threshold{cluster="test",job="other-api",relay_format="openai",severity="warning"}'
+        values: '10x16'
+      - series: 'newapi_relay_inflight_threshold{cluster="test",job="new-api",relay_format="openai_image",severity="warning"}'
+        values: '10x16'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: NewAPIRelayInflightHigh
+        exp_alerts: []
+
+  - name: transient relay inflight spike does not alert
+    interval: 1m
+    input_series:
+      - series: 'newapi_relay_inflight{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false"}'
+        values: '35x6 20x10'
+      - series: 'newapi_relay_inflight_threshold{cluster="test",job="new-api",relay_format="openai",severity="warning"}'
+        values: '30x16'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: NewAPIRelayInflightHigh
+        exp_alerts: []

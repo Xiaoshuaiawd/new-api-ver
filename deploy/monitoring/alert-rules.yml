@@ -37,6 +37,24 @@ groups:
           summary: new-api Relay P99 latency exceeds the configured threshold
           description: Relay format {{ $labels.relay_format }} P99 latency is above its calibrated threshold in cluster {{ $labels.cluster }} job {{ $labels.job }}. Investigate upstream saturation, network latency, and long-running requests.
 
+      - alert: NewAPIRelayInflightHigh
+        expr: newapi:relay_inflight_by_format > on (cluster, job, relay_format) newapi_relay_inflight_threshold{severity="warning"}
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: new-api Relay inflight exceeds the calibrated warning threshold
+          description: Relay format {{ $labels.relay_format }} inflight is above its calibrated warning threshold in cluster {{ $labels.cluster }} job {{ $labels.job }}. Check long-lived streams, upstream latency, request accumulation, instance distribution, and scaling needs; this threshold is not an application hard limit.
+
+      - alert: NewAPIRelayInflightCritical
+        expr: newapi:relay_inflight_by_format > on (cluster, job, relay_format) newapi_relay_inflight_threshold{severity="critical"}
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: new-api Relay inflight exceeds the calibrated critical threshold
+          description: Relay format {{ $labels.relay_format }} inflight is above its calibrated critical threshold in cluster {{ $labels.cluster }} job {{ $labels.job }}. Check long-lived streams, upstream latency, request accumulation, instance distribution, and scaling needs; this threshold is not an application hard limit.
+
       - alert: NewAPIRelayRateLimitErrorsHigh
         expr: (newapi:relay_error_ratio:5m{error_type="rate_limit"} > 0.10) and on (cluster, job) (newapi:relay_request_increase:5m >= 100) and on (cluster, job, error_type) (newapi:relay_error_increase:5m{error_type="rate_limit"} >= 10)
         for: 10m

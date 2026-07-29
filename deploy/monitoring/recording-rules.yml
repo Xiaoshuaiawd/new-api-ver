@@ -10,6 +10,9 @@ groups:
       - record: newapi:relay_request_increase_by_format:5m
         expr: sum by (cluster, job, relay_format) (increase(newapi_relay_requests_total[5m]))
 
+      - record: newapi:relay_inflight_by_format
+        expr: sum by (cluster, job, relay_format) (newapi_relay_inflight)
+
       - record: newapi:relay_success_ratio:5m
         expr: sum by (cluster, job) (rate(newapi_relay_requests_total{result="success"}[5m])) / clamp_min(sum by (cluster, job) (rate(newapi_relay_requests_total[5m])), 0.000001)
 

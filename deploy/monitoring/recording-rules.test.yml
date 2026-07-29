@@ -315,3 +315,21 @@ tests:
             value: 100
           - labels: '{__name__="newapi:relay_request_increase_by_format:5m",cluster="test",job="new-api",relay_format="openai_image"}'
             value: 20
+
+  - name: relay inflight aggregation preserves relay format
+    interval: 1m
+    input_series:
+      - series: 'newapi_relay_inflight{cluster="test",job="new-api",instance="app-1",relay_format="openai",stream="false"}'
+        values: '20x3'
+      - series: 'newapi_relay_inflight{cluster="test",job="new-api",instance="app-2",relay_format="openai",stream="true"}'
+        values: '15x3'
+      - series: 'newapi_relay_inflight{cluster="test",job="new-api",instance="app-1",relay_format="openai_image",stream="false"}'
+        values: '5x3'
+    promql_expr_test:
+      - expr: newapi:relay_inflight_by_format
+        eval_time: 1m
+        exp_samples:
+          - labels: '{__name__="newapi:relay_inflight_by_format",cluster="test",job="new-api",relay_format="openai"}'
+            value: 35
+          - labels: '{__name__="newapi:relay_inflight_by_format",cluster="test",job="new-api",relay_format="openai_image"}'
+            value: 5
