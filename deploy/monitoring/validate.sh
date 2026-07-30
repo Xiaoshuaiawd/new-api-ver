@@ -413,7 +413,7 @@ ruby -e '
   recording_count = recording.fetch("groups").sum { |group| group.fetch("rules").length }
   alert_rules = alerts.fetch("groups").flat_map { |group| group.fetch("rules") }
   alert_count = alert_rules.length
-  abort "expected 47 recording rules, got #{recording_count}" unless recording_count == 47
+  abort "expected 54 recording rules, got #{recording_count}" unless recording_count == 54
   abort "expected 72 alert rules, got #{alert_count}" unless alert_count == 72
 
   alert_rules.each do |rule|
@@ -432,7 +432,7 @@ ruby -e '
     }
   end
   contract_digest = Digest::SHA256.hexdigest(JSON.generate(alert_contract))
-  expected_digest = "5e7a8cb56ef2f923f8b0db5723447292571c53ce6279c8baee0f24cc2100535f"
+  expected_digest = "dca88961f6c6461480eb91ac74654cdecb6fee9f94b0bdf413f0f6361b6f04fe"
   abort "alert names or non-annotation fields changed" unless contract_digest == expected_digest
 ' "$monitoring_dir/recording-rules.yml" "$monitoring_dir/alert-rules.yml"
 if command -v "$amtool_bin" >/dev/null 2>&1 || [ -x "$amtool_bin" ]; then

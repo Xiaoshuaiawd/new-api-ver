@@ -112,8 +112,8 @@ groups:
   - name: newapi-channel-alerts
     rules:
       - alert: NewAPIChannelFailureRateHigh
-        expr: (newapi:channel_failure_ratio:5m > 0.20) and on (cluster, job, channel_id) (newapi:channel_attempt_increase:5m >= 50)
-        for: 10m
+        expr: (newapi:channel_failure_ratio:1m > 0.20) and on (cluster, job, channel_id) (newapi:channel_attempt_increase:1m >= 5)
+        for: 1m
         labels:
           severity: warning
         annotations:
@@ -121,8 +121,8 @@ groups:
           description: 请检查集群 {{ $labels.cluster }} 中渠道 {{ $labels.channel_id }} 的上游错误和可用性。
 
       - alert: NewAPIChannelRetryRatioHigh
-        expr: (newapi:channel_retry_ratio:5m > 0.20) and on (cluster, job, channel_id) (newapi:channel_attempt_increase:5m >= 50)
-        for: 10m
+        expr: (newapi:channel_retry_ratio:1m > 0.20) and on (cluster, job, channel_id) (newapi:channel_attempt_increase:1m >= 5)
+        for: 1m
         labels:
           severity: warning
         annotations:
@@ -130,13 +130,13 @@ groups:
           description: 请检查集群 {{ $labels.cluster }} 中渠道 {{ $labels.channel_id }} 的路由和上游稳定性。
 
       - alert: NewAPIChannelNoSuccess
-        expr: (newapi:channel_attempt_increase:5m >= 20) unless on (cluster, job, channel_id) (newapi:channel_success_increase:5m > 0)
-        for: 5m
+        expr: (newapi:channel_attempt_increase:1m >= 5) unless on (cluster, job, channel_id) (newapi:channel_success_increase:1m > 0)
+        for: 1m
         labels:
           severity: critical
         annotations:
           summary: new-api 渠道在窗口内无成功请求
-          description: 渠道 {{ $labels.channel_id }} 在最近 5 分钟内至少尝试 20 次但没有一次成功。
+          description: 渠道 {{ $labels.channel_id }} 在最近 1 分钟内至少尝试 5 次但没有一次成功。
 
   - name: newapi-database-alerts
     rules:
@@ -564,22 +564,22 @@ groups:
   - name: newapi-channel-latency-alerts
     rules:
       - alert: NewAPIChannelFirstTokenWaitingHigh
-        expr: newapi:channel_first_token_waiting_overdue{threshold_seconds="30"} >= 3
-        for: 2m
+        expr: newapi:channel_first_token_waiting_overdue{threshold_seconds="30"} >= 1
+        for: 1m
         labels:
           severity: warning
         annotations:
           summary: 渠道流式首字等待堆积
-          description: 渠道 {{ $labels.channel_id }} 有至少 3 个流式请求等待首字超过 30 秒，请检查上游连接、首字延迟和请求积压。
+          description: 渠道 {{ $labels.channel_id }} 有至少 1 个流式请求等待首字超过 30 秒，请检查上游连接、首字延迟和请求积压。
 
       - alert: NewAPIChannelFirstTokenWaitingCritical
-        expr: newapi:channel_first_token_waiting_overdue{threshold_seconds="60"} >= 5
-        for: 2m
+        expr: newapi:channel_first_token_waiting_overdue{threshold_seconds="60"} >= 1
+        for: 1m
         labels:
           severity: critical
         annotations:
           summary: 渠道流式首字严重阻塞
-          description: 渠道 {{ $labels.channel_id }} 有至少 5 个流式请求等待首字超过 60 秒，需要立即检查上游和网络。
+          description: 渠道 {{ $labels.channel_id }} 有至少 1 个流式请求等待首字超过 60 秒，需要立即检查上游和网络。
 
       - alert: NewAPIStreamFirstTokenWaitingHigh
         expr: sum by (cluster, job, threshold_seconds) (newapi:channel_first_token_waiting_overdue{threshold_seconds="30"}) >= 10
@@ -600,8 +600,8 @@ groups:
           description: 集群 {{ $labels.cluster }} 有至少 20 个流式请求等待首字超过 60 秒，需要立即排查全局网络、实例和上游状态。
 
       - alert: NewAPIChannelDurationP95High
-        expr: (newapi:channel_duration_seconds:p95_5m > on (cluster, job, channel_id) newapi_channel_latency_threshold_seconds{metric="duration_p95",severity="warning"}) and on (cluster, job, channel_id) (sum by (cluster, job, channel_id) (increase(newapi_channel_duration_seconds_count[5m])) >= 30)
-        for: 10m
+        expr: (newapi:channel_duration_seconds:p95_1m > on (cluster, job, channel_id) newapi_channel_latency_threshold_seconds{metric="duration_p95",severity="warning"}) and on (cluster, job, channel_id) (sum by (cluster, job, channel_id) (increase(newapi_channel_duration_seconds_count[1m])) >= 5)
+        for: 1m
         labels:
           severity: warning
         annotations:
@@ -609,8 +609,8 @@ groups:
           description: 渠道 {{ $labels.channel_id }} 的 P95 attempt 总耗时超过已配置阈值，请检查上游响应、重试和请求类型。
 
       - alert: NewAPIChannelDurationP95Critical
-        expr: (newapi:channel_duration_seconds:p95_5m > on (cluster, job, channel_id) newapi_channel_latency_threshold_seconds{metric="duration_p95",severity="critical"}) and on (cluster, job, channel_id) (sum by (cluster, job, channel_id) (increase(newapi_channel_duration_seconds_count[5m])) >= 50)
-        for: 5m
+        expr: (newapi:channel_duration_seconds:p95_1m > on (cluster, job, channel_id) newapi_channel_latency_threshold_seconds{metric="duration_p95",severity="critical"}) and on (cluster, job, channel_id) (sum by (cluster, job, channel_id) (increase(newapi_channel_duration_seconds_count[1m])) >= 10)
+        for: 1m
         labels:
           severity: critical
         annotations:
@@ -618,26 +618,26 @@ groups:
           description: 渠道 {{ $labels.channel_id }} 的 P95 attempt 总耗时超过严重阈值，请立即检查上游、网络和请求积压。
 
       - alert: NewAPIChannelTTFTP95High
-        expr: (newapi:channel_ttft_seconds:p95_5m > on (cluster, job, channel_id) newapi_channel_latency_threshold_seconds{metric="ttft_p95",severity="warning"}) and on (cluster, job, channel_id) (sum by (cluster, job, channel_id) (increase(newapi_channel_ttft_seconds_count[5m])) >= 30)
-        for: 10m
+        expr: (((newapi:channel_ttft_seconds:p95_1m > on (cluster, job, channel_id) newapi_channel_latency_threshold_seconds{metric="ttft_p95",severity="warning"}) or ((newapi:channel_ttft_seconds:p95_1m >= 30) unless on (cluster, job, channel_id) newapi_channel_latency_threshold_seconds{metric="ttft_p95",severity="warning"})) and on (cluster, job, channel_id) (sum by (cluster, job, channel_id) (increase(newapi_channel_ttft_seconds_count[1m])) >= 1))
+        for: 1m
         labels:
           severity: warning
         annotations:
           summary: 渠道 TTFT P95 过高
-          description: 渠道 {{ $labels.channel_id }} 的流式 TTFT P95 超过已配置阈值，请检查首字延迟和上游负载。
+          description: 渠道 {{ $labels.channel_id }} 的流式 TTFT P95 超过告警阈值（未配置时为 30 秒），请检查首字延迟和上游负载。
 
       - alert: NewAPIChannelTTFTP95Critical
-        expr: (newapi:channel_ttft_seconds:p95_5m > on (cluster, job, channel_id) newapi_channel_latency_threshold_seconds{metric="ttft_p95",severity="critical"}) and on (cluster, job, channel_id) (sum by (cluster, job, channel_id) (increase(newapi_channel_ttft_seconds_count[5m])) >= 50)
-        for: 5m
+        expr: (((newapi:channel_ttft_seconds:p95_1m > on (cluster, job, channel_id) newapi_channel_latency_threshold_seconds{metric="ttft_p95",severity="critical"}) or ((newapi:channel_ttft_seconds:p95_1m >= 60) unless on (cluster, job, channel_id) newapi_channel_latency_threshold_seconds{metric="ttft_p95",severity="critical"})) and on (cluster, job, channel_id) (sum by (cluster, job, channel_id) (increase(newapi_channel_ttft_seconds_count[1m])) >= 1))
+        for: 1m
         labels:
           severity: critical
         annotations:
           summary: 渠道 TTFT P95 严重过高
-          description: 渠道 {{ $labels.channel_id }} 的流式 TTFT P95 超过严重阈值，请立即检查上游、网络和流式连接积压。
+          description: 渠道 {{ $labels.channel_id }} 的流式 TTFT P95 超过严重阈值（未配置时为 60 秒），请立即检查上游、网络和流式连接积压。
 
       - alert: NewAPIChannelFirstByteP95High
-        expr: (newapi:channel_first_byte_seconds:p95_5m > on (cluster, job, channel_id) newapi_channel_latency_threshold_seconds{metric="first_byte_p95",severity="warning"}) and on (cluster, job, channel_id) (sum by (cluster, job, channel_id) (increase(newapi_channel_first_byte_seconds_count[5m])) >= 30)
-        for: 10m
+        expr: (newapi:channel_first_byte_seconds:p95_1m > on (cluster, job, channel_id) newapi_channel_latency_threshold_seconds{metric="first_byte_p95",severity="warning"}) and on (cluster, job, channel_id) (sum by (cluster, job, channel_id) (increase(newapi_channel_first_byte_seconds_count[1m])) >= 5)
+        for: 1m
         labels:
           severity: warning
         annotations:
@@ -645,8 +645,8 @@ groups:
           description: 渠道 {{ $labels.channel_id }} 的上游响应头首字节 P95 超过已配置阈值，请检查上游网络和连接建立。
 
       - alert: NewAPIChannelFirstByteP95Critical
-        expr: (newapi:channel_first_byte_seconds:p95_5m > on (cluster, job, channel_id) newapi_channel_latency_threshold_seconds{metric="first_byte_p95",severity="critical"}) and on (cluster, job, channel_id) (sum by (cluster, job, channel_id) (increase(newapi_channel_first_byte_seconds_count[5m])) >= 50)
-        for: 5m
+        expr: (newapi:channel_first_byte_seconds:p95_1m > on (cluster, job, channel_id) newapi_channel_latency_threshold_seconds{metric="first_byte_p95",severity="critical"}) and on (cluster, job, channel_id) (sum by (cluster, job, channel_id) (increase(newapi_channel_first_byte_seconds_count[1m])) >= 10)
+        for: 1m
         labels:
           severity: critical
         annotations:
@@ -655,7 +655,7 @@ groups:
 
       - alert: NewAPIChannelInflightHigh
         expr: sum by (cluster, job, channel_id) (newapi_channel_inflight) > on (cluster, job, channel_id) newapi_channel_inflight_threshold{severity="warning"}
-        for: 10m
+        for: 1m
         labels:
           severity: warning
         annotations:
@@ -664,7 +664,7 @@ groups:
 
       - alert: NewAPIChannelInflightCritical
         expr: sum by (cluster, job, channel_id) (newapi_channel_inflight) > on (cluster, job, channel_id) newapi_channel_inflight_threshold{severity="critical"}
-        for: 5m
+        for: 1m
         labels:
           severity: critical
         annotations:

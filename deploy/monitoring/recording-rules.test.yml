@@ -183,6 +183,34 @@ tests:
             value: 0.25
           - labels: '{__name__="newapi:channel_timeout_ratio:1m",channel_id="9",cluster="test",job="new-api"}'
             value: 0.5
+      - expr: newapi:channel_attempt_increase:1m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_attempt_increase:1m",channel_id="7",cluster="test",job="new-api"}'
+            value: 16
+          - labels: '{__name__="newapi:channel_attempt_increase:1m",channel_id="9",cluster="test",job="new-api"}'
+            value: 8
+      - expr: newapi:channel_success_increase:1m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_success_increase:1m",channel_id="7",cluster="test",job="new-api"}'
+            value: 12
+          - labels: '{__name__="newapi:channel_success_increase:1m",channel_id="9",cluster="test",job="new-api"}'
+            value: 4
+      - expr: newapi:channel_failure_ratio:1m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_failure_ratio:1m",channel_id="7",cluster="test",job="new-api"}'
+            value: 0.25
+          - labels: '{__name__="newapi:channel_failure_ratio:1m",channel_id="9",cluster="test",job="new-api"}'
+            value: 0.5
+      - expr: newapi:channel_retry_ratio:1m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_retry_ratio:1m",channel_id="7",cluster="test",job="new-api"}'
+            value: 0.125
+          - labels: '{__name__="newapi:channel_retry_ratio:1m",channel_id="9",cluster="test",job="new-api"}'
+            value: 0.125
       - expr: newapi:channel_duration_seconds:p90_5m
         eval_time: 6m
         exp_samples:
@@ -210,6 +238,27 @@ tests:
           - labels: '{__name__="newapi:channel_first_byte_seconds:p95_5m",channel_id="7",cluster="test",job="new-api"}'
             value: 0.2375
           - labels: '{__name__="newapi:channel_first_byte_seconds:p95_5m",channel_id="9",cluster="test",job="new-api"}'
+            value: 0.475
+      - expr: newapi:channel_duration_seconds:p95_1m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_duration_seconds:p95_1m",channel_id="7",cluster="test",job="new-api"}'
+            value: 0.95
+          - labels: '{__name__="newapi:channel_duration_seconds:p95_1m",channel_id="9",cluster="test",job="new-api"}'
+            value: 1.9
+      - expr: newapi:channel_ttft_seconds:p95_1m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_ttft_seconds:p95_1m",channel_id="7",cluster="test",job="new-api"}'
+            value: 0.475
+          - labels: '{__name__="newapi:channel_ttft_seconds:p95_1m",channel_id="9",cluster="test",job="new-api"}'
+            value: 0.95
+      - expr: newapi:channel_first_byte_seconds:p95_1m
+        eval_time: 6m
+        exp_samples:
+          - labels: '{__name__="newapi:channel_first_byte_seconds:p95_1m",channel_id="7",cluster="test",job="new-api"}'
+            value: 0.2375
+          - labels: '{__name__="newapi:channel_first_byte_seconds:p95_1m",channel_id="9",cluster="test",job="new-api"}'
             value: 0.475
       - expr: newapi:channel_cache_hit_ratio:5m
         eval_time: 6m

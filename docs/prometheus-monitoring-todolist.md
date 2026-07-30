@@ -21,7 +21,7 @@
 
 ---
 
-> 状态（2026-07-29）：P0-A、P0-B 已完成；P0-C 的规则、Alertmanager 示例、Grafana provisioning/dashboard、Prometheus 配置、独立 Compose 和部署文档已完成静态实现与本地联调，发布验收仍保留生产基数校准、活动 Relay inflight 多实例下钻等环境项。P1 D1-D10 能力保留；D11 已将默认展示重构为主机、程序、中间件、渠道四层中文监控，新增 Node/PostgreSQL/MySQL/Redis Exporter、渠道 TTFT/Token 指标和 1 分钟/5 分钟实时聚合规则。D12 新增实时流式首字等待、主机/进程/Exporter/中间件告警以及渠道阈值基础设施。D13 已增加飞书 IP 白名单机器人转换服务、中文彩色卡片和内网投递链路，待提供生产 Webhook URL 后完成真实 firing/resolved 验收。当前共 47 条基础 Recording Rules、72 条告警、0 条默认 Relay/渠道延迟与并发阈值规则和 108 条 Dashboard PromQL。DB 等待、Goroutine/heap 增长、任务积压、Relay/渠道延迟与并发阈值都需要生产校准，生产证据完成前不视为最终值。
+> 状态（2026-07-30）：P0-A、P0-B 已完成；P0-C 的规则、Alertmanager 示例、Grafana provisioning/dashboard、Prometheus 配置、独立 Compose 和部署文档已完成静态实现与本地联调，发布验收仍保留生产基数校准、活动 Relay inflight 多实例下钻等环境项。P1 D1-D10 能力保留；D11 已将默认展示重构为主机、程序、中间件、渠道四层中文监控，新增 Node/PostgreSQL/MySQL/Redis Exporter、渠道 TTFT/Token 指标和 1 分钟/5 分钟实时聚合规则。D12 新增实时流式首字等待、主机/进程/Exporter/中间件告警以及渠道阈值基础设施；本次将渠道失败率、重试率、无成功、并发、TTFT/P95 和首字等待告警统一调整为 1 分钟窗口。D13 已增加飞书 IP 白名单机器人转换服务、中文彩色卡片和内网投递链路，待提供生产 Webhook URL 后完成真实 firing/resolved 验收。当前共 54 条基础 Recording Rules、72 条告警、0 条默认 Relay/渠道延迟与并发阈值规则和 108 条 Dashboard PromQL。DB 等待、Goroutine/heap 增长、任务积压、Relay/渠道延迟与并发阈值都需要生产校准，生产证据完成前不视为最终值。
 >
 > 勾选规则：只有代码、测试、配置或文档已经落地并通过对应验收时，才允许把条目标记为 `[x]`。仅完成设计、创建空文件或本地手工观察不算完成。
 
@@ -764,7 +764,7 @@ completion 与计费生命周期必须保持解耦：终态 CAS 获胜就记录�
 - [x] 基于时间窗口的 Recording Rule 名称包含窗口，例如 `newapi:relay_success_ratio:5m`；瞬时 DB 利用率使用 `:instance` 后缀。
 - [x] 比率查询使用 `clamp_min` 避免除零；比例告警另加独立事件量门槛，不把 `clamp_min` 当作低流量保护。
 - [x] 名称严格区分 `rpm`、每秒 `rate` 和无单位 `ratio`；重试数与 attempt 数之比命名为 `retry_ratio`。
-- [x] D3-D10 累计形成 35 条基础规则；D11 新增 11 条渠道实时/性能/缓存/Token 聚合规则，当前基础 Recording Rules 为 46 条。
+- [x] D3-D10 累计形成 35 条基础规则；D11 新增 11 条渠道实时/性能/缓存/Token 聚合规则，本次又新增 7 条 1 分钟渠道告警聚合规则，当前基础 Recording Rules 为 54 条。
 
 P0 已提供以下规则。当前默认配置同时保留 `cluster` 和 `job` 作为部署边界；完整可执行版本以 `deploy/monitoring/recording-rules.yml` 为准：
 
@@ -1372,7 +1372,7 @@ git diff --check
 **文件：** `pkg/prometheus_metrics/channel.go`、`service/channel_runtime_metrics.go`、`relay/common/relay_info.go`、`controller/relay.go`、`deploy/monitoring/recording-rules.yml`、`alert-rules.yml`、渠道阈值文件、Prometheus/Alertmanager/Compose 配置、规则测试、`validate.sh` 和监控文档。
 
 - [x] D12-1：新增 `newapi_channel_stream_first_token_waiting` 实时 Gauge，固定统计等待首个有效流式内容超过 30/60 秒的当前渠道 attempt；首字、取消、失败、超时、panic 和正常结束都能归还。
-- [x] D12-2：新增渠道/集群首字等待 warning/critical，渠道默认门槛为 30 秒并发 `>=3`、60 秒并发 `>=5`，集群默认门槛为 10/20，均持续 2 分钟。
+- [x] D12-2：新增渠道/集群首字等待 warning/critical；渠道 30 秒和 60 秒均为单请求阈值，持续 1 分钟即告警；集群门槛仍为 10/20。
 - [x] D12-3：新增主机 CPU、内存、磁盘、只读、I/O、swap，应用进程 CPU/FD，Exporter/collector 可用性，PostgreSQL/MySQL 连接与 PostgreSQL 死锁，Redis 可用性、内存、淘汰和拒绝连接告警。
 - [x] D12-4：新增渠道 P95 总耗时、TTFT、上游首字节和 inflight 的独立阈值文件；默认空规则保证未校准渠道不会误报。
 - [x] D12-5：Alertmanager 增加渠道、主机和中间件 warning/critical 抑制，新增规则 annotation 使用中文。

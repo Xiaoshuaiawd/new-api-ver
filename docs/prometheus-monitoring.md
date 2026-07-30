@@ -687,7 +687,7 @@ newapi_relay_inflight_threshold{cluster="default",job="new-api",relay_format="op
 
 ### 渠道阈值与流式首字等待
 
-`deploy/monitoring/channel-latency-thresholds.yml` 与 `deploy/monitoring/channel-concurrency-thresholds.yml` 默认都是空规则，因此渠道 P95 总耗时、TTFT、上游首字节和渠道并发告警默认休眠。它们必须按具体 `channel_id` 写入阈值，不能使用模型、用户、IP、Request ID 等高基数标签。
+`deploy/monitoring/channel-latency-thresholds.yml` 与 `deploy/monitoring/channel-concurrency-thresholds.yml` 默认都是空规则。渠道 P95 总耗时、上游首字节和渠道并发告警在未配置阈值时休眠；渠道 TTFT P95 例外，未配置时使用 warning 30 秒、critical 60 秒的默认阈值。也可按具体 `channel_id` 写入阈值覆盖默认值，不能使用模型、用户、IP、Request ID 等高基数标签。
 
 ```yaml
 groups:
@@ -711,9 +711,9 @@ groups:
           severity: critical
 ```
 
-`metric` 仅允许 `duration_p95`、`ttft_p95`、`first_byte_p95`；`severity` 仅允许 `warning`、`critical`。延迟 warning/critical 分别要求 5 分钟至少 30/50 个样本，持续 10/5 分钟。渠道并发阈值的记录名为 `newapi_channel_inflight_threshold`，标签为 `cluster/job/channel_id/severity`，值必须是正整数；warning/critical 分别持续 10/5 分钟。
+`metric` 仅允许 `duration_p95`、`ttft_p95`、`first_byte_p95`；`severity` 仅允许 `warning`、`critical`。所有渠道延迟均使用 1 分钟窗口并持续 1 分钟后告警：P95 总耗时和上游首字节 warning/critical 分别要求窗口内至少 5/10 个样本，TTFT 至少 1 个样本。渠道并发阈值的记录名为 `newapi_channel_inflight_threshold`，标签为 `cluster/job/channel_id/severity`，值必须是正整数；warning/critical 均持续 1 分钟。
 
-`newapi_channel_stream_first_token_waiting` 是实时 Gauge，不等待请求结束：它只统计当前仍未收到首个有效流式内容的渠道 attempt；收到首字、取消、失败、超时、panic 或正常结束后都会移除。该指标固定导出 `threshold_seconds="30"` 与 `"60"` 两个超过阈值的并发计数。它不把 HTTP 响应头当作首字，不受渠道 Histogram 开关影响。
+`newapi_channel_stream_first_token_waiting` 是实时 Gauge，不等待请求结束：它只统计当前仍未收到首个有效流式内容的渠道 attempt；收到首字、取消、失败、超时、panic 或正常结束后都会移除。该指标固定导出 `threshold_seconds="30"` 与 `"60"` 两个超过阈值的并发计数；同一渠道有至少 1 个等待者并持续 1 分钟即告警。它不把 HTTP 响应头当作首字，不受渠道 Histogram 开关影响。
 
 ## 九、无数据与常见故障
 

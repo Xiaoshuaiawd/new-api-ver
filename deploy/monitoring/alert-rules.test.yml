@@ -62,18 +62,18 @@ tests:
               description: 请立即检查集群 test、任务 new-api 的服务和上游状态。
 
   - name: channel failure retry and no-success alerts
-    interval: 1m
+    interval: 15s
     input_series:
       - series: 'newapi_channel_attempts_total{cluster="test",job="new-api",instance="app-1",channel_id="7",channel_type="1",stream="false",result="success",error_type="none"}'
-        values: '0+7x20'
+        values: '0+2x20'
       - series: 'newapi_channel_attempts_total{cluster="test",job="new-api",instance="app-1",channel_id="7",channel_type="1",stream="false",result="failure",error_type="upstream_5xx"}'
-        values: '0+3x20'
+        values: '0+1x20'
       - series: 'newapi_channel_retries_total{cluster="test",job="new-api",instance="app-1",channel_id="7",channel_type="1",reason="upstream_5xx"}'
-        values: '0+3x20'
+        values: '0+1x20'
       - series: 'newapi_channel_attempts_total{cluster="test",job="new-api",instance="app-1",channel_id="8",channel_type="1",stream="false",result="failure",error_type="upstream_5xx"}'
-        values: '0+4x20'
+        values: '0+2x20'
     alert_rule_test:
-      - eval_time: 16m
+      - eval_time: 3m
         alertname: NewAPIChannelFailureRateHigh
         exp_alerts:
           - exp_labels:
@@ -84,7 +84,15 @@ tests:
             exp_annotations:
               summary: new-api 渠道失败率高于 20%
               description: 请检查集群 test 中渠道 7 的上游错误和可用性。
-      - eval_time: 16m
+          - exp_labels:
+              channel_id: "8"
+              cluster: test
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: new-api 渠道失败率高于 20%
+              description: 请检查集群 test 中渠道 8 的上游错误和可用性。
+      - eval_time: 3m
         alertname: NewAPIChannelRetryRatioHigh
         exp_alerts:
           - exp_labels:
@@ -95,7 +103,7 @@ tests:
             exp_annotations:
               summary: new-api 渠道重试率高于 20%
               description: 请检查集群 test 中渠道 7 的路由和上游稳定性。
-      - eval_time: 11m
+      - eval_time: 3m
         alertname: NewAPIChannelNoSuccess
         exp_alerts:
           - exp_labels:
@@ -105,7 +113,7 @@ tests:
               severity: critical
             exp_annotations:
               summary: new-api 渠道在窗口内无成功请求
-              description: 渠道 8 在最近 5 分钟内至少尝试 20 次但没有一次成功。
+              description: 渠道 8 在最近 1 分钟内至少尝试 5 次但没有一次成功。
 
   - name: database utilization excludes unlimited pools and separates severity
     interval: 1m
@@ -639,7 +647,16 @@ tests:
               threshold_seconds: "30"
             exp_annotations:
               summary: 渠道流式首字等待堆积
-              description: 渠道 7 有至少 3 个流式请求等待首字超过 30 秒，请检查上游连接、首字延迟和请求积压。
+              description: 渠道 7 有至少 1 个流式请求等待首字超过 30 秒，请检查上游连接、首字延迟和请求积压。
+          - exp_labels:
+              channel_id: "8"
+              cluster: test
+              job: new-api
+              severity: warning
+              threshold_seconds: "30"
+            exp_annotations:
+              summary: 渠道流式首字等待堆积
+              description: 渠道 8 有至少 1 个流式请求等待首字超过 30 秒，请检查上游连接、首字延迟和请求积压。
       - eval_time: 3m
         alertname: NewAPIChannelFirstTokenWaitingCritical
         exp_alerts:
@@ -651,7 +668,26 @@ tests:
               threshold_seconds: "60"
             exp_annotations:
               summary: 渠道流式首字严重阻塞
-              description: 渠道 7 有至少 5 个流式请求等待首字超过 60 秒，需要立即检查上游和网络。
+              description: 渠道 7 有至少 1 个流式请求等待首字超过 60 秒，需要立即检查上游和网络。
+
+  - name: one overdue first token waiter alerts after one minute
+    interval: 1m
+    input_series:
+      - series: 'newapi_channel_stream_first_token_waiting{cluster="test",job="new-api",instance="app-1",channel_id="12",channel_type="1",threshold_seconds="30"}'
+        values: '1x5'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: NewAPIChannelFirstTokenWaitingHigh
+        exp_alerts:
+          - exp_labels:
+              channel_id: "12"
+              cluster: test
+              job: new-api
+              severity: warning
+              threshold_seconds: "30"
+            exp_annotations:
+              summary: 渠道流式首字等待堆积
+              description: 渠道 12 有至少 1 个流式请求等待首字超过 30 秒，请检查上游连接、首字延迟和请求积压。
 
   - name: host middleware and exporter alerts use explicit thresholds
     interval: 1m
@@ -938,7 +974,7 @@ tests:
         exp_alerts: []
 
   - name: configured channel latency and inflight thresholds require matching channel
-    interval: 1m
+    interval: 15s
     input_series:
       - series: 'newapi_channel_duration_seconds_bucket{cluster="test",job="new-api",instance="app-1",channel_id="9",channel_type="1",stream="true",result="success",le="5"}'
         values: '0+10x22'
@@ -955,7 +991,7 @@ tests:
       - series: 'newapi_channel_inflight_threshold{cluster="test",job="new-api",channel_id="9",severity="warning"}'
         values: '10x22'
     alert_rule_test:
-      - eval_time: 16m
+      - eval_time: 3m
         alertname: NewAPIChannelDurationP95High
         exp_alerts:
           - exp_labels:
@@ -966,7 +1002,7 @@ tests:
             exp_annotations:
               summary: 渠道 P95 总耗时过高
               description: 渠道 9 的 P95 attempt 总耗时超过已配置阈值，请检查上游响应、重试和请求类型。
-      - eval_time: 16m
+      - eval_time: 3m
         alertname: NewAPIChannelInflightHigh
         exp_alerts:
           - exp_labels:
@@ -977,6 +1013,30 @@ tests:
             exp_annotations:
               summary: 渠道并发偏高
               description: 渠道 9 的实际并发超过已配置 warning 阈值，请检查长连接、上游延迟和容量。
+
+  - name: default channel TTFT threshold alerts without per-channel configuration
+    interval: 15s
+    input_series:
+      - series: 'newapi_channel_ttft_seconds_bucket{cluster="test",job="new-api",instance="app-1",channel_id="12",channel_type="1",le="30"}'
+        values: '0x17'
+      - series: 'newapi_channel_ttft_seconds_bucket{cluster="test",job="new-api",instance="app-1",channel_id="12",channel_type="1",le="60"}'
+        values: '0+2x16'
+      - series: 'newapi_channel_ttft_seconds_bucket{cluster="test",job="new-api",instance="app-1",channel_id="12",channel_type="1",le="+Inf"}'
+        values: '0+2x16'
+      - series: 'newapi_channel_ttft_seconds_count{cluster="test",job="new-api",instance="app-1",channel_id="12",channel_type="1"}'
+        values: '0+2x16'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: NewAPIChannelTTFTP95High
+        exp_alerts:
+          - exp_labels:
+              channel_id: "12"
+              cluster: test
+              job: new-api
+              severity: warning
+            exp_annotations:
+              summary: 渠道 TTFT P95 过高
+              description: 渠道 12 的流式 TTFT P95 超过告警阈值（未配置时为 30 秒），请检查首字延迟和上游负载。
 
   - name: process cpu alerts normalize usage by gomaxprocs
     interval: 1m
