@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	prometheusmetrics "github.com/QuantumNous/new-api/pkg/prometheus_metrics"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
@@ -74,37 +73,6 @@ func TestRedisIPRateLimiterThresholdTTLAndNamespace(t *testing.T) {
 	assert.True(t, redisServer.Exists(legacyKey), "the v2 counter must not touch an old list key")
 }
 
-func TestRateLimitRejectionMetricRecordsIPLimit(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	_, _ = useRateLimitMiniRedis(t)
-
-	runtime, err := prometheusmetrics.NewRuntime(
-		prometheusmetrics.Config{Enabled: true, AllowPublic: true},
-		"v-test",
-		nil,
-		nil,
-	)
-	require.NoError(t, err)
-	prometheusmetrics.SetDefaultRuntime(runtime)
-	t.Cleanup(func() { prometheusmetrics.SetDefaultRuntime(nil) })
-
-	router := gin.New()
-	require.NoError(t, router.SetTrustedProxies(nil))
-	router.GET("/limited", rateLimitFactory(1, 30, "TEST"), func(c *gin.Context) {
-		c.Status(http.StatusNoContent)
-	})
-
-	remoteAddr := "192.0.2.70:12345"
-	assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/limited", remoteAddr).Code)
-	assert.Equal(t, http.StatusTooManyRequests, performRateLimitRequest(router, "/limited", remoteAddr).Code)
-
-	response := httptest.NewRecorder()
-	runtime.Handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	assert.Contains(t, response.Body.String(),
-		`newapi_rate_limit_rejections_total{reason="request_count",scope="global"} 1`,
-	)
-}
-
 func TestRedisUserRateLimiterUsesSharedFixedWindow(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	redisServer, _ := useRateLimitMiniRedis(t)
@@ -128,15 +96,6 @@ func TestRedisUserRateLimiterUsesSharedFixedWindow(t *testing.T) {
 func TestRedisEmailVerificationRateLimiterPreservesResponseAndTTL(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	redisServer, _ := useRateLimitMiniRedis(t)
-	runtime, err := prometheusmetrics.NewRuntime(
-		prometheusmetrics.Config{Enabled: true, AllowPublic: true},
-		"v-test",
-		nil,
-		nil,
-	)
-	require.NoError(t, err)
-	prometheusmetrics.SetDefaultRuntime(runtime)
-	t.Cleanup(func() { prometheusmetrics.SetDefaultRuntime(nil) })
 
 	router := gin.New()
 	require.NoError(t, router.SetTrustedProxies(nil))
@@ -154,12 +113,6 @@ func TestRedisEmailVerificationRateLimiterPreservesResponseAndTTL(t *testing.T) 
 	key := redisIPRateLimitKey(EmailVerificationRateLimitMark, "192.0.2.30")
 	assert.True(t, redisServer.Exists(key))
 	assert.Equal(t, time.Duration(EmailVerificationDuration)*time.Second, redisServer.TTL(key))
-
-	metricsResponse := httptest.NewRecorder()
-	runtime.Handler.ServeHTTP(metricsResponse, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	assert.Contains(t, metricsResponse.Body.String(),
-		`newapi_rate_limit_rejections_total{reason="request_count",scope="global"} 1`,
-	)
 }
 
 func TestRedisFixedWindowIsAtomicUnderConcurrency(t *testing.T) {
@@ -246,15 +199,6 @@ func TestRedisFailurePolicies(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	_, redisClient := useRateLimitMiniRedis(t)
 	require.NoError(t, redisClient.Close())
-	runtime, err := prometheusmetrics.NewRuntime(
-		prometheusmetrics.Config{Enabled: true, AllowPublic: true},
-		"v-test",
-		nil,
-		nil,
-	)
-	require.NoError(t, err)
-	prometheusmetrics.SetDefaultRuntime(runtime)
-	t.Cleanup(func() { prometheusmetrics.SetDefaultRuntime(nil) })
 
 	router := gin.New()
 	require.NoError(t, router.SetTrustedProxies(nil))
@@ -278,13 +222,4 @@ func TestRedisFailurePolicies(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, userResponse.Code)
 	assert.Empty(t, userResponse.Body.String())
 	assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/email", "192.0.2.62:12345").Code)
-
-	metricsResponse := httptest.NewRecorder()
-	runtime.Handler.ServeHTTP(metricsResponse, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	assert.Contains(t, metricsResponse.Body.String(),
-		`newapi_redis_rate_limit_failures_total{limiter="fixed_window"} 3`,
-	)
-	assert.Contains(t, metricsResponse.Body.String(),
-		`newapi_redis_degradations_total{reason="rate_limit_fallback"} 1`,
-	)
 }

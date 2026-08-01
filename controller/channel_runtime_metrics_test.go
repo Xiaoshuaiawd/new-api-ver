@@ -11,10 +11,8 @@ import (
 
 func TestAttachChannelRuntimeMetricsAddsCurrentSnapshot(t *testing.T) {
 	const channelID = 876_543_210
-	completed := service.BeginChannelRuntimeAttempt(channelID)
-	completed.Done(true)
-	active := service.BeginChannelRuntimeAttempt(channelID)
-	defer active.Done(false)
+	attempt := service.BeginChannelRuntimeAttempt(channelID)
+	defer attempt.Done()
 
 	channels := []*model.Channel{{Id: channelID}}
 	attachChannelRuntimeMetrics(channels)

@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"embed"
 	"errors"
 	"fmt"
@@ -25,7 +24,6 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
-	prometheusmetrics "github.com/QuantumNous/new-api/pkg/prometheus_metrics"
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
@@ -36,7 +34,6 @@ import (
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-	"gorm.io/gorm"
 
 	_ "net/http/pprof"
 )
@@ -47,52 +44,6 @@ var buildFS embed.FS
 //go:embed web/dist/index.html
 var indexPage []byte
 
-func taskQueueMetricsSource(db *gorm.DB) prometheusmetrics.TaskQueueSource {
-	return func() ([]prometheusmetrics.TaskQueueRecord, error) {
-		type queueCountRow struct {
-			Platform string
-			Status   string
-			Count    int64
-		}
-
-		taskRows := make([]queueCountRow, 0)
-		if err := db.Model(&model.Task{}).
-			Select("platform, status, COUNT(*) AS count").
-			Where("status NOT IN ?", []model.TaskStatus{model.TaskStatusSuccess, model.TaskStatusFailure}).
-			Group("platform, status").
-			Scan(&taskRows).Error; err != nil {
-			return nil, fmt.Errorf("query task queue counts: %w", err)
-		}
-
-		midjourneyRows := make([]queueCountRow, 0)
-		if err := db.Model(&model.Midjourney{}).
-			Select("status, COUNT(*) AS count").
-			Where("progress != ?", "100%").
-			Group("status").
-			Scan(&midjourneyRows).Error; err != nil {
-			return nil, fmt.Errorf("query midjourney queue counts: %w", err)
-		}
-
-		records := make([]prometheusmetrics.TaskQueueRecord, 0, len(taskRows)+len(midjourneyRows))
-		for _, row := range taskRows {
-			records = append(records, prometheusmetrics.TaskQueueRecord{
-				Source:   prometheusmetrics.TaskQueueSourceTasks,
-				Platform: row.Platform,
-				Status:   row.Status,
-				Count:    row.Count,
-			})
-		}
-		for _, row := range midjourneyRows {
-			records = append(records, prometheusmetrics.TaskQueueRecord{
-				Source: prometheusmetrics.TaskQueueSourceMidjourneys,
-				Status: row.Status,
-				Count:  row.Count,
-			})
-		}
-		return records, nil
-	}
-}
-
 func main() {
 	startTime := time.Now()
 
@@ -100,51 +51,6 @@ func main() {
 	if err != nil {
 		common.FatalLog("failed to initialize resources: " + err.Error())
 		return
-	}
-
-	metricsConfig, err := prometheusmetrics.LoadConfig()
-	if err != nil {
-		common.FatalLog("failed to initialize Prometheus configuration: " + err.Error())
-		return
-	}
-	var mainSQLDB, logSQLDB *sql.DB
-	if metricsConfig.Enabled {
-		mainSQLDB, err = model.DB.DB()
-		if err != nil {
-			common.FatalLog("failed to get main database connection pool for Prometheus: " + err.Error())
-			return
-		}
-		logSQLDB, err = model.LOG_DB.DB()
-		if err != nil {
-			common.FatalLog("failed to get log database connection pool for Prometheus: " + err.Error())
-			return
-		}
-	}
-	metricsRuntime, err := prometheusmetrics.NewRuntime(
-		metricsConfig,
-		common.Version,
-		mainSQLDB,
-		logSQLDB,
-		prometheusmetrics.WithChannelStateSource(func() ([]prometheusmetrics.ChannelState, error) {
-			states := make([]prometheusmetrics.ChannelState, 0)
-			err := model.DB.Model(&model.Channel{}).
-				Select("id", "name", "type", "status").
-				Find(&states).Error
-			return states, err
-		}),
-		prometheusmetrics.WithTaskQueueSource(taskQueueMetricsSource(model.DB)),
-		prometheusmetrics.WithRedisClient(common.RDB, common.RedisEnabled),
-	)
-	if err != nil {
-		common.FatalLog("failed to initialize Prometheus metrics: " + err.Error())
-		return
-	}
-	prometheusmetrics.SetDefaultRuntime(metricsRuntime)
-	if metricsConfig.AllowPublic {
-		common.SysLog("WARNING: Prometheus metrics endpoint is publicly accessible")
-	}
-	if metricsConfig.DisableChannelHistogram {
-		common.SysLog("Prometheus channel duration histogram is disabled")
 	}
 
 	common.SysLog("New API " + common.Version + " started")
@@ -267,7 +173,6 @@ func main() {
 		common.FatalLog("failed to configure trusted proxies: " + err.Error())
 		return
 	}
-	server.Use(middleware.PrometheusHTTP(metricsRuntime))
 	server.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
 		common.SysLog(fmt.Sprintf("panic detected: %v", err))
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -290,7 +195,7 @@ func main() {
 	router.SetRouter(server, router.WebAssets{
 		BuildFS:   buildFS,
 		IndexPage: indexPage,
-	}, metricsRuntime)
+	})
 	var port = os.Getenv("PORT")
 	if port == "" {
 		port = strconv.Itoa(*common.Port)

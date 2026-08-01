@@ -92,33 +92,20 @@ func (c *HybridCache[V]) Get(key string) (value V, found bool, err error) {
 		if e == nil {
 			v, decErr := c.redisCodec.Decode(raw)
 			if decErr != nil {
-				observeLookup("redis", "error")
 				var zero V
 				return zero, false, decErr
 			}
-			observeLookup("redis", "hit")
 			return v, true, nil
 		}
 		if errors.Is(e, redis.Nil) {
-			observeLookup("redis", "miss")
 			var zero V
 			return zero, false, nil
 		}
-		observeLookup("redis", "error")
 		var zero V
 		return zero, false, e
 	}
 
-	value, found, err = c.memCache().Get(full)
-	switch {
-	case err != nil:
-		observeLookup("memory", "error")
-	case found:
-		observeLookup("memory", "hit")
-	default:
-		observeLookup("memory", "miss")
-	}
-	return value, found, err
+	return c.memCache().Get(full)
 }
 
 func (c *HybridCache[V]) SetWithTTL(key string, v V, ttl time.Duration) error {

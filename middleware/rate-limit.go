@@ -9,7 +9,6 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
-	prometheusmetrics "github.com/QuantumNous/new-api/pkg/prometheus_metrics"
 	"github.com/gin-gonic/gin"
 )
 
@@ -115,14 +114,12 @@ func redisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark st
 		duration,
 	)
 	if err != nil {
-		recordRedisRateLimitFailure("fixed_window")
 		logger.LogError(c.Request.Context(), fmt.Sprintf("rate limit check failed (mark=%s): %v", mark, err))
 		c.Status(http.StatusInternalServerError)
 		c.Abort()
 		return
 	}
 	if !allowed {
-		recordRateLimitRejection("global", "request_count")
 		writeRateLimited(c, ttlSeconds)
 	}
 }
@@ -130,7 +127,6 @@ func redisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark st
 func memoryRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark string) {
 	key := mark + c.ClientIP()
 	if !inMemoryRateLimiter.Request(key, maxRequestNum, duration) {
-		recordRateLimitRejection("global", "request_count")
 		writeRateLimited(c, duration)
 		return
 	}
@@ -216,7 +212,6 @@ func userRateLimitFactory(maxRequestNum int, duration int64, mark string) func(c
 		}
 		key := fmt.Sprintf("%s:user:%d", mark, userID)
 		if !inMemoryRateLimiter.Request(key, maxRequestNum, duration) {
-			recordRateLimitRejection("user", "request_count")
 			writeRateLimited(c, duration)
 			return
 		}
@@ -228,28 +223,14 @@ func userRateLimitFactory(maxRequestNum int, duration int64, mark string) func(c
 func userRedisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, key string) {
 	allowed, _, ttlSeconds, err := redisFixedWindowTake(c.Request.Context(), key, maxRequestNum, duration)
 	if err != nil {
-		recordRedisRateLimitFailure("fixed_window")
 		logger.LogError(c.Request.Context(), fmt.Sprintf("rate limit check failed (key=%s): %v", key, err))
 		c.Status(http.StatusInternalServerError)
 		c.Abort()
 		return
 	}
 	if !allowed {
-		recordRateLimitRejection("user", "request_count")
 		writeRateLimited(c, ttlSeconds)
 	}
-}
-
-func recordRateLimitRejection(scope, reason string) {
-	prometheusmetrics.RecordRateLimitRejection(scope, reason)
-}
-
-func recordRedisRateLimitFailure(limiter string) {
-	prometheusmetrics.RecordRedisRateLimitFailure(limiter)
-}
-
-func recordRedisDegradation(reason string) {
-	prometheusmetrics.RecordRedisDegradation(reason)
 }
 
 // SearchRateLimit returns a per-user rate limiter for search endpoints.

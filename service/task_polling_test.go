@@ -3,10 +3,8 @@ package service
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"net/http"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -25,7 +23,6 @@ type taskPollingFetchAdaptor struct {
 	mu           sync.Mutex
 	taskIDs      []string
 	fetched      chan string
-	status       model.TaskStatus
 	blockTaskID  string
 	blockStarted chan struct{}
 	releaseBlock chan struct{}
@@ -34,26 +31,6 @@ type taskPollingFetchAdaptor struct {
 
 type sunoFailurePollingAdaptor struct {
 	failReason string
-}
-
-type taskPollingErrorAdaptor struct {
-	err   error
-	calls int
-}
-
-func (a *taskPollingErrorAdaptor) Init(_ *relaycommon.RelayInfo) {}
-
-func (a *taskPollingErrorAdaptor) FetchTask(_ string, _ string, _ map[string]any, _ string) (*http.Response, error) {
-	a.calls++
-	return nil, a.err
-}
-
-func (a *taskPollingErrorAdaptor) ParseTaskResult([]byte) (*relaycommon.TaskInfo, error) {
-	return nil, nil
-}
-
-func (a *taskPollingErrorAdaptor) AdjustBillingOnComplete(_ *model.Task, _ *relaycommon.TaskInfo) int {
-	return 0
 }
 
 func (a *sunoFailurePollingAdaptor) Init(_ *relaycommon.RelayInfo) {}
@@ -114,20 +91,12 @@ func (a *taskPollingFetchAdaptor) FetchTask(_ string, _ string, body map[string]
 		}
 	}
 
-	status := a.status
-	if status == "" {
-		status = model.TaskStatusInProgress
-	}
-	progress := "30%"
-	if status == model.TaskStatusSuccess || status == model.TaskStatusFailure {
-		progress = "100%"
-	}
 	response := dto.TaskResponse[model.Task]{
 		Code: dto.TaskSuccessCode,
 		Data: model.Task{
 			TaskID:   taskID,
-			Status:   status,
-			Progress: progress,
+			Status:   model.TaskStatusInProgress,
+			Progress: "30%",
 		},
 	}
 	responseBody, err := common.Marshal(response)
@@ -141,11 +110,7 @@ func (a *taskPollingFetchAdaptor) FetchTask(_ string, _ string, body map[string]
 }
 
 func (a *taskPollingFetchAdaptor) ParseTaskResult([]byte) (*relaycommon.TaskInfo, error) {
-	status := a.status
-	if status == "" {
-		status = model.TaskStatusInProgress
-	}
-	return &relaycommon.TaskInfo{Status: string(status)}, nil
+	return &relaycommon.TaskInfo{Status: model.TaskStatusInProgress}, nil
 }
 
 func (a *taskPollingFetchAdaptor) AdjustBillingOnComplete(_ *model.Task, _ *relaycommon.TaskInfo) int {
@@ -231,14 +196,11 @@ func TestUpdateVideoTasksDefaultSleepWaitsBetweenTasks(t *testing.T) {
 
 func TestUpdateVideoTasksCanSkipPollingSleepPerChannel(t *testing.T) {
 	truncate(t)
-	runtime := useBillingMetricsRuntime(t)
 
 	const channelID = 102
 	seedTaskPollingChannel(t, channelID, true)
 	first := seedPollingTask(t, channelID, "task_public_3", "upstream_3")
 	second := seedPollingTask(t, channelID, "task_public_4", "upstream_4")
-	first.Platform = constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeKling))
-	second.Platform = constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeKling))
 
 	adaptor := &taskPollingFetchAdaptor{}
 	previousFactory := GetTaskAdaptorFunc
@@ -260,80 +222,6 @@ func TestUpdateVideoTasksCanSkipPollingSleepPerChannel(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, 2, adaptor.fetchCount())
-	assert.Contains(t, billingMetricsOutput(runtime), `newapi_task_poll_total{platform="video",result="success"} 2`)
-}
-
-func TestUpdateVideoSingleTaskRecordsFetchError(t *testing.T) {
-	truncate(t)
-	runtime := useBillingMetricsRuntime(t)
-
-	const channelID = 103
-	seedTaskPollingChannel(t, channelID, true)
-	task := seedPollingTask(t, channelID, "task_public_poll_error", "upstream_poll_error")
-	task.Platform = constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeKling))
-	adaptor := &taskPollingErrorAdaptor{err: errors.New("fetch failed")}
-	channel, err := model.CacheGetChannel(channelID)
-	require.NoError(t, err)
-
-	err = updateVideoSingleTask(context.Background(), adaptor, channel, task.GetUpstreamTaskID(), map[string]*model.Task{
-		task.GetUpstreamTaskID(): task,
-	})
-
-	require.ErrorContains(t, err, "fetchTask failed")
-	assert.Equal(t, 1, adaptor.calls)
-	assert.Contains(t, billingMetricsOutput(runtime), `newapi_task_poll_total{platform="video",result="error"} 1`)
-}
-
-func TestUpdateVideoSingleTaskDoesNotRecordPollBeforeFetch(t *testing.T) {
-	truncate(t)
-	runtime := useBillingMetricsRuntime(t)
-
-	const channelID = 104
-	seedTaskPollingChannel(t, channelID, true)
-	adaptor := &taskPollingErrorAdaptor{err: errors.New("must not be called")}
-	channel, err := model.CacheGetChannel(channelID)
-	require.NoError(t, err)
-
-	err = updateVideoSingleTask(context.Background(), adaptor, channel, "missing", map[string]*model.Task{})
-
-	require.ErrorContains(t, err, "not found")
-	assert.Zero(t, adaptor.calls)
-	assert.NotContains(t, billingMetricsOutput(runtime), `newapi_task_poll_total{platform="video"`)
-}
-
-func TestUpdateVideoSingleTaskRecordsFirstTerminalCASOnce(t *testing.T) {
-	truncate(t)
-	runtime := useBillingMetricsRuntime(t)
-
-	const channelID = 105
-	seedTaskPollingChannel(t, channelID, true)
-	seeded := seedPollingTask(t, channelID, "task_public_terminal", "upstream_terminal")
-	seeded.Platform = constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeKling))
-	seeded.SubmitTime = time.Now().Add(-2 * time.Minute).Unix()
-	require.NoError(t, model.DB.Model(&model.Task{}).Where("id = ?", seeded.ID).Updates(map[string]any{
-		"platform":    seeded.Platform,
-		"submit_time": seeded.SubmitTime,
-	}).Error)
-
-	var firstPoll model.Task
-	var staleSecondPoll model.Task
-	require.NoError(t, model.DB.First(&firstPoll, seeded.ID).Error)
-	require.NoError(t, model.DB.First(&staleSecondPoll, seeded.ID).Error)
-	channel, err := model.CacheGetChannel(channelID)
-	require.NoError(t, err)
-	adaptor := &taskPollingFetchAdaptor{status: model.TaskStatusSuccess}
-
-	require.NoError(t, updateVideoSingleTask(context.Background(), adaptor, channel, seeded.GetUpstreamTaskID(), map[string]*model.Task{
-		seeded.GetUpstreamTaskID(): &firstPoll,
-	}))
-	require.NoError(t, updateVideoSingleTask(context.Background(), adaptor, channel, seeded.GetUpstreamTaskID(), map[string]*model.Task{
-		seeded.GetUpstreamTaskID(): &staleSecondPoll,
-	}))
-
-	metrics := billingMetricsOutput(runtime)
-	assert.Contains(t, metrics, `newapi_task_poll_total{platform="video",result="success"} 2`)
-	assert.Contains(t, metrics, `newapi_task_completions_total{platform="video",result="success"} 1`)
-	assert.Contains(t, metrics, `newapi_task_duration_seconds_count{platform="video",result="success"} 1`)
 }
 
 func TestUpdateVideoTasksDefaultSleepDoesNotBlockOtherChannels(t *testing.T) {
@@ -485,7 +373,6 @@ func TestUpdateVideoTasksMixedChannelSleepSettings(t *testing.T) {
 
 func TestUpdateSunoTasksStalePollsRefundExactlyOnce(t *testing.T) {
 	truncate(t)
-	runtime := useBillingMetricsRuntime(t)
 
 	const userID, tokenID, channelID = 401, 401, 401
 	const initialUserQuota, initialTokenQuota, taskQuota = 10_000, 6_000, 2_500
@@ -508,7 +395,7 @@ func TestUpdateSunoTasksStalePollsRefundExactlyOnce(t *testing.T) {
 	task.Platform = constant.TaskPlatformSuno
 	task.Status = model.TaskStatusInProgress
 	task.Progress = "50%"
-	task.SubmitTime = time.Now().Add(-time.Minute).Unix()
+	task.SubmitTime = time.Now().Unix()
 	task.PrivateData.UpstreamTaskID = upstreamTaskID
 	require.NoError(t, model.DB.Create(task).Error)
 
@@ -536,43 +423,6 @@ func TestUpdateSunoTasksStalePollsRefundExactlyOnce(t *testing.T) {
 	assert.Equal(t, initialUserQuota+taskQuota, getUserQuota(t, userID))
 	assert.Equal(t, initialTokenQuota+taskQuota, getTokenRemainQuota(t, tokenID))
 	assert.Equal(t, int64(1), countLogs(t))
-	assert.Contains(t, billingMetricsOutput(runtime), `newapi_task_poll_total{platform="suno",result="success"} 2`)
-	assert.Contains(t, billingMetricsOutput(runtime), `newapi_task_completions_total{platform="suno",result="failure"} 1`)
-	assert.Contains(t, billingMetricsOutput(runtime), `newapi_task_duration_seconds_count{platform="suno",result="failure"} 1`)
-}
-
-func TestUpdateSunoTasksRecordsFetchError(t *testing.T) {
-	truncate(t)
-	runtime := useBillingMetricsRuntime(t)
-
-	const channelID = 405
-	baseURL := "https://suno.invalid"
-	require.NoError(t, model.DB.Create(&model.Channel{
-		Id:      channelID,
-		Type:    constant.ChannelTypeSunoAPI,
-		Name:    "suno_poll_error",
-		Key:     "sk-suno-channel",
-		Status:  common.ChannelStatusEnabled,
-		BaseURL: &baseURL,
-	}).Error)
-	adaptor := &taskPollingErrorAdaptor{err: errors.New("suno fetch failed")}
-	previousFactory := GetTaskAdaptorFunc
-	GetTaskAdaptorFunc = func(constant.TaskPlatform) TaskPollingAdaptor { return adaptor }
-	t.Cleanup(func() { GetTaskAdaptorFunc = previousFactory })
-
-	err := updateSunoTasks(context.Background(), channelID, []string{"upstream-suno-error"}, map[string]*model.Task{})
-
-	require.ErrorContains(t, err, "suno fetch failed")
-	assert.Equal(t, 1, adaptor.calls)
-	assert.Contains(t, billingMetricsOutput(runtime), `newapi_task_poll_total{platform="suno",result="error"} 1`)
-}
-
-func TestUpdateSunoTasksDoesNotRecordPollForEmptyBatch(t *testing.T) {
-	truncate(t)
-	runtime := useBillingMetricsRuntime(t)
-
-	require.NoError(t, updateSunoTasks(context.Background(), 0, nil, nil))
-	assert.NotContains(t, billingMetricsOutput(runtime), `newapi_task_poll_total{platform="suno"`)
 }
 
 func TestRunTaskPollingOnceDoesNotRefundHistoricalFailedTask(t *testing.T) {
@@ -605,7 +455,6 @@ func TestRunTaskPollingOnceDoesNotRefundHistoricalFailedTask(t *testing.T) {
 
 func TestSweepTimedOutTasksHonorsRefundRolloutBoundary(t *testing.T) {
 	truncate(t)
-	runtime := useBillingMetricsRuntime(t)
 
 	const (
 		userID          = 403
@@ -617,14 +466,12 @@ func TestSweepTimedOutTasksHonorsRefundRolloutBoundary(t *testing.T) {
 
 	legacyTask := makeTask(userID, 0, legacyTaskQuota, 0, BillingSourceWallet, 0)
 	legacyTask.TaskID = "legacy_timeout_without_refund"
-	legacyTask.Platform = constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeKling))
 	legacyTask.Progress = "50%"
 	legacyTask.SubmitTime = 1771718399 // 2026-02-21 23:59:59 UTC
 	require.NoError(t, model.DB.Create(legacyTask).Error)
 
 	modernTask := makeTask(userID, 0, modernTaskQuota, 0, BillingSourceWallet, 0)
 	modernTask.TaskID = "modern_timeout_with_refund"
-	modernTask.Platform = constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeKling))
 	modernTask.Progress = "50%"
 	modernTask.SubmitTime = 1771718400 // 2026-02-22 00:00:00 UTC
 	require.NoError(t, model.DB.Create(modernTask).Error)
@@ -647,7 +494,4 @@ func TestSweepTimedOutTasksHonorsRefundRolloutBoundary(t *testing.T) {
 	assert.Contains(t, reloadedModern.FailReason, "任务超时")
 	assert.Equal(t, initialQuota+modernTaskQuota, getUserQuota(t, userID))
 	assert.Equal(t, int64(1), countLogs(t))
-	metrics := billingMetricsOutput(runtime)
-	assert.Contains(t, metrics, `newapi_task_completions_total{platform="video",result="failure"} 2`)
-	assert.Contains(t, metrics, `newapi_task_duration_seconds_count{platform="video",result="failure"} 2`)
 }

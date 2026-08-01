@@ -16,54 +16,15 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
-	prometheusmetrics "github.com/QuantumNous/new-api/pkg/prometheus_metrics"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
-	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 )
-
-const midjourneyUpstreamSuccessContextKey = "newapi_midjourney_upstream_success"
-
-func RecordMidjourneyUpstreamSuccess(c *gin.Context, success bool) {
-	if c == nil {
-		return
-	}
-	c.Set(midjourneyUpstreamSuccessContextKey, success)
-}
-
-func MidjourneyUpstreamSucceeded(c *gin.Context) (bool, bool) {
-	if c == nil {
-		return false, false
-	}
-	value, exists := c.Get(midjourneyUpstreamSuccessContextKey)
-	if !exists {
-		return false, false
-	}
-	success, ok := value.(bool)
-	return success, ok
-}
-
-func midjourneySubmitSucceeded(response *dto.MidjourneyResponseWithStatusCode) bool {
-	if response == nil {
-		return false
-	}
-	code := response.Response.Code
-	return code == 1 || code == 21 || code == 22
-}
-
-func midjourneySwapFaceSucceeded(response *dto.MidjourneyResponseWithStatusCode) bool {
-	return response != nil && response.StatusCode == http.StatusOK && response.Response.Code == 1
-}
-
-func midjourneyImageSeedSucceeded(response *dto.MidjourneyResponseWithStatusCode) bool {
-	return response != nil && response.StatusCode >= http.StatusOK && response.StatusCode < http.StatusMultipleChoices
-}
 
 func RelayMidjourneyImage(c *gin.Context) {
 	taskId := c.Param("id")
@@ -156,7 +117,6 @@ func RelayMidjourneyNotify(c *gin.Context) *dto.MidjourneyResponse {
 			Result:      "",
 		}
 	}
-	oldStatus := midjourneyTask.Status
 	midjourneyTask.Progress = midjRequest.Progress
 	midjourneyTask.PromptEn = midjRequest.PromptEn
 	midjourneyTask.State = midjRequest.State
@@ -165,30 +125,16 @@ func RelayMidjourneyNotify(c *gin.Context) *dto.MidjourneyResponse {
 	midjourneyTask.FinishTime = midjRequest.FinishTime
 	midjourneyTask.ImageUrl = midjRequest.ImageUrl
 	midjourneyTask.VideoUrl = midjRequest.VideoUrl
-	videoUrlsStr, _ := common.Marshal(midjRequest.VideoUrls)
+	videoUrlsStr, _ := json.Marshal(midjRequest.VideoUrls)
 	midjourneyTask.VideoUrls = string(videoUrlsStr)
 	midjourneyTask.Status = midjRequest.Status
 	midjourneyTask.FailReason = midjRequest.FailReason
-	isTerminal := midjourneyTask.Status == string(model.TaskStatusSuccess) || midjourneyTask.Status == string(model.TaskStatusFailure)
-	wasTerminal := oldStatus == string(model.TaskStatusSuccess) || oldStatus == string(model.TaskStatusFailure)
-	if isTerminal && midjourneyTask.FinishTime <= 0 {
-		midjourneyTask.FinishTime = time.Now().UnixMilli()
-	}
-	won, err := midjourneyTask.UpdateWithStatus(oldStatus)
+	err = midjourneyTask.Update()
 	if err != nil {
 		return &dto.MidjourneyResponse{
 			Code:        4,
 			Description: "update_midjourney_task_failed",
 		}
-	}
-	if won && isTerminal && !wasTerminal {
-		prometheusmetrics.RecordTaskCompletion(
-			string(constant.TaskPlatformMidjourney),
-			midjourneyTask.Status == string(model.TaskStatusSuccess),
-			midjourneyTask.SubmitTime,
-			midjourneyTask.FinishTime,
-			prometheusmetrics.TaskTimestampMilliseconds,
-		)
 	}
 
 	return nil
@@ -243,35 +189,6 @@ func coverMidjourneyTaskDto(c *gin.Context, originTask *model.Midjourney) (midjo
 	return
 }
 
-func doTrackedMidjourneyHttpRequest(
-	c *gin.Context,
-	timeout time.Duration,
-	fullRequestURL string,
-	succeeded func(*dto.MidjourneyResponseWithStatusCode) bool,
-) (response *dto.MidjourneyResponseWithStatusCode, responseBody []byte, err error) {
-	upstreamSucceeded := false
-	service.TrackChannelAttempt(service.ChannelAttemptMeta{
-		ChannelID:   c.GetInt("channel_id"),
-		ChannelType: c.GetInt("channel_type"),
-	}, func() service.ChannelAttemptOutcome {
-		response, responseBody, err = service.DoMidjourneyHttpRequest(c, timeout, fullRequestURL)
-		upstreamSucceeded = err == nil && response != nil && succeeded(response)
-		if upstreamSucceeded {
-			return service.ChannelAttemptOutcome{Success: true}
-		}
-		outcome := service.ChannelAttemptOutcome{Error: prometheusmetrics.ErrorDetails{Err: err}}
-		if err != nil {
-			outcome.Error.ErrorCode = types.ErrorCodeDoRequestFailed
-		}
-		if response != nil {
-			outcome.Error.StatusCode = response.StatusCode
-		}
-		return outcome
-	})
-	RecordMidjourneyUpstreamSuccess(c, upstreamSucceeded)
-	return
-}
-
 func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyResponse {
 	var swapFaceRequest dto.SwapFaceRequest
 	err := common.UnmarshalBodyReusable(c, &swapFaceRequest)
@@ -311,7 +228,7 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 	requestURL := getMjRequestPath(c.Request.URL.String())
 	baseURL := c.GetString("base_url")
 	fullRequestURL := fmt.Sprintf("%s%s", baseURL, requestURL)
-	mjResp, _, err := doTrackedMidjourneyHttpRequest(c, time.Second*60, fullRequestURL, midjourneySwapFaceSucceeded)
+	mjResp, _, err := service.DoMidjourneyHttpRequest(c, time.Second*60, fullRequestURL)
 	if err != nil {
 		return &mjResp.Response
 	}
@@ -390,12 +307,11 @@ func RelayMidjourneyTaskImageSeed(c *gin.Context) *dto.MidjourneyResponse {
 		return service.MidjourneyErrorWrapper(constant.MjRequestError, "该任务所属渠道已被禁用")
 	}
 	c.Set("channel_id", originTask.ChannelId)
-	c.Set("channel_type", channel.Type)
 	c.Request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", channel.Key))
 
 	requestURL := getMjRequestPath(c.Request.URL.String())
 	fullRequestURL := fmt.Sprintf("%s%s", channel.GetBaseURL(), requestURL)
-	midjResponseWithStatus, _, err := doTrackedMidjourneyHttpRequest(c, time.Second*30, fullRequestURL, midjourneyImageSeedSucceeded)
+	midjResponseWithStatus, _, err := service.DoMidjourneyHttpRequest(c, time.Second*30, fullRequestURL)
 	if err != nil {
 		return &midjResponseWithStatus.Response
 	}
@@ -617,7 +533,9 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		}
 	}
 
-	midjResponseWithStatus, responseBody, err := doTrackedMidjourneyHttpRequest(c, time.Second*60, fullRequestURL, midjourneySubmitSucceeded)
+	attempt := service.BeginChannelRuntimeAttempt(c.GetInt("channel_id"))
+	midjResponseWithStatus, responseBody, err := service.DoMidjourneyHttpRequest(c, time.Second*60, fullRequestURL)
+	attempt.Done()
 	if err != nil {
 		return &midjResponseWithStatus.Response
 	}

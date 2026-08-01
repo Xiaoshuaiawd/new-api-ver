@@ -3,106 +3,12 @@ package channel
 import (
 	"net/http"
 	"net/http/httptest"
-	"net/http/httptrace"
 	"testing"
 
-	prometheusmetrics "github.com/QuantumNous/new-api/pkg/prometheus_metrics"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestWithChannelFirstByteTraceRecordsFirstHeaderByteOnce(t *testing.T) {
-	runtime, err := prometheusmetrics.NewRuntime(prometheusmetrics.Config{
-		Enabled:     true,
-		AllowPublic: true,
-	}, "v-test", nil, nil)
-	require.NoError(t, err)
-	prometheusmetrics.SetDefaultRuntime(runtime)
-	t.Cleanup(func() { prometheusmetrics.SetDefaultRuntime(nil) })
-
-	req := httptest.NewRequest(http.MethodPost, "https://example.com/v1/chat/completions", nil)
-	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 23, ChannelType: 1}}
-	tracedRequest := withChannelFirstByteTrace(req, info)
-	trace := httptrace.ContextClientTrace(tracedRequest.Context())
-	require.NotNil(t, trace)
-	require.NotNil(t, trace.GetConn)
-	require.NotNil(t, trace.GotFirstResponseByte)
-
-	trace.GetConn("example.com:443")
-	trace.GotFirstResponseByte()
-	trace.GotFirstResponseByte()
-
-	response := httptest.NewRecorder()
-	runtime.Handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	require.Equal(t, http.StatusOK, response.Code)
-	assert.Contains(t, response.Body.String(), "newapi_channel_first_byte_seconds_count{channel_id=\"23\",channel_type=\"1\"} 1")
-}
-
-func TestWithChannelFirstByteTraceFreezesChannelLabels(t *testing.T) {
-	runtime, err := prometheusmetrics.NewRuntime(prometheusmetrics.Config{
-		Enabled:     true,
-		AllowPublic: true,
-	}, "v-test", nil, nil)
-	require.NoError(t, err)
-	prometheusmetrics.SetDefaultRuntime(runtime)
-	t.Cleanup(func() { prometheusmetrics.SetDefaultRuntime(nil) })
-
-	req := httptest.NewRequest(http.MethodPost, "https://example.com/v1/chat/completions", nil)
-	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 25, ChannelType: 3}}
-	tracedRequest := withChannelFirstByteTrace(req, info)
-	info.ChannelId = 99
-	info.ChannelType = 9
-
-	trace := httptrace.ContextClientTrace(tracedRequest.Context())
-	require.NotNil(t, trace)
-	require.NotNil(t, trace.GetConn)
-	require.NotNil(t, trace.GotFirstResponseByte)
-	trace.GetConn("example.com:443")
-	trace.GotFirstResponseByte()
-
-	response := httptest.NewRecorder()
-	runtime.Handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	require.Equal(t, http.StatusOK, response.Code)
-	assert.Contains(t, response.Body.String(), "newapi_channel_first_byte_seconds_count{channel_id=\"25\",channel_type=\"3\"} 1")
-	assert.NotContains(t, response.Body.String(), "channel_id=\"99\"")
-}
-
-func TestDoRequestRecordsSharedHTTPFirstByte(t *testing.T) {
-	runtime, err := prometheusmetrics.NewRuntime(prometheusmetrics.Config{
-		Enabled:     true,
-		AllowPublic: true,
-	}, "v-test", nil, nil)
-	require.NoError(t, err)
-	prometheusmetrics.SetDefaultRuntime(runtime)
-	t.Cleanup(func() { prometheusmetrics.SetDefaultRuntime(nil) })
-
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, writeErr := w.Write([]byte(`{"ok":true}`))
-		assert.NoError(t, writeErr)
-	}))
-	t.Cleanup(upstream.Close)
-	service.InitHttpClient()
-
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	upstreamRequest, err := http.NewRequestWithContext(ctx.Request.Context(), http.MethodPost, upstream.URL, http.NoBody)
-	require.NoError(t, err)
-	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 24, ChannelType: 2}}
-
-	upstreamResponse, err := DoRequest(ctx, upstreamRequest, info)
-	require.NoError(t, err)
-	require.NoError(t, upstreamResponse.Body.Close())
-
-	response := httptest.NewRecorder()
-	runtime.Handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	require.Equal(t, http.StatusOK, response.Code)
-	assert.Contains(t, response.Body.String(), "newapi_channel_first_byte_seconds_count{channel_id=\"24\",channel_type=\"2\"} 1")
-}
 
 func TestProcessHeaderOverride_ChannelTestSkipsPassthroughRules(t *testing.T) {
 	t.Parallel()

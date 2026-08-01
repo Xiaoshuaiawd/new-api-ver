@@ -8,15 +8,13 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/middleware"
-	prometheusmetrics "github.com/QuantumNous/new-api/pkg/prometheus_metrics"
 
 	"github.com/gin-gonic/gin"
 )
 
-func SetRouter(router *gin.Engine, assets WebAssets, metricsRuntime *prometheusmetrics.Runtime) {
+func SetRouter(router *gin.Engine, assets WebAssets) {
 	SetApiRouter(router)
 	SetDashboardRouter(router)
-	SetMetricsRouter(router, metricsRuntime)
 	SetRelayRouter(router)
 	SetVideoRouter(router)
 	frontendBaseUrl := os.Getenv("FRONTEND_BASE_URL")

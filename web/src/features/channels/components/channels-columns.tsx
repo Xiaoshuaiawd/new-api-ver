@@ -1088,19 +1088,17 @@ export function useChannelsColumns(
         enableSorting: false,
       },
 
-      // Current concurrency and successful requests completed in the latest 60 seconds
+      // Current concurrency and requests started during the latest 60 seconds
       {
         accessorKey: 'runtime_metrics',
-        header: `${t('Concurrency / RPM')} (${t('Success')})`,
+        header: t('Concurrency / RPM'),
         meta: { mobileHidden: true },
         cell: ({ row }) => {
           const metrics = row.original.runtime_metrics
-          const label = `${t('Concurrency / RPM')} (${t('Success')})`
           return (
             <span
               className='font-mono text-xs whitespace-nowrap tabular-nums'
-              aria-label={`${label}: ${metrics.concurrency} / ${metrics.rpm}`}
-              title={t('Only successful requests')}
+              aria-label={`${t('Concurrency / RPM')}: ${metrics.concurrency} / ${metrics.rpm}`}
             >
               {metrics.concurrency} / {metrics.rpm}
             </span>

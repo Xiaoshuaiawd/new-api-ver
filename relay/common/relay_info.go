@@ -86,19 +86,16 @@ type TokenCountMeta struct {
 }
 
 type RelayInfo struct {
-	TokenId                          int
-	TokenKey                         string
-	TokenGroup                       string
-	UserId                           int
-	UsingGroup                       string // 使用的分组，当auto跨分组重试时，会变动
-	UserGroup                        string // 用户所在分组
-	TokenUnlimited                   bool
-	StartTime                        time.Time
-	FirstResponseTime                time.Time
-	isFirstResponse                  bool
-	channelAttemptStartTime          time.Time
-	channelAttemptFirstResponseTime  time.Time
-	channelAttemptFirstTokenObserver func()
+	TokenId           int
+	TokenKey          string
+	TokenGroup        string
+	UserId            int
+	UsingGroup        string // 使用的分组，当auto跨分组重试时，会变动
+	UserGroup         string // 用户所在分组
+	TokenUnlimited    bool
+	StartTime         time.Time
+	FirstResponseTime time.Time
+	isFirstResponse   bool
 	//SendLastReasoningResponse bool
 	IsStream               bool
 	IsGeminiBatchEmbedding bool
@@ -689,58 +686,14 @@ func (info *RelayInfo) GetEstimatePromptTokens() int {
 }
 
 func (info *RelayInfo) SetFirstResponseTime() {
-	info.setFirstResponseTime(time.Now())
-}
-
-func (info *RelayInfo) setFirstResponseTime(now time.Time) {
 	if info.isFirstResponse {
-		info.FirstResponseTime = now
+		info.FirstResponseTime = time.Now()
 		info.isFirstResponse = false
 	}
-	if !info.channelAttemptStartTime.IsZero() && info.channelAttemptFirstResponseTime.IsZero() {
-		info.channelAttemptFirstResponseTime = now
-		if info.channelAttemptFirstTokenObserver != nil {
-			info.channelAttemptFirstTokenObserver()
-			info.channelAttemptFirstTokenObserver = nil
-		}
-	}
-}
-
-func (info *RelayInfo) SetChannelAttemptFirstTokenObserver(observer func()) {
-	if info == nil {
-		return
-	}
-	info.channelAttemptFirstTokenObserver = observer
-}
-
-func (info *RelayInfo) BeginChannelAttempt() {
-	info.beginChannelAttempt(time.Now())
-}
-
-func (info *RelayInfo) beginChannelAttempt(now time.Time) {
-	info.channelAttemptStartTime = now
-	info.channelAttemptFirstResponseTime = time.Time{}
-	info.channelAttemptFirstTokenObserver = nil
-}
-
-func (info *RelayInfo) ChannelAttemptTTFT() time.Duration {
-	if info == nil || info.channelAttemptStartTime.IsZero() || !info.channelAttemptFirstResponseTime.After(info.channelAttemptStartTime) {
-		return 0
-	}
-	return info.channelAttemptFirstResponseTime.Sub(info.channelAttemptStartTime)
 }
 
 func (info *RelayInfo) HasSendResponse() bool {
 	return info.FirstResponseTime.After(info.StartTime)
-}
-
-func (info *RelayInfo) FinalSuccess(handlerSuccess bool) bool {
-	if !handlerSuccess || info == nil || !info.IsStream || info.StreamStatus == nil {
-		return handlerSuccess
-	}
-	return info.StreamStatus.IsNormalEnd() &&
-		info.StreamStatus.EndError == nil &&
-		!info.StreamStatus.HasErrors()
 }
 
 type TaskRelayInfo struct {

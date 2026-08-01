@@ -9,11 +9,9 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
-	prometheusmetrics "github.com/QuantumNous/new-api/pkg/prometheus_metrics"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -121,39 +119,36 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("mj-api-secret", midjourneyChannel.Key)
-		var responseItems []dto.MidjourneyDto
-		pollSuccess := false
-		func() {
-			defer func() {
-				prometheusmetrics.RecordTaskPoll(string(constant.TaskPlatformMidjourney), pollSuccess)
-			}()
-
-			resp, requestErr := service.GetHttpClient().Do(req)
-			if requestErr != nil {
-				logger.LogError(ctx, fmt.Sprintf("Get Task Do req error: %v", requestErr))
-				return
-			}
-			defer resp.Body.Close()
-			if resp.StatusCode != http.StatusOK {
-				logger.LogError(ctx, fmt.Sprintf("Get Task status code: %d", resp.StatusCode))
-				return
-			}
-			responseBody, readErr := io.ReadAll(resp.Body)
-			if readErr != nil {
-				logger.LogError(ctx, fmt.Sprintf("Get Mjp Task parse body error: %v", readErr))
-				return
-			}
-			if unmarshalErr := common.Unmarshal(responseBody, &responseItems); unmarshalErr != nil {
-				logger.LogError(ctx, fmt.Sprintf("Get Mjp Task parse body error2: %v, body: %s", unmarshalErr, string(responseBody)))
-				return
-			}
-			pollSuccess = true
-		}()
-		req.Body.Close()
-		cancel()
-		if !pollSuccess {
+		resp, err := service.GetHttpClient().Do(req)
+		if err != nil {
+			logger.LogError(ctx, fmt.Sprintf("Get Task Do req error: %v", err))
+			cancel()
 			continue
 		}
+		if resp.StatusCode != http.StatusOK {
+			logger.LogError(ctx, fmt.Sprintf("Get Task status code: %d", resp.StatusCode))
+			resp.Body.Close()
+			cancel()
+			continue
+		}
+		responseBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			logger.LogError(ctx, fmt.Sprintf("Get Mjp Task parse body error: %v", err))
+			resp.Body.Close()
+			cancel()
+			continue
+		}
+		var responseItems []dto.MidjourneyDto
+		err = common.Unmarshal(responseBody, &responseItems)
+		if err != nil {
+			logger.LogError(ctx, fmt.Sprintf("Get Mjp Task parse body error2: %v, body: %s", err, string(responseBody)))
+			resp.Body.Close()
+			cancel()
+			continue
+		}
+		resp.Body.Close()
+		req.Body.Close()
+		cancel()
 
 		for _, responseItem := range responseItems {
 			task := taskM[responseItem.MjId]
@@ -182,11 +177,6 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 			task.ImageUrl = responseItem.ImageUrl
 			task.Status = responseItem.Status
 			task.FailReason = responseItem.FailReason
-			isTerminal := task.Status == string(model.TaskStatusSuccess) || task.Status == string(model.TaskStatusFailure)
-			wasTerminal := preStatus == string(model.TaskStatusSuccess) || preStatus == string(model.TaskStatusFailure)
-			if isTerminal && task.FinishTime <= 0 {
-				task.FinishTime = time.Now().UnixMilli()
-			}
 			if responseItem.Properties != nil {
 				propertiesStr, _ := common.Marshal(responseItem.Properties)
 				task.Properties = string(propertiesStr)
@@ -222,34 +212,23 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 			won, err := task.UpdateWithStatus(preStatus)
 			if err != nil {
 				logger.LogError(ctx, "UpdateMidjourneyTask task error: "+err.Error())
-			} else if won {
-				if isTerminal && !wasTerminal {
-					prometheusmetrics.RecordTaskCompletion(
-						string(constant.TaskPlatformMidjourney),
-						task.Status == string(model.TaskStatusSuccess),
-						task.SubmitTime,
-						task.FinishTime,
-						prometheusmetrics.TaskTimestampMilliseconds,
-					)
+			} else if won && shouldReturnQuota {
+				err = model.IncreaseUserQuota(task.UserId, task.Quota, false)
+				if err != nil {
+					logger.LogError(ctx, "fail to increase user quota: "+err.Error())
 				}
-				if shouldReturnQuota {
-					err = model.IncreaseUserQuota(task.UserId, task.Quota, false)
-					if err != nil {
-						logger.LogError(ctx, "fail to increase user quota: "+err.Error())
-					}
-					model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
-						UserId:    task.UserId,
-						LogType:   model.LogTypeRefund,
-						Content:   "",
-						ChannelId: task.ChannelId,
-						ModelName: service.CovertMjpActionToModelName(task.Action),
-						Quota:     task.Quota,
-						Other: map[string]interface{}{
-							"task_id": task.MjId,
-							"reason":  "构图失败",
-						},
-					})
-				}
+				model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
+					UserId:    task.UserId,
+					LogType:   model.LogTypeRefund,
+					Content:   "",
+					ChannelId: task.ChannelId,
+					ModelName: service.CovertMjpActionToModelName(task.Action),
+					Quota:     task.Quota,
+					Other: map[string]interface{}{
+						"task_id": task.MjId,
+						"reason":  "构图失败",
+					},
+				})
 			}
 		}
 	}

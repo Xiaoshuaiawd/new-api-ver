@@ -310,7 +310,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, fmt.Errorf("get request url failed: %w", err)
 	}
 	logger.LogDebug(c, "fullRequestURL: %s", common.SanitizeURLForLog(fullRequestURL))
-	req, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, fullRequestURL, requestBody)
+	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
@@ -386,11 +386,7 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		targetHeader.Set(key, value)
 	}
 	targetHeader.Set("Content-Type", c.Request.Header.Get("Content-Type"))
-	dialContext := c.Request.Context()
-	if info != nil && info.ChannelMeta != nil {
-		dialContext = service.WithChannelFirstByteTrace(dialContext, info.ChannelId, info.ChannelType)
-	}
-	targetConn, _, err := websocket.DefaultDialer.DialContext(dialContext, fullRequestURL, targetHeader)
+	targetConn, _, err := websocket.DefaultDialer.Dial(fullRequestURL, targetHeader)
 	if err != nil {
 		return nil, fmt.Errorf("dial failed to %s: %w", common.SanitizeURLForLog(fullRequestURL), err)
 	}
@@ -478,14 +474,6 @@ func sendPingData(c *gin.Context, mutex *sync.Mutex) error {
 func DoRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	return doRequest(c, req, info)
 }
-
-func withChannelFirstByteTrace(req *http.Request, info *common.RelayInfo) *http.Request {
-	if req == nil || info == nil || info.ChannelMeta == nil || info.ChannelId <= 0 {
-		return req
-	}
-	return req.WithContext(service.WithChannelFirstByteTrace(req.Context(), info.ChannelId, info.ChannelType))
-}
-
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	var client *http.Client
 	var err error
@@ -518,7 +506,6 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		}
 	}
 
-	req = withChannelFirstByteTrace(req, info)
 	resp, err := client.Do(req)
 	if err != nil {
 		logger.LogError(c, "do request failed: "+err.Error())

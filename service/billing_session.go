@@ -11,7 +11,6 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
-	prometheusmetrics "github.com/QuantumNous/new-api/pkg/prometheus_metrics"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -48,18 +47,14 @@ func (s *BillingSession) Settle(actualQuota int) error {
 	if s.settled {
 		return nil
 	}
-	source := s.funding.Source()
 	delta := actualQuota - s.preConsumedQuota
 	if delta == 0 {
 		s.settled = true
-		prometheusmetrics.RecordBillingOperation("settle", source, "success")
 		return nil
 	}
 	// 1) 调整资金来源（仅在尚未提交时执行，防止重复调用）
 	if !s.fundingSettled {
 		if err := s.funding.Settle(delta); err != nil {
-			prometheusmetrics.RecordBillingOperation("settle", source, "error")
-			prometheusmetrics.RecordBillingFailure("settle", source, billingFundingFailureReason(err, source))
 			return err
 		}
 		s.fundingSettled = true
@@ -83,12 +78,6 @@ func (s *BillingSession) Settle(actualQuota int) error {
 		s.relayInfo.SubscriptionPostDelta += int64(delta)
 	}
 	s.settled = true
-	if tokenErr != nil {
-		prometheusmetrics.RecordBillingOperation("settle", source, "error")
-		prometheusmetrics.RecordBillingFailure("settle", source, "token_quota")
-	} else {
-		prometheusmetrics.RecordBillingOperation("settle", source, "success")
-	}
 	return tokenErr
 }
 
@@ -116,38 +105,23 @@ func (s *BillingSession) Refund(c *gin.Context) {
 	extraReserved := s.extraReserved
 	subscriptionId := s.relayInfo.SubscriptionId
 	funding := s.funding
-	source := funding.Source()
 
 	gopool.Go(func() {
-		failureReason := ""
 		// 1) 退还资金来源
 		if err := funding.Refund(); err != nil {
 			common.SysLog("error refunding billing source: " + err.Error())
-			failureReason = billingFundingFailureReason(err, source)
 		}
 		if extraReserved > 0 && funding.Source() == BillingSourceSubscription && subscriptionId > 0 {
 			if err := model.PostConsumeUserSubscriptionDelta(subscriptionId, -int64(extraReserved)); err != nil {
 				common.SysLog("error refunding subscription extra reserved quota: " + err.Error())
-				if failureReason == "" {
-					failureReason = "database"
-				}
 			}
 		}
 		// 2) 退还令牌额度
 		if tokenConsumed > 0 && !isPlayground {
 			if err := model.IncreaseTokenQuota(tokenId, tokenKey, tokenConsumed); err != nil {
 				common.SysLog("error refunding token quota: " + err.Error())
-				if failureReason == "" {
-					failureReason = "token_quota"
-				}
 			}
 		}
-		if failureReason != "" {
-			prometheusmetrics.RecordBillingOperation("refund", source, "error")
-			prometheusmetrics.RecordBillingFailure("refund", source, failureReason)
-			return
-		}
-		prometheusmetrics.RecordBillingOperation("refund", source, "success")
 	})
 }
 
@@ -438,7 +412,6 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 
 	// 钱包路径需要先检查用户额度
 	tryWallet := func(walletPreConsumedQuota int) (*BillingSession, *types.NewAPIError) {
-		relayInfo.BillingSource = BillingSourceWallet
 		userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
 		if err != nil {
 			return nil, types.NewError(err, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
@@ -468,7 +441,6 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 	}
 
 	trySubscription := func() (*BillingSession, *types.NewAPIError) {
-		relayInfo.BillingSource = BillingSourceSubscription
 		subConsume := int64(preConsumedQuota)
 		if subConsume <= 0 {
 			subConsume = 1
@@ -510,7 +482,6 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 		if apiErr != nil {
 			if isSubscriptionQuotaErr(apiErr) {
 				if pref == "subscription_only" {
-					prometheusmetrics.RecordSubscriptionRejection("insufficient_quota")
 					return nil, newSubscriptionBillingError("订阅额度不足")
 				}
 				// 仅当用户的活跃订阅允许钱包回退时才回退到钱包，否则返回订阅额度不足错误
@@ -519,7 +490,6 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 					return nil, types.NewError(overflowErr, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
 				}
 				if !allowOverflow {
-					prometheusmetrics.RecordSubscriptionRejection("insufficient_quota")
 					return nil, apiErr
 				}
 				walletPreConsumedQuota := switchRelayInfoPriceDataToWallet(relayInfo, preConsumedQuota)
@@ -536,13 +506,11 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 
 	switch pref {
 	case "subscription_only":
-		relayInfo.BillingSource = BillingSourceSubscription
 		hasSubscription, err := model.HasUserSubscription(relayInfo.UserId)
 		if err != nil {
 			return nil, types.NewError(err, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
 		}
 		if !hasSubscription {
-			prometheusmetrics.RecordSubscriptionRejection("no_available_subscription")
 			return nil, newSubscriptionBillingError("当前无可用订阅")
 		}
 		hasActiveSubscription, err := model.HasActiveUserSubscription(relayInfo.UserId)
@@ -550,10 +518,8 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 			return nil, types.NewError(err, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
 		}
 		if hasActiveSubscription {
-			prometheusmetrics.RecordSubscriptionRejection("no_available_subscription")
 			return nil, newSubscriptionBillingError("当前无可用订阅")
 		}
-		prometheusmetrics.RecordSubscriptionRejection("expired")
 		return nil, newSubscriptionBillingError("订阅额度不足")
 	case "wallet_only":
 		return tryWallet(preConsumedQuota)

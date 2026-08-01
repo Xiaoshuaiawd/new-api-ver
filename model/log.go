@@ -11,7 +11,6 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
-	prometheusmetrics "github.com/QuantumNous/new-api/pkg/prometheus_metrics"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -365,14 +364,6 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	err := createLog(log)
 	if err != nil {
 		logger.LogError(c, "failed to record log: "+err.Error())
-	} else {
-		prometheusmetrics.RecordPersistedBillingLog(
-			"consume",
-			log.Quota,
-			log.PromptTokens,
-			log.CompletionTokens,
-			log.Other,
-		)
 	}
 	if common.DataExportEnabled {
 		LogQuotaData(QuotaDataLogParams{
@@ -403,9 +394,9 @@ type RecordTaskBillingLogParams struct {
 	NodeName  string // 任务发起节点；为空时回退当前节点
 }
 
-func RecordTaskBillingLog(params RecordTaskBillingLogParams) bool {
+func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	if params.LogType == LogTypeConsume && !common.LogConsumeEnabled {
-		return false
+		return
 	}
 	username, _ := GetUsernameById(params.UserId, false)
 	tokenName := ""
@@ -430,20 +421,8 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) bool {
 		Other:     common.MapToJsonStr(params.Other),
 	}
 	err := createLog(log)
-	persisted := err == nil
 	if err != nil {
 		common.SysLog("failed to record task billing log: " + err.Error())
-	} else {
-		eventType := ""
-		switch log.Type {
-		case LogTypeConsume:
-			eventType = "consume"
-		case LogTypeRefund:
-			eventType = "refund"
-		}
-		if eventType != "" {
-			prometheusmetrics.RecordPersistedBillingLog(eventType, log.Quota, 0, 0, log.Other)
-		}
 	}
 	if params.LogType == LogTypeConsume && common.DataExportEnabled {
 		nodeName := params.NodeName
@@ -462,7 +441,6 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) bool {
 			NodeName:  nodeName,
 		})
 	}
-	return persisted
 }
 
 func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string) (logs []*Log, total int64, err error) {

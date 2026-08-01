@@ -8,13 +8,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
-	prometheusmetrics "github.com/QuantumNous/new-api/pkg/prometheus_metrics"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -448,10 +446,6 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 		return nil
 	}
 
-	pollSuccess := false
-	defer func() {
-		prometheusmetrics.RecordTaskPoll(string(task.Platform), pollSuccess)
-	}()
 	resp, err := adaptor.FetchTask(baseURL, channelModel.Key, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
 		"action":  task.Action,
@@ -469,7 +463,6 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 	if err != nil || ti == nil {
 		return nil
 	}
-	pollSuccess = true
 
 	snap := task.Snapshot()
 
@@ -480,11 +473,6 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 	if ti.Progress != "" {
 		task.Progress = ti.Progress
 	}
-	isTerminal := task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure
-	wasTerminal := snap.Status == model.TaskStatusSuccess || snap.Status == model.TaskStatusFailure
-	if isTerminal && task.FinishTime <= 0 {
-		task.FinishTime = time.Now().Unix()
-	}
 	if strings.HasPrefix(ti.Url, "data:") {
 		// data: URI — kept in Data, not ResultURL
 	} else if ti.Url != "" {
@@ -494,18 +482,8 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 		task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
 	}
 
-	won := false
 	if !snap.Equal(task.Snapshot()) {
-		won, _ = task.UpdateWithStatus(snap.Status)
-	}
-	if won && isTerminal && !wasTerminal {
-		prometheusmetrics.RecordTaskCompletion(
-			string(task.Platform),
-			task.Status == model.TaskStatusSuccess,
-			task.SubmitTime,
-			task.FinishTime,
-			prometheusmetrics.TaskTimestampSeconds,
-		)
+		_, _ = task.UpdateWithStatus(snap.Status)
 	}
 
 	// OpenAI Video API 由调用者的 ConvertToOpenAIVideo 分支处理

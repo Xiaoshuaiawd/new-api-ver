@@ -9,7 +9,6 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
-	prometheusmetrics "github.com/QuantumNous/new-api/pkg/prometheus_metrics"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -103,13 +102,13 @@ func taskAdjustFunding(task *model.Task, delta int) error {
 
 // taskAdjustTokenQuota 调整任务的令牌额度，delta > 0 表示扣费，delta < 0 表示退还。
 // 需要通过 resolveTokenKey 运行时获取 key（不从 PrivateData 中读取）。
-func taskAdjustTokenQuota(ctx context.Context, task *model.Task, delta int) error {
+func taskAdjustTokenQuota(ctx context.Context, task *model.Task, delta int) {
 	if task.PrivateData.TokenId <= 0 || delta == 0 {
-		return nil
+		return
 	}
 	tokenKey := resolveTokenKey(ctx, task.PrivateData.TokenId, task.TaskID)
 	if tokenKey == "" {
-		return nil
+		return
 	}
 	var err error
 	if delta > 0 {
@@ -120,7 +119,6 @@ func taskAdjustTokenQuota(ctx context.Context, task *model.Task, delta int) erro
 	if err != nil {
 		logger.LogWarn(ctx, fmt.Sprintf("调整令牌额度失败 (delta=%d, task=%s): %s", delta, task.TaskID, err.Error()))
 	}
-	return err
 }
 
 // taskBillingOther 从 task 的 BillingContext 构建日志 Other 字段。
@@ -191,19 +189,17 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 	// 1. 退还资金来源（钱包或订阅）
 	if err := taskAdjustFunding(task, -quota); err != nil {
 		logger.LogWarn(ctx, fmt.Sprintf("退还资金来源失败 task %s: %s", task.TaskID, err.Error()))
-		prometheusmetrics.RecordBillingOperation("refund", task.PrivateData.BillingSource, "error")
-		prometheusmetrics.RecordBillingFailure("refund", task.PrivateData.BillingSource, billingFundingFailureReason(err, task.PrivateData.BillingSource))
 		return false
 	}
 
 	// 2. 退还令牌额度
-	tokenErr := taskAdjustTokenQuota(ctx, task, -quota)
+	taskAdjustTokenQuota(ctx, task, -quota)
 
 	// 3. 记录日志
 	other := taskBillingOther(task)
 	other["task_id"] = task.TaskID
 	other["reason"] = reason
-	logPersisted := model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
+	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
 		UserId:    task.UserId,
 		LogType:   model.LogTypeRefund,
 		Content:   "",
@@ -218,23 +214,8 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 	// 4. 资金退款完成后再清除持久化标记。
 	// 回写失败必须显式告警，避免漏掉潜在的重复退款风险。
 	task.Quota = 0
-	updateErr := task.UpdateQuota()
-	if updateErr != nil {
-		logger.LogError(ctx, fmt.Sprintf("退款成功但清除 task quota 失败 task %s: %s", task.TaskID, updateErr.Error()))
-	}
-	failureReason := ""
-	if tokenErr != nil {
-		failureReason = "token_quota"
-	} else if !logPersisted {
-		failureReason = "database"
-	} else if updateErr != nil {
-		failureReason = "database"
-	}
-	if failureReason != "" {
-		prometheusmetrics.RecordBillingOperation("refund", task.PrivateData.BillingSource, "error")
-		prometheusmetrics.RecordBillingFailure("refund", task.PrivateData.BillingSource, failureReason)
-	} else {
-		prometheusmetrics.RecordBillingOperation("refund", task.PrivateData.BillingSource, "success")
+	if err := task.UpdateQuota(); err != nil {
+		logger.LogError(ctx, fmt.Sprintf("退款成功但清除 task quota 失败 task %s: %s", task.TaskID, err.Error()))
 	}
 	return true
 }
@@ -267,18 +248,15 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	// 调整资金来源
 	if err := taskAdjustFunding(task, quotaDelta); err != nil {
 		logger.LogError(ctx, fmt.Sprintf("差额结算资金调整失败 task %s: %s", task.TaskID, err.Error()))
-		prometheusmetrics.RecordBillingOperation("task_recalculate", task.PrivateData.BillingSource, "error")
-		prometheusmetrics.RecordBillingFailure("task_recalculate", task.PrivateData.BillingSource, billingFundingFailureReason(err, task.PrivateData.BillingSource))
 		return
 	}
 
 	// 调整令牌额度
-	tokenErr := taskAdjustTokenQuota(ctx, task, quotaDelta)
+	taskAdjustTokenQuota(ctx, task, quotaDelta)
 
 	task.Quota = actualQuota
-	updateErr := task.UpdateQuota()
-	if updateErr != nil {
-		logger.LogError(ctx, fmt.Sprintf("差额结算回写 quota 失败 task %s: %s", task.TaskID, updateErr.Error()))
+	if err := task.UpdateQuota(); err != nil {
+		logger.LogError(ctx, fmt.Sprintf("差额结算回写 quota 失败 task %s: %s", task.TaskID, err.Error()))
 	}
 
 	var logType int
@@ -299,7 +277,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	for _, clamp := range clamps {
 		attachQuotaSaturationToOther(other, clamp)
 	}
-	logPersisted := model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
+	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
 		UserId:    task.UserId,
 		LogType:   logType,
 		Content:   reason,
@@ -311,20 +289,6 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		Other:     other,
 		NodeName:  task.PrivateData.NodeName,
 	})
-	failureReason := ""
-	if tokenErr != nil {
-		failureReason = "token_quota"
-	} else if updateErr != nil {
-		failureReason = "database"
-	} else if !logPersisted && (logType != model.LogTypeConsume || common.LogConsumeEnabled) {
-		failureReason = "database"
-	}
-	if failureReason != "" {
-		prometheusmetrics.RecordBillingOperation("task_recalculate", task.PrivateData.BillingSource, "error")
-		prometheusmetrics.RecordBillingFailure("task_recalculate", task.PrivateData.BillingSource, failureReason)
-	} else {
-		prometheusmetrics.RecordBillingOperation("task_recalculate", task.PrivateData.BillingSource, "success")
-	}
 }
 
 // RecalculateTaskQuotaByTokens 根据实际 token 消耗重新计费（异步差额结算）。
