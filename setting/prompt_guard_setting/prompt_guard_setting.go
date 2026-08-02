@@ -111,7 +111,10 @@ func applyLocked(decrypt func(string) (string, error)) {
 func buildActive(cfg StorageConfig, decrypt func(string) (string, error)) promptguard.Config {
 	eps := make([]promptguard.Endpoint, 0, len(cfg.Endpoints))
 	for _, ep := range cfg.Endpoints {
-		token := ""
+		// Tokens are stored as plaintext (same pattern as SMTPToken/StripeApiSecret),
+		// so when no decryptor is provided the stored value IS the token. Only run
+		// decrypt when a decryptor is supplied and the value is ciphertext.
+		token := ep.TokenCipher
 		if decrypt != nil && ep.TokenCipher != "" {
 			if pt, err := decrypt(ep.TokenCipher); err == nil {
 				token = pt
