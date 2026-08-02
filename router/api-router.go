@@ -214,6 +214,15 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.GET("/waffo-pancake/subscription-product-options", controller.ListWaffoPancakeSubscriptionProductOptions)
 		}
 
+		// Prompt Guard configuration (root only)
+		promptGuardRoute := apiRouter.Group("/prompt-guard")
+		promptGuardRoute.Use(middleware.RootAuth())
+		{
+			promptGuardRoute.GET("/config", controller.GetPromptGuardConfig)
+			promptGuardRoute.PUT("/config", controller.UpdatePromptGuardConfig)
+			promptGuardRoute.POST("/probe", controller.ProbePromptGuardEndpoint)
+		}
+
 		// Custom OAuth provider management (root only)
 		customOAuthRoute := apiRouter.Group("/custom-oauth-provider")
 		customOAuthRoute.Use(middleware.RootAuth())

@@ -148,6 +148,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 	}
 
+	// Prompt Guard: must run before channel selection, pre-consume and upstream dispatch.
+	// A blocked request returns 403 without touching any account/quota state.
+	if guardErr := service.CheckPromptGuard(c, relayInfo.TokenGroup, relayInfo.RequestId, relayInfo.OriginModelName, request); guardErr != nil {
+		newAPIError = guardErr
+		return
+	}
+
 	tokens, err := service.EstimateRequestToken(c, meta, relayInfo)
 	if err != nil {
 		newAPIError = types.NewError(err, types.ErrorCodeCountTokenFailed)

@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/performance_setting"
+	prompt_guard_setting "github.com/QuantumNous/new-api/setting/prompt_guard_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"gorm.io/gorm"
@@ -204,6 +205,9 @@ func InitOptionMap() {
 	common.OptionMap["channel_health_setting.reference_ttft_ms"] = strconv.Itoa(channel_health_setting.ReferenceTTFTMs)
 	common.OptionMap["channel_health_setting.warmup_threshold"] = strconv.Itoa(channel_health_setting.WarmupThreshold)
 	common.OptionMap["channel_health_setting.min_multiplier_pct"] = strconv.Itoa(channel_health_setting.MinMultiplierPct)
+
+	// prompt_guard: stored as a single JSON blob; default is disabled
+	common.OptionMap["prompt_guard_setting"] = "{}"
 
 	common.OptionMapRWMutex.Unlock()
 	loadOptionsFromDatabase()
@@ -709,6 +713,9 @@ func updateOptionMap(key string, value string) (err error) {
 	case "channel_health_setting.min_multiplier_pct":
 		channel_health_setting.MinMultiplierPct, _ = strconv.Atoi(value)
 		applyChannelHealthConfig()
+	case "prompt_guard_setting":
+		// Stored as JSON blob; token fields are plaintext (same pattern as SMTPToken/StripeApiSecret)
+		prompt_guard_setting.LoadFromJSON(value, nil)
 	}
 	return err
 }

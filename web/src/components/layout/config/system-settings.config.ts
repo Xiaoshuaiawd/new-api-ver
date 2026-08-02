@@ -24,6 +24,7 @@ import {
   Settings,
   Shield,
   ShieldAlert,
+  ShieldCheck,
   Activity,
   Wrench,
 } from 'lucide-react'
@@ -34,6 +35,7 @@ import { getChannelHealthSectionNavItems } from '@/features/system-settings/chan
 import { getContentSectionNavItems } from '@/features/system-settings/content/section-registry.tsx'
 import { getModelsSectionNavItems } from '@/features/system-settings/models/section-registry.tsx'
 import { getOperationsSectionNavItems } from '@/features/system-settings/operations/section-registry.tsx'
+import { getPromptGuardSectionNavItems } from '@/features/system-settings/prompt-guard/section-registry.tsx'
 import { getSecuritySectionNavItems } from '@/features/system-settings/security/section-registry.tsx'
 import { getSiteSectionNavItems } from '@/features/system-settings/site/section-registry.tsx'
 
@@ -91,6 +93,11 @@ function getSystemSettingsNavGroups(t: TFunction): NavGroup[] {
           title: t('Channel Health'),
           icon: Activity,
           items: getChannelHealthSectionNavItems(t),
+        },
+        {
+          title: t('Prompt Guard'),
+          icon: ShieldCheck,
+          items: getPromptGuardSectionNavItems(t),
         },
       ],
     },
