@@ -210,6 +210,9 @@ func InitOptionMap() {
 	common.OptionMap["prompt_guard_setting"] = "{}"
 
 	common.OptionMapRWMutex.Unlock()
+	// Remove stale option rows from the reverted channel-health feature before
+	// loading, so they never reach updateOptionMap and spam the logs.
+	cleanupObsoleteChannelHealthOptions()
 	loadOptionsFromDatabase()
 }
 
