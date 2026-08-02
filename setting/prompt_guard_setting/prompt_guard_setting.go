@@ -22,6 +22,7 @@ type StorageConfig struct {
 	AllGroups       bool              `json:"all_groups"`
 	GroupNames      []string          `json:"group_names"`
 	Endpoints       []StorageEndpoint `json:"endpoints"`
+	SystemPrompt    string            `json:"system_prompt"`
 	ConfigVersion   int64             `json:"config_version"`
 }
 
@@ -153,6 +154,7 @@ func buildActive(cfg StorageConfig, decrypt func(string) (string, error)) prompt
 		AllGroups:       cfg.AllGroups,
 		GroupNames:      cfg.GroupNames,
 		Endpoints:       eps,
+		SystemPrompt:    cfg.SystemPrompt,
 		ConfigVersion:   cfg.ConfigVersion,
 	}
 }
@@ -168,6 +170,7 @@ type PublicConfig struct {
 	AllGroups       bool             `json:"all_groups"`
 	GroupNames      []string         `json:"group_names"`
 	Endpoints       []PublicEndpoint `json:"endpoints"`
+	SystemPrompt    string           `json:"system_prompt"`
 	ConfigVersion   int64            `json:"config_version"`
 }
 
@@ -219,21 +222,23 @@ func toPublic(cfg StorageConfig) PublicConfig {
 		AllGroups:       cfg.AllGroups,
 		GroupNames:      groups,
 		Endpoints:       eps,
+		SystemPrompt:    cfg.SystemPrompt,
 		ConfigVersion:   cfg.ConfigVersion,
 	}
 }
 
 // UpdateRequest is the body sent by the admin frontend.
 type UpdateRequest struct {
-	ExpectedVersion int64           `json:"expected_version"`
-	Enabled         bool            `json:"enabled"`
-	BlockingEnabled bool            `json:"blocking_enabled"`
-	LatestTurnOnly  bool            `json:"latest_turn_only"`
-	StorePassEvents bool            `json:"store_pass_events"`
-	Scanners        []string        `json:"scanners"`
-	AllGroups       bool            `json:"all_groups"`
-	GroupNames      []string        `json:"group_names"`
+	ExpectedVersion int64            `json:"expected_version"`
+	Enabled         bool             `json:"enabled"`
+	BlockingEnabled bool             `json:"blocking_enabled"`
+	LatestTurnOnly  bool             `json:"latest_turn_only"`
+	StorePassEvents bool             `json:"store_pass_events"`
+	Scanners        []string         `json:"scanners"`
+	AllGroups       bool             `json:"all_groups"`
+	GroupNames      []string         `json:"group_names"`
 	Endpoints       []UpdateEndpoint `json:"endpoints"`
+	SystemPrompt    string           `json:"system_prompt"`
 }
 
 type UpdateEndpoint struct {

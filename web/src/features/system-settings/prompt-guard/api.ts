@@ -26,6 +26,7 @@ export type PromptGuardConfig = {
   all_groups: boolean
   group_names: string[]
   endpoints: PromptGuardEndpoint[]
+  system_prompt: string
   config_version: number
 }
 
@@ -52,6 +53,7 @@ export type UpdatePromptGuardConfig = {
   all_groups: boolean
   group_names: string[]
   endpoints: UpdatePromptGuardEndpoint[]
+  system_prompt: string
 }
 
 export async function getPromptGuardConfig(): Promise<PromptGuardConfig> {

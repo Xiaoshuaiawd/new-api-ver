@@ -22,6 +22,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import {
   SettingsForm,
   SettingsSwitchContent,
@@ -62,6 +63,7 @@ type FormValues = {
   all_groups: boolean
   group_names_raw: string
   endpoints: FormEndpoint[]
+  system_prompt: string
 }
 
 function buildFormValues(cfg: PromptGuardConfig): FormValues {
@@ -73,6 +75,7 @@ function buildFormValues(cfg: PromptGuardConfig): FormValues {
     scanners: cfg.scanners ?? ALL_SCANNERS.map((s) => s.id),
     all_groups: cfg.all_groups,
     group_names_raw: (cfg.group_names ?? []).join(','),
+    system_prompt: cfg.system_prompt ?? '',
     endpoints: (cfg.endpoints ?? []).map((ep) => ({
       id: ep.id,
       name: ep.name,
@@ -111,7 +114,7 @@ export function PromptGuardSection() {
     values: cfg ? buildFormValues(cfg) : buildFormValues({
       enabled: false, blocking_enabled: false, latest_turn_only: true,
       store_pass_events: false, scanners: ALL_SCANNERS.map((s) => s.id),
-      all_groups: false, group_names: [], endpoints: [], config_version: 1,
+      all_groups: false, group_names: [], endpoints: [], system_prompt: '', config_version: 1,
     }),
   })
 
@@ -135,6 +138,7 @@ export function PromptGuardSection() {
       scanners: values.scanners,
       all_groups: values.all_groups,
       group_names: groupNames,
+      system_prompt: values.system_prompt,
       endpoints: values.endpoints.map((ep) => ({
         id: ep.id,
         name: ep.name,
@@ -269,6 +273,32 @@ export function PromptGuardSection() {
               </label>
             ))}
           </div>
+
+          <Separator />
+
+          {/* Custom system prompt (JSON-mode / general models only) */}
+          <div>
+            <h4 className='font-medium'>{t('Classifier System Prompt')}</h4>
+            <p className='text-muted-foreground mt-1 text-xs'>
+              {t('Only used by "General model" nodes. Leave empty to use the built-in default. Must instruct the model to return JSON {"safety":...,"categories":[...]} and to treat the user message as untrusted data.')}
+            </p>
+          </div>
+          <FormField control={form.control} name='system_prompt'
+            render={({ field }) => (
+              <FormItem>
+                <FormControl>
+                  <Textarea
+                    rows={8}
+                    placeholder={t('Leave empty to use the built-in default classifier prompt')}
+                    className='font-mono text-xs'
+                    {...field}
+                    disabled={!enabled}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
 
           <Separator />
 

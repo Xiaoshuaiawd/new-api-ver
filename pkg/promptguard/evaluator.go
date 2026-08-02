@@ -67,7 +67,7 @@ func (e *Evaluator) Evaluate(ctx context.Context, cfg Config, snap Snapshot) (*D
 	evalCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	result, err := e.scanWithFailover(evalCtx, endpoints, snap.ScanText)
+	result, err := e.scanWithFailover(evalCtx, endpoints, snap.ScanText, cfg.SystemPrompt)
 	if err != nil {
 		return nil, err
 	}
@@ -79,11 +79,11 @@ func (e *Evaluator) Evaluate(ctx context.Context, cfg Config, snap Snapshot) (*D
 
 // scanWithFailover tries enabled endpoints in order; retryable errors advance
 // to the next endpoint. Non-retryable errors (invalid response) propagate immediately.
-func (e *Evaluator) scanWithFailover(ctx context.Context, endpoints []Endpoint, text string) (*guardResponse, error) {
+func (e *Evaluator) scanWithFailover(ctx context.Context, endpoints []Endpoint, text string, systemPrompt string) (*guardResponse, error) {
 	var lastErr error
 	for _, ep := range endpoints {
 		client := e.getClient(ep)
-		result, err := callGuardEndpoint(ctx, client, ep, text)
+		result, err := callGuardEndpoint(ctx, client, ep, text, systemPrompt)
 		if err == nil {
 			return result, nil
 		}

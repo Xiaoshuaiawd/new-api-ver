@@ -5452,6 +5452,9 @@
     "Response Format": "Response Format",
     "qwen3guard (native line format)": "qwen3guard (native line format)",
     "General model (forced JSON)": "General model (forced JSON)",
-    "Use \"General model\" for gpt-4o-mini, qwen-turbo, etc. — forces JSON output for max reliability.": "Use \"General model\" for gpt-4o-mini, qwen-turbo, etc. — forces JSON output for max reliability."
+    "Use \"General model\" for gpt-4o-mini, qwen-turbo, etc. — forces JSON output for max reliability.": "Use \"General model\" for gpt-4o-mini, qwen-turbo, etc. — forces JSON output for max reliability.",
+    "Classifier System Prompt": "Classifier System Prompt",
+    "Only used by \"General model\" nodes. Leave empty to use the built-in default. Must instruct the model to return JSON {\"safety\":...,\"categories\":[...]} and to treat the user message as untrusted data.": "Only used by \"General model\" nodes. Leave empty to use the built-in default. Must instruct the model to return JSON {\"safety\":...,\"categories\":[...]} and to treat the user message as untrusted data.",
+    "Leave empty to use the built-in default classifier prompt": "Leave empty to use the built-in default classifier prompt"
   }
 }

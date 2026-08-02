@@ -102,15 +102,18 @@ type Endpoint struct {
 
 // Config is the validated, decrypted runtime snapshot passed to the evaluator.
 type Config struct {
-	Enabled                bool
-	BlockingEnabled        bool
-	LatestTurnOnly         bool
-	StorePassEvents        bool
-	Scanners               []string // enabled scanner IDs
-	AllGroups              bool
-	GroupNames             []string // token group names (empty = AllGroups)
-	Endpoints              []Endpoint
-	ConfigVersion          int64
+	Enabled         bool
+	BlockingEnabled bool
+	LatestTurnOnly  bool
+	StorePassEvents bool
+	Scanners        []string // enabled scanner IDs
+	AllGroups       bool
+	GroupNames      []string // token group names (empty = AllGroups)
+	Endpoints       []Endpoint
+	// SystemPrompt overrides the built-in JSON-mode system prompt (FormatJSON only).
+	// Empty falls back to the built-in DefaultJSONSystemPrompt.
+	SystemPrompt  string
+	ConfigVersion int64
 }
 
 // EnabledEndpoints returns only enabled endpoints.

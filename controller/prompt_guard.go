@@ -232,6 +232,7 @@ func buildStorageConfig(req prompt_guard_setting.UpdateRequest, current prompt_g
 		AllGroups:       req.AllGroups,
 		GroupNames:      groups,
 		Endpoints:       eps,
+		SystemPrompt:    strings.TrimSpace(req.SystemPrompt),
 		ConfigVersion:   current.ConfigVersion + 1,
 	}
 }
