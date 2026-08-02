@@ -88,7 +88,10 @@ func callGuardEndpoint(ctx context.Context, client *http.Client, ep Endpoint, te
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: text},
 		}
-		body.MaxTokens = 200
+		// Reasoning models (e.g. deepseek-v4-flash) spend tokens on hidden
+		// reasoning before emitting the JSON, so keep a generous budget to avoid
+		// truncation (finish_reason=length) being treated as an invalid response.
+		body.MaxTokens = 1024
 		body.ResponseFormat = &responseFormat{Type: "json_object"}
 	} else {
 		// qwen3guard: raw content, no system prompt, native line format.
@@ -127,7 +130,14 @@ func callGuardEndpoint(ctx context.Context, client *http.Client, ep Endpoint, te
 	}
 	// 4xx other than 429 are non-retryable (misconfiguration)
 	if resp.StatusCode >= 400 {
-		return nil, &GuardError{Code: ErrorCodeUnavailable, Retryable: false, Cause: fmt.Errorf("guard returned %d", resp.StatusCode)}
+		hint := ""
+		switch resp.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			hint = " (authentication failed — check API Token)"
+		case http.StatusNotFound:
+			hint = " (not found — check Base URL and model)"
+		}
+		return nil, &GuardError{Code: ErrorCodeUnavailable, Retryable: false, Cause: fmt.Errorf("guard returned %d%s", resp.StatusCode, hint)}
 	}
 
 	rawBody, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))

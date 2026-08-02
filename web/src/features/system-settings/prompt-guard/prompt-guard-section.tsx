@@ -180,6 +180,12 @@ export function PromptGuardSection() {
 
   const probe = async (idx: number) => {
     const ep = form.getValues(`endpoints.${idx}`)
+    // General models almost always need a token; probing cannot read the saved
+    // ciphertext, so require it to be entered for a meaningful test.
+    if (ep.format === 'json' && !ep.newToken?.trim()) {
+      toast.error(t('Please enter the API Token before testing this node.'))
+      return
+    }
     setProbing((p) => ({ ...p, [idx]: true }))
     try {
       const result = await probePromptGuardEndpoint({
