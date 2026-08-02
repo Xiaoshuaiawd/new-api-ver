@@ -189,6 +189,15 @@ func buildStorageConfig(req prompt_guard_setting.UpdateRequest, current prompt_g
 		groups = []string{}
 	}
 
+	maxConcurrency := req.MaxConcurrency
+	if maxConcurrency <= 0 {
+		maxConcurrency = promptguard.DefaultMaxConcurrency
+	} else if maxConcurrency < promptguard.MinMaxConcurrency {
+		maxConcurrency = promptguard.MinMaxConcurrency
+	} else if maxConcurrency > promptguard.MaxMaxConcurrency {
+		maxConcurrency = promptguard.MaxMaxConcurrency
+	}
+
 	eps := make([]prompt_guard_setting.StorageEndpoint, 0, len(req.Endpoints))
 	for _, ep := range req.Endpoints {
 		tokenCipher := existingTokens[ep.ID]
@@ -233,6 +242,7 @@ func buildStorageConfig(req prompt_guard_setting.UpdateRequest, current prompt_g
 		GroupNames:      groups,
 		Endpoints:       eps,
 		SystemPrompt:    strings.TrimSpace(req.SystemPrompt),
+		MaxConcurrency:  maxConcurrency,
 		ConfigVersion:   current.ConfigVersion + 1,
 	}
 }

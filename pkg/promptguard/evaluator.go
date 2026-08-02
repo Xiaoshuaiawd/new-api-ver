@@ -7,23 +7,49 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/semaphore"
 )
 
 // Evaluator calls the guard service and applies the decision matrix.
 // It is safe for concurrent use.
 type Evaluator struct {
-	mu       sync.Mutex
-	clients  map[string]*http.Client // keyed by endpoint ID
-	global   chan struct{}            // global concurrency limiter
-	clock    clock
+	mu      sync.Mutex
+	clients map[string]*http.Client // keyed by endpoint ID
+	clock   clock
+
+	// semMu guards sem/semCap so MaxConcurrency can be re-sized at runtime.
+	semMu  sync.Mutex
+	sem    *semaphore.Weighted
+	semCap int64
 }
 
 func NewEvaluator() *Evaluator {
 	return &Evaluator{
 		clients: make(map[string]*http.Client),
-		global:  make(chan struct{}, 64),
 		clock:   realClock{},
+		sem:     semaphore.NewWeighted(DefaultMaxConcurrency),
+		semCap:  DefaultMaxConcurrency,
 	}
+}
+
+// acquireSlot returns the semaphore sized to the desired concurrency, resizing
+// it when the configured limit changed. Callers Acquire(ctx, 1) on the returned
+// semaphore so they WAIT for a slot within the request's timeout budget instead
+// of failing closed immediately when the limit is momentarily saturated.
+func (e *Evaluator) acquireSlot(desired int) *semaphore.Weighted {
+	if desired <= 0 {
+		desired = DefaultMaxConcurrency
+	}
+	e.semMu.Lock()
+	defer e.semMu.Unlock()
+	if int64(desired) != e.semCap {
+		// Resize: a fresh semaphore. In-flight holders on the old semaphore
+		// release against it harmlessly; new arrivals use the new one.
+		e.sem = semaphore.NewWeighted(int64(desired))
+		e.semCap = int64(desired)
+	}
+	return e.sem
 }
 
 // defaultEvaluator is the package-level singleton.
@@ -52,14 +78,17 @@ func (e *Evaluator) Evaluate(ctx context.Context, cfg Config, snap Snapshot) (*D
 		return nil, &GuardError{Code: ErrorCodeUnavailable}
 	}
 
-	// Global concurrency limit — fail closed when full.
-	select {
-	case e.global <- struct{}{}:
-		defer func() { <-e.global }()
-	default:
-		return nil, &GuardError{Code: ErrorCodeUnavailable}
+	// Global concurrency limit. Instead of failing closed the instant the limit
+	// is hit, wait for a slot within the request's overall timeout budget (ctx).
+	// Only when we cannot get a slot before the deadline do we fail closed —
+	// that indicates sustained guard saturation, not a transient spike.
+	sem := e.acquireSlot(cfg.MaxConcurrency)
+	if err := sem.Acquire(ctx, 1); err != nil {
+		return nil, &GuardError{Code: ErrorCodeUnavailable, Retryable: false, Timeout: true, Cause: err}
 	}
+	defer sem.Release(1)
 
+	// Per-attempt timeout for the actual guard call, bounded by the remaining ctx.
 	timeout := time.Duration(endpoints[0].TimeoutMS) * time.Millisecond
 	if timeout <= 0 {
 		timeout = DefaultTimeoutMS * time.Millisecond

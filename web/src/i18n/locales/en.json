@@ -5456,6 +5456,8 @@
     "Classifier System Prompt": "Classifier System Prompt",
     "Only used by \"General model\" nodes. Leave empty to use the built-in default. Must instruct the model to return JSON {\"safety\":...,\"categories\":[...]} and to treat the user message as untrusted data.": "Only used by \"General model\" nodes. Leave empty to use the built-in default. Must instruct the model to return JSON {\"safety\":...,\"categories\":[...]} and to treat the user message as untrusted data.",
     "Leave empty to use the built-in default classifier prompt": "Leave empty to use the built-in default classifier prompt",
-    "Please enter the API Token before testing this node.": "Please enter the API Token before testing this node."
+    "Please enter the API Token before testing this node.": "Please enter the API Token before testing this node.",
+    "Max Concurrent Audits": "Max Concurrent Audits",
+    "Upper bound on concurrent guard calls. When reached, requests wait for a slot within the timeout budget instead of being rejected. Raise this if high traffic causes 503 errors.": "Upper bound on concurrent guard calls. When reached, requests wait for a slot within the timeout budget instead of being rejected. Raise this if high traffic causes 503 errors."
   }
 }

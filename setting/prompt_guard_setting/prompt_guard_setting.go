@@ -23,6 +23,7 @@ type StorageConfig struct {
 	GroupNames      []string          `json:"group_names"`
 	Endpoints       []StorageEndpoint `json:"endpoints"`
 	SystemPrompt    string            `json:"system_prompt"`
+	MaxConcurrency  int               `json:"max_concurrency"`
 	ConfigVersion   int64             `json:"config_version"`
 }
 
@@ -148,6 +149,10 @@ func buildActive(cfg StorageConfig, decrypt func(string) (string, error)) prompt
 	if len(scanners) == 0 {
 		scanners = append([]string(nil), promptguard.AllScannerIDs...)
 	}
+	maxConcurrency := cfg.MaxConcurrency
+	if maxConcurrency <= 0 {
+		maxConcurrency = promptguard.DefaultMaxConcurrency
+	}
 	return promptguard.Config{
 		Enabled:         cfg.Enabled,
 		BlockingEnabled: cfg.BlockingEnabled,
@@ -158,6 +163,7 @@ func buildActive(cfg StorageConfig, decrypt func(string) (string, error)) prompt
 		GroupNames:      cfg.GroupNames,
 		Endpoints:       eps,
 		SystemPrompt:    cfg.SystemPrompt,
+		MaxConcurrency:  maxConcurrency,
 		ConfigVersion:   cfg.ConfigVersion,
 	}
 }
@@ -174,6 +180,7 @@ type PublicConfig struct {
 	GroupNames      []string         `json:"group_names"`
 	Endpoints       []PublicEndpoint `json:"endpoints"`
 	SystemPrompt    string           `json:"system_prompt"`
+	MaxConcurrency  int              `json:"max_concurrency"`
 	ConfigVersion   int64            `json:"config_version"`
 }
 
@@ -226,6 +233,7 @@ func toPublic(cfg StorageConfig) PublicConfig {
 		GroupNames:      groups,
 		Endpoints:       eps,
 		SystemPrompt:    cfg.SystemPrompt,
+		MaxConcurrency:  cfg.MaxConcurrency,
 		ConfigVersion:   cfg.ConfigVersion,
 	}
 }
@@ -242,6 +250,7 @@ type UpdateRequest struct {
 	GroupNames      []string         `json:"group_names"`
 	Endpoints       []UpdateEndpoint `json:"endpoints"`
 	SystemPrompt    string           `json:"system_prompt"`
+	MaxConcurrency  int              `json:"max_concurrency"`
 }
 
 type UpdateEndpoint struct {

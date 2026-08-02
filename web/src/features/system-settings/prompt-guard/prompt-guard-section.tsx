@@ -64,6 +64,7 @@ type FormValues = {
   group_names_raw: string
   endpoints: FormEndpoint[]
   system_prompt: string
+  max_concurrency: number
 }
 
 function buildFormValues(cfg: PromptGuardConfig): FormValues {
@@ -76,6 +77,7 @@ function buildFormValues(cfg: PromptGuardConfig): FormValues {
     all_groups: cfg.all_groups,
     group_names_raw: (cfg.group_names ?? []).join(','),
     system_prompt: cfg.system_prompt ?? '',
+    max_concurrency: cfg.max_concurrency || 256,
     endpoints: (cfg.endpoints ?? []).map((ep) => ({
       id: ep.id,
       name: ep.name,
@@ -114,7 +116,7 @@ export function PromptGuardSection() {
     values: cfg ? buildFormValues(cfg) : buildFormValues({
       enabled: false, blocking_enabled: false, latest_turn_only: true,
       store_pass_events: false, scanners: ALL_SCANNERS.map((s) => s.id),
-      all_groups: false, group_names: [], endpoints: [], system_prompt: '', config_version: 1,
+      all_groups: false, group_names: [], endpoints: [], system_prompt: '', max_concurrency: 256, config_version: 1,
     }),
   })
 
@@ -139,6 +141,7 @@ export function PromptGuardSection() {
       all_groups: values.all_groups,
       group_names: groupNames,
       system_prompt: values.system_prompt,
+      max_concurrency: values.max_concurrency,
       endpoints: values.endpoints.map((ep) => ({
         id: ep.id,
         name: ep.name,
@@ -257,6 +260,21 @@ export function PromptGuardSection() {
                 </SettingsSwitchContent>
                 <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} disabled={!enabled} /></FormControl>
               </SettingsSwitchItem>
+            )}
+          />
+
+          <FormField control={form.control} name='max_concurrency'
+            render={({ field }) => (
+              <FormItem className='max-w-xs'>
+                <FormLabel>{t('Max Concurrent Audits')}</FormLabel>
+                <FormControl>
+                  <Input type='number' min={1} step={1} {...safeNumberFieldProps(field)} disabled={!enabled} />
+                </FormControl>
+                <FormDescription>
+                  {t('Upper bound on concurrent guard calls. When reached, requests wait for a slot within the timeout budget instead of being rejected. Raise this if high traffic causes 503 errors.')}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
             )}
           />
 

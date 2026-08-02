@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -179,6 +182,64 @@ func TestCallGuardEndpointSystemPrompt(t *testing.T) {
 			assert.Equal(t, tc.wantSystem, gotSystem)
 		})
 	}
+}
+
+// Under concurrency saturation, requests must WAIT for a slot within the
+// timeout budget instead of failing closed immediately. With MaxConcurrency=1
+// and a slow guard, two concurrent requests should both succeed (the second
+// waits for the first to release), not 503.
+func TestEvaluatorConcurrencyWaitsInsteadOfFailClosed(t *testing.T) {
+	var inFlight int32
+	var maxObserved int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cur := atomic.AddInt32(&inFlight, 1)
+		for {
+			old := atomic.LoadInt32(&maxObserved)
+			if cur <= old || atomic.CompareAndSwapInt32(&maxObserved, old, cur) {
+				break
+			}
+		}
+		time.Sleep(150 * time.Millisecond)
+		atomic.AddInt32(&inFlight, -1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Safety: Safe\nCategories: None"},"finish_reason":"stop"}]}`))
+	}))
+	defer srv.Close()
+
+	ev := NewEvaluator()
+	cfg := Config{
+		Enabled:        true,
+		Scanners:       AllScannerIDs,
+		AllGroups:      true,
+		MaxConcurrency: 1, // force serialization
+		Endpoints: []Endpoint{
+			{ID: "n1", BaseURL: srv.URL, Model: "m", Format: FormatQwen3Guard, TimeoutMS: 3000, Enabled: true},
+		},
+	}
+
+	var wg sync.WaitGroup
+	results := make([]*Decision, 2)
+	errs := make([]error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			// generous overall budget so the second request can wait for a slot
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			snap := Snapshot{ScanText: "hello"}
+			results[idx], errs[idx] = ev.Evaluate(ctx, cfg, snap)
+		}(i)
+	}
+	wg.Wait()
+
+	for i := 0; i < 2; i++ {
+		require.NoError(t, errs[i], "request %d should not fail closed", i)
+		require.NotNil(t, results[i])
+		assert.Equal(t, DecisionAllow, results[i].Kind)
+	}
+	// With MaxConcurrency=1 the guard must never see 2 concurrent calls.
+	assert.Equal(t, int32(1), maxObserved, "concurrency limit must be enforced")
 }
 
 // Verify the decision matrix wiring end-to-end from a parsed response.
