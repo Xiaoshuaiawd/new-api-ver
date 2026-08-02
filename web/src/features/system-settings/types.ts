@@ -387,6 +387,17 @@ export type SecuritySettings = {
   'token_setting.max_user_tokens': number
 }
 
+export type ChannelHealthSettings = {
+  'channel_health_setting.enabled': boolean
+  'channel_health_setting.ttft_timeout_seconds': number
+  'channel_health_setting.window_size': number
+  'channel_health_setting.cooldown_after': number
+  'channel_health_setting.cooldown_duration_minutes': number
+  'channel_health_setting.reference_ttft_ms': number
+  'channel_health_setting.warmup_threshold': number
+  'channel_health_setting.min_multiplier_pct': number
+}
+
 export type UpstreamChannel = {
   id: number
   name: string

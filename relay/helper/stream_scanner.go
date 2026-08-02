@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	channelhealth "github.com/QuantumNous/new-api/pkg/channelhealth"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -87,6 +88,14 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 
 	streamingTimeout := time.Duration(constant.StreamingTimeout) * time.Second
 
+	// TTFT timeout: if configured and no first token arrives within the deadline,
+	// cancel the stream so the caller can retry with a different channel.
+	var ttftTimer *time.Timer
+	ttftCfg := channelhealth.GetConfig()
+	if ttftCfg.Enabled && ttftCfg.TTFTTimeout > 0 {
+		ttftTimer = time.NewTimer(ttftCfg.TTFTTimeout)
+	}
+
 	var (
 		stopChan    = make(chan bool, 3) // 增加缓冲区避免阻塞
 		scanner     = NewStreamScanner(resp.Body)
@@ -96,6 +105,8 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		wg          sync.WaitGroup // 用于等待所有 goroutine 退出
 		cleanupOnce sync.Once
 		stopOnce    sync.Once
+		firstToken  = make(chan struct{})
+		firstOnce   sync.Once
 	)
 
 	stop := func() {
@@ -132,6 +143,9 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			ticker.Stop()
 			if pingTicker != nil {
 				pingTicker.Stop()
+			}
+			if ttftTimer != nil {
+				ttftTimer.Stop()
 			}
 
 			wg.Wait()
@@ -264,6 +278,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			}
 			if !strings.HasPrefix(data, "[DONE]") {
 				info.SetFirstResponseTime()
+				firstOnce.Do(func() { close(firstToken) })
 				info.ReceivedResponseCount++
 
 				select {
@@ -290,15 +305,52 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	})
 
 	// 主循环等待完成或超时
-	select {
-	case <-ticker.C:
-		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonTimeout, nil)
-	case <-stopChan:
-		// EndReason already set by the goroutine that triggered stopChan
-	case <-c.Request.Context().Done():
-		// 客户端断开：立即 cleanup 关闭上游 resp.Body，解除 scanner 阻塞并让上游停止生成，
-		// 避免为已放弃的请求继续消费上游 token。
-		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+	var ttftTimerCh <-chan time.Time
+	if ttftTimer != nil {
+		ttftTimerCh = ttftTimer.C
+	}
+	firstTokenCh := (<-chan struct{})(firstToken)
+
+waitForStreamEnd:
+	for {
+		select {
+		case <-firstTokenCh:
+			if ttftTimer != nil {
+				ttftTimer.Stop()
+			}
+			firstTokenCh = nil
+			ttftTimerCh = nil
+		case <-ttftTimerCh:
+			// Prefer a first token that arrived concurrently with the timer.
+			select {
+			case <-firstToken:
+				if ttftTimer != nil {
+					ttftTimer.Stop()
+				}
+				firstTokenCh = nil
+				ttftTimerCh = nil
+				continue
+			default:
+			}
+
+			writeMutex.Lock()
+			info.TTFTRetrySafe = !c.Writer.Written()
+			writeMutex.Unlock()
+			logger.LogWarn(c, fmt.Sprintf("TTFT timeout after %ds, retry_safe=%t", int(ttftCfg.TTFTTimeout.Seconds()), info.TTFTRetrySafe))
+			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonTTFTTimeout, nil)
+			break waitForStreamEnd
+		case <-ticker.C:
+			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonTimeout, nil)
+			break waitForStreamEnd
+		case <-stopChan:
+			// EndReason already set by the goroutine that triggered stopChan
+			break waitForStreamEnd
+		case <-c.Request.Context().Done():
+			// 客户端断开：立即 cleanup 关闭上游 resp.Body，解除 scanner 阻塞并让上游停止生成，
+			// 避免为已放弃的请求继续消费上游 token。
+			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+			break waitForStreamEnd
+		}
 	}
 
 	cleanup()

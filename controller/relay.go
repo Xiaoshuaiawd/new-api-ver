@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/channelhealth"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -92,6 +93,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if newAPIError != nil {
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
+			if relayFormat != types.RelayFormatOpenAIRealtime && c.Writer.Written() {
+				return
+			}
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				helper.WssError(c, ws, newAPIError.ToOpenAIError())
@@ -225,15 +229,39 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 		attempt.Done()
 
+		var (
+			ttftTimedOut  bool
+			ttftRetrySafe bool
+		)
 		if newAPIError == nil {
+			if ttftError, retrySafe := ttftTimeoutError(relayInfo); ttftError != nil {
+				newAPIError = ttftError
+				ttftTimedOut = true
+				ttftRetrySafe = retrySafe
+			}
+		}
+
+		if newAPIError == nil {
+			ttftMs := int64(-1)
+			if relayInfo.HasSendResponse() {
+				ttftMs = relayInfo.FirstResponseTime.Sub(relayInfo.StartTime).Milliseconds()
+			}
+			channelhealth.Record(channel.Id, true, ttftMs)
 			relayInfo.LastError = nil
 			return
 		}
 
+		channelhealth.Record(channel.Id, false, -1)
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 
-		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+		// TTFT timeout is a transient condition — do not trigger auto-disable.
+		if !ttftTimedOut {
+			processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+		}
+		if ttftTimedOut && !ttftRetrySafe {
+			break
+		}
 
 		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
 			break
@@ -250,6 +278,19 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			perfmetrics.RecordRelaySample(relayInfo, false, 0)
 		})
 	}
+}
+
+func ttftTimeoutError(info *relaycommon.RelayInfo) (*types.NewAPIError, bool) {
+	if info == nil || info.StreamStatus == nil ||
+		info.StreamStatus.EndReason != relaycommon.StreamEndReasonTTFTTimeout {
+		return nil, false
+	}
+
+	return types.NewErrorWithStatusCode(
+		fmt.Errorf("首字响应超时（%ds）", int(channelhealth.GetConfig().TTFTTimeout.Seconds())),
+		types.ErrorCodeChannelResponseTimeExceeded,
+		http.StatusGatewayTimeout,
+	), info.TTFTRetrySafe
 }
 
 var upgrader = websocket.Upgrader{

@@ -184,6 +184,12 @@ type RelayInfo struct {
 
 	StreamStatus *StreamStatus
 
+	// TTFTRetrySafe is set by StreamScannerHandler at the moment a TTFT timeout
+	// fires, capturing whether it is safe to retry (no token received AND nothing
+	// yet flushed to the client). The retry decision must rely on this snapshot
+	// rather than re-checking writer state after the handler returns.
+	TTFTRetrySafe bool
+
 	ThinkingContentInfo
 	TokenCountMeta
 	*ClaudeConvertInfo

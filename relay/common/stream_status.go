@@ -13,6 +13,7 @@ const (
 	StreamEndReasonNone        StreamEndReason = ""
 	StreamEndReasonDone        StreamEndReason = "done"
 	StreamEndReasonTimeout     StreamEndReason = "timeout"
+	StreamEndReasonTTFTTimeout StreamEndReason = "ttft_timeout" // first token not received within deadline
 	StreamEndReasonClientGone  StreamEndReason = "client_gone"
 	StreamEndReasonScannerErr  StreamEndReason = "scanner_error"
 	StreamEndReasonHandlerStop StreamEndReason = "handler_stop"
@@ -29,9 +30,9 @@ type StreamErrorEntry struct {
 }
 
 type StreamStatus struct {
-	EndReason  StreamEndReason
-	EndError   error
-	endOnce    sync.Once
+	EndReason StreamEndReason
+	EndError  error
+	endOnce   sync.Once
 
 	mu         sync.Mutex
 	Errors     []StreamErrorEntry

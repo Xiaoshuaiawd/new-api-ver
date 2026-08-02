@@ -1,12 +1,15 @@
 package model
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	channelhealth "github.com/QuantumNous/new-api/pkg/channelhealth"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/channel_health_setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/performance_setting"
@@ -193,6 +196,15 @@ func InitOptionMap() {
 		common.OptionMap[k] = v
 	}
 
+	common.OptionMap["channel_health_setting.enabled"] = strconv.FormatBool(channel_health_setting.Enabled)
+	common.OptionMap["channel_health_setting.ttft_timeout_seconds"] = strconv.Itoa(channel_health_setting.TTFTTimeoutSeconds)
+	common.OptionMap["channel_health_setting.window_size"] = strconv.Itoa(channel_health_setting.WindowSize)
+	common.OptionMap["channel_health_setting.cooldown_after"] = strconv.Itoa(channel_health_setting.CooldownAfter)
+	common.OptionMap["channel_health_setting.cooldown_duration_minutes"] = strconv.Itoa(channel_health_setting.CooldownDurationMinutes)
+	common.OptionMap["channel_health_setting.reference_ttft_ms"] = strconv.Itoa(channel_health_setting.ReferenceTTFTMs)
+	common.OptionMap["channel_health_setting.warmup_threshold"] = strconv.Itoa(channel_health_setting.WarmupThreshold)
+	common.OptionMap["channel_health_setting.min_multiplier_pct"] = strconv.Itoa(channel_health_setting.MinMultiplierPct)
+
 	common.OptionMapRWMutex.Unlock()
 	loadOptionsFromDatabase()
 }
@@ -218,6 +230,47 @@ func SyncOptions(frequency int) {
 func validateOptionValue(key string, value string) error {
 	if key == operation_setting.ToolPriceOptionKey {
 		return operation_setting.ValidateToolPricesJSON(value)
+	}
+	if strings.HasPrefix(key, "channel_health_setting.") {
+		return validateChannelHealthOption(key, value)
+	}
+	return nil
+}
+
+func validateChannelHealthOption(key string, value string) error {
+	if key == "channel_health_setting.enabled" {
+		if _, err := strconv.ParseBool(value); err != nil {
+			return fmt.Errorf("%s must be a boolean: %w", key, err)
+		}
+		return nil
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fmt.Errorf("%s must be an integer: %w", key, err)
+	}
+
+	var min, max int
+	switch key {
+	case "channel_health_setting.ttft_timeout_seconds":
+		min, max = channel_health_setting.MinTTFTTimeoutSeconds, channel_health_setting.MaxTTFTTimeoutSeconds
+	case "channel_health_setting.window_size":
+		min, max = channel_health_setting.MinWindowSize, channel_health_setting.MaxWindowSize
+	case "channel_health_setting.cooldown_after":
+		min, max = channel_health_setting.MinCooldownAfter, channel_health_setting.MaxCooldownAfter
+	case "channel_health_setting.cooldown_duration_minutes":
+		min, max = channel_health_setting.MinCooldownMinutes, channel_health_setting.MaxCooldownMinutes
+	case "channel_health_setting.reference_ttft_ms":
+		min, max = channel_health_setting.MinReferenceTTFTMs, channel_health_setting.MaxReferenceTTFTMs
+	case "channel_health_setting.warmup_threshold":
+		min, max = channel_health_setting.MinWarmupThreshold, channel_health_setting.MaxWarmupThreshold
+	case "channel_health_setting.min_multiplier_pct":
+		min, max = channel_health_setting.MinMultiplierPercent, channel_health_setting.MaxMultiplierPercent
+	default:
+		return fmt.Errorf("unknown channel health option: %s", key)
+	}
+	if parsed < min || parsed > max {
+		return fmt.Errorf("%s must be between %d and %d", key, min, max)
 	}
 	return nil
 }
@@ -280,6 +333,11 @@ func UpdateOptionsBulk(values map[string]string) error {
 }
 
 func updateOptionMap(key string, value string) (err error) {
+	if strings.HasPrefix(key, "channel_health_setting.") {
+		if err := validateChannelHealthOption(key, value); err != nil {
+			return err
+		}
+	}
 	if key == retiredThemeOptionKey {
 		common.OptionMapRWMutex.Lock()
 		delete(common.OptionMap, key)
@@ -627,8 +685,51 @@ func updateOptionMap(key string, value string) (err error) {
 		// WaffoPayMethods is read directly from OptionMap via setting.GetWaffoPayMethods().
 		// The value is already stored in OptionMap at the top of this function (line: common.OptionMap[key] = value).
 		// No additional in-memory variable to update.
+	case "channel_health_setting.enabled":
+		channel_health_setting.Enabled, _ = strconv.ParseBool(value)
+		applyChannelHealthConfig()
+	case "channel_health_setting.ttft_timeout_seconds":
+		channel_health_setting.TTFTTimeoutSeconds, _ = strconv.Atoi(value)
+		applyChannelHealthConfig()
+	case "channel_health_setting.window_size":
+		channel_health_setting.WindowSize, _ = strconv.Atoi(value)
+		applyChannelHealthConfig()
+	case "channel_health_setting.cooldown_after":
+		channel_health_setting.CooldownAfter, _ = strconv.Atoi(value)
+		applyChannelHealthConfig()
+	case "channel_health_setting.cooldown_duration_minutes":
+		channel_health_setting.CooldownDurationMinutes, _ = strconv.Atoi(value)
+		applyChannelHealthConfig()
+	case "channel_health_setting.reference_ttft_ms":
+		channel_health_setting.ReferenceTTFTMs, _ = strconv.Atoi(value)
+		applyChannelHealthConfig()
+	case "channel_health_setting.warmup_threshold":
+		channel_health_setting.WarmupThreshold, _ = strconv.Atoi(value)
+		applyChannelHealthConfig()
+	case "channel_health_setting.min_multiplier_pct":
+		channel_health_setting.MinMultiplierPct, _ = strconv.Atoi(value)
+		applyChannelHealthConfig()
 	}
 	return err
+}
+
+func applyChannelHealthConfig() {
+	minMultiplier := float64(channel_health_setting.MinMultiplierPct) / 100.0
+	if minMultiplier <= 0 {
+		minMultiplier = 0.05
+	}
+	ttftTimeout := time.Duration(channel_health_setting.TTFTTimeoutSeconds) * time.Second
+	channelhealth.Configure(channelhealth.Config{
+		Enabled:          channel_health_setting.Enabled,
+		WindowSize:       channel_health_setting.WindowSize,
+		EWMAAlpha:        0.15,
+		ReferenceTTFTMs:  float64(channel_health_setting.ReferenceTTFTMs),
+		CooldownAfter:    channel_health_setting.CooldownAfter,
+		CooldownDuration: time.Duration(channel_health_setting.CooldownDurationMinutes) * time.Minute,
+		WarmupThreshold:  channel_health_setting.WarmupThreshold,
+		MinMultiplier:    minMultiplier,
+		TTFTTimeout:      ttftTimeout,
+	})
 }
 
 // handleConfigUpdate 处理分层配置更新，返回是否已处理

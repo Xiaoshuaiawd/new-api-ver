@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/pkg/channelhealth"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
@@ -486,6 +487,42 @@ func TestStreamScannerHandler_StreamStatus_Timeout(t *testing.T) {
 	require.NotNil(t, info.StreamStatus)
 	assert.Equal(t, relaycommon.StreamEndReasonTimeout, info.StreamStatus.EndReason)
 	assert.False(t, info.StreamStatus.IsNormalEnd())
+}
+
+func TestStreamScannerHandler_TTFTTimeoutDoesNotRetryAfterPing(t *testing.T) {
+	previousConfig := channelhealth.GetConfig()
+	channelhealth.Configure(channelhealth.Config{
+		Enabled:     true,
+		TTFTTimeout: 1500 * time.Millisecond,
+	})
+	t.Cleanup(func() { channelhealth.Configure(previousConfig) })
+
+	setting := operation_setting.GetGeneralSetting()
+	oldPingEnabled := setting.PingIntervalEnabled
+	oldPingSeconds := setting.PingIntervalSeconds
+	setting.PingIntervalEnabled = true
+	setting.PingIntervalSeconds = 1
+	t.Cleanup(func() {
+		setting.PingIntervalEnabled = oldPingEnabled
+		setting.PingIntervalSeconds = oldPingSeconds
+	})
+
+	pr, pw := io.Pipe()
+	t.Cleanup(func() {
+		_ = pr.Close()
+		_ = pw.Close()
+	})
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+
+	StreamScannerHandler(c, &http.Response{Body: pr}, info, func(data string, sr *StreamResult) {})
+
+	require.NotNil(t, info.StreamStatus)
+	assert.Equal(t, relaycommon.StreamEndReasonTTFTTimeout, info.StreamStatus.EndReason)
+	assert.False(t, info.TTFTRetrySafe)
 }
 
 func TestStreamScannerHandler_StreamStatus_SoftErrors(t *testing.T) {

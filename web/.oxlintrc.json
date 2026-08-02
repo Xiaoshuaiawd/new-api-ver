@@ -126,6 +126,9 @@
           "getSiteSectionNavItems",
           "getSiteSectionContent",
           "getSiteSectionMeta",
+          "getChannelHealthSectionNavItems",
+          "getChannelHealthSectionContent",
+          "getChannelHealthSectionMeta",
           "getUsageLogsSectionNavItems",
           "isUsageLogsSectionId",
           "useSuppressSettingsSectionHeader"

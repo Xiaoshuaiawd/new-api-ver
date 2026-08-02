@@ -682,7 +682,7 @@ func IsChannelAffinityPriorityStale(group string, modelName string, requestPath 
 	if err != nil || preferred == nil {
 		return false
 	}
-	candidate, err := model.GetRandomSatisfiedChannel(group, modelName, 0, requestPath)
+	candidate, err := model.GetRandomSatisfiedChannel(group, modelName, nil, requestPath)
 	if err != nil || candidate == nil {
 		return false
 	}
