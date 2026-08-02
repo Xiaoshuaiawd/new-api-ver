@@ -77,6 +77,16 @@ const (
 	MaxInputLimit     = 100000
 )
 
+// Endpoint format determines how the request is built and parsed.
+const (
+	// FormatQwen3Guard: specialised safety model. Raw user content, no system
+	// prompt, native line-based response ("Safety: ...\nCategories: ...").
+	FormatQwen3Guard = "qwen3guard"
+	// FormatJSON: general instruct model (gpt-4o-mini, qwen-turbo, etc). Sends a
+	// system prompt and OpenAI response_format=json_object to force valid JSON.
+	FormatJSON = "json"
+)
+
 // Endpoint is a single guard service node (runtime, with decrypted token).
 type Endpoint struct {
 	ID         string
@@ -84,6 +94,7 @@ type Endpoint struct {
 	BaseURL    string
 	Model      string
 	Token      string
+	Format     string // FormatQwen3Guard (default) or FormatJSON
 	TimeoutMS  int
 	InputLimit int
 	Enabled    bool

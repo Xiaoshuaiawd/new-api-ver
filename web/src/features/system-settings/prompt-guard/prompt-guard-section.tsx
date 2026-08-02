@@ -78,6 +78,7 @@ function buildFormValues(cfg: PromptGuardConfig): FormValues {
       name: ep.name,
       base_url: ep.base_url,
       model: ep.model,
+      format: ep.format || 'qwen3guard',
       timeout_ms: ep.timeout_ms || 4000,
       input_limit: ep.input_limit || 16000,
       enabled: ep.enabled,
@@ -139,6 +140,7 @@ export function PromptGuardSection() {
         name: ep.name,
         base_url: ep.base_url,
         model: ep.model,
+        format: ep.format,
         token: ep.newToken || undefined,
         clear_token: ep.clear_token,
         timeout_ms: ep.timeout_ms,
@@ -157,6 +159,7 @@ export function PromptGuardSection() {
         name: '',
         base_url: '',
         model: '',
+        format: 'qwen3guard',
         timeout_ms: 4000,
         input_limit: 16000,
         enabled: true,
@@ -178,6 +181,7 @@ export function PromptGuardSection() {
       const result = await probePromptGuardEndpoint({
         base_url: ep.base_url,
         model: ep.model,
+        format: ep.format,
         token: ep.newToken || undefined,
         timeout_ms: ep.timeout_ms,
       })
@@ -335,6 +339,28 @@ export function PromptGuardSection() {
                 <FormField control={form.control} name={`endpoints.${idx}.model`}
                   render={({ field }) => (
                     <FormItem><FormLabel>{t('Model')}</FormLabel><FormControl><Input placeholder='sileader/qwen3guard:0.6b' {...field} disabled={!enabled} /></FormControl><FormMessage /></FormItem>
+                  )}
+                />
+                <FormField control={form.control} name={`endpoints.${idx}.format`}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Response Format')}</FormLabel>
+                      <FormControl>
+                        <select
+                          className='border-input bg-background flex h-9 w-full rounded-md border px-3 py-1 text-sm'
+                          value={field.value}
+                          onChange={(e) => field.onChange(e.target.value)}
+                          disabled={!enabled}
+                        >
+                          <option value='qwen3guard'>{t('qwen3guard (native line format)')}</option>
+                          <option value='json'>{t('General model (forced JSON)')}</option>
+                        </select>
+                      </FormControl>
+                      <FormDescription>
+                        {t('Use "General model" for gpt-4o-mini, qwen-turbo, etc. — forces JSON output for max reliability.')}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
                   )}
                 />
                 <FormField control={form.control} name={`endpoints.${idx}.newToken`}

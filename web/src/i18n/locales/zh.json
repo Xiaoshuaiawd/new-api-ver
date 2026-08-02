@@ -5448,6 +5448,10 @@
     "API Token": "API Token",
     "Probe succeeded: decision={{decision}}, {{ms}}ms": "探测成功：判定 {{decision}}，耗时 {{ms}}ms",
     "Probe failed: {{msg}}": "探测失败：{{msg}}",
-    "Prompt Guard settings saved": "提示词防护配置已保存"
+    "Prompt Guard settings saved": "提示词防护配置已保存",
+    "Response Format": "响应格式",
+    "qwen3guard (native line format)": "qwen3guard（原生行格式）",
+    "General model (forced JSON)": "通用模型（强制 JSON）",
+    "Use \"General model\" for gpt-4o-mini, qwen-turbo, etc. — forces JSON output for max reliability.": "gpt-4o-mini、qwen-turbo 等通用模型请选「通用模型」，会强制返回 JSON 以最大化可用率。"
   }
 }

@@ -5448,6 +5448,10 @@
     "API Token": "API Token",
     "Probe succeeded: decision={{decision}}, {{ms}}ms": "Probe succeeded: decision={{decision}}, {{ms}}ms",
     "Probe failed: {{msg}}": "Probe failed: {{msg}}",
-    "Prompt Guard settings saved": "Prompt Guard settings saved"
+    "Prompt Guard settings saved": "Prompt Guard settings saved",
+    "Response Format": "Response Format",
+    "qwen3guard (native line format)": "qwen3guard (native line format)",
+    "General model (forced JSON)": "General model (forced JSON)",
+    "Use \"General model\" for gpt-4o-mini, qwen-turbo, etc. — forces JSON output for max reliability.": "Use \"General model\" for gpt-4o-mini, qwen-turbo, etc. — forces JSON output for max reliability."
   }
 }

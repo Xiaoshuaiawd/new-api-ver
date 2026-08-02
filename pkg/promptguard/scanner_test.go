@@ -82,6 +82,64 @@ func TestParseQwen3GuardContent(t *testing.T) {
 	}
 }
 
+// JSON format (general models like gpt-4o-mini) and tolerant fallback.
+func TestParseGuardContentJSON(t *testing.T) {
+	cases := []struct {
+		name       string
+		content    string
+		wantSafety string
+		wantCats   []string
+		wantErr    bool
+	}{
+		{
+			name:       "plain json",
+			content:    `{"safety":"Unsafe","categories":["Jailbreak"]}`,
+			wantSafety: "Unsafe",
+			wantCats:   []string{"Jailbreak"},
+		},
+		{
+			name:       "json wrapped in markdown fence",
+			content:    "```json\n{\"safety\":\"Safe\",\"categories\":[]}\n```",
+			wantSafety: "Safe",
+			wantCats:   []string{},
+		},
+		{
+			name:       "json with null categories",
+			content:    `{"safety":"Safe"}`,
+			wantSafety: "Safe",
+			wantCats:   []string{},
+		},
+		{
+			name:       "fallback: line format still parses via unified parser",
+			content:    "Safety: Unsafe\nCategories: PII",
+			wantSafety: "Unsafe",
+			wantCats:   []string{"PII"},
+		},
+		{
+			name:    "garbage is invalid",
+			content: "I cannot classify this.",
+			wantErr: true,
+		},
+		{
+			name:    "json with unknown safety is invalid",
+			content: `{"safety":"Dangerous","categories":[]}`,
+			wantErr: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := parseGuardContent(tc.content)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantSafety, resp.Safety)
+			assert.Equal(t, tc.wantCats, resp.Categories)
+		})
+	}
+}
+
 // Verify the decision matrix wiring end-to-end from a parsed response.
 func TestDecisionMatrixFromParsedResponse(t *testing.T) {
 	// Unsafe + enabled category → block

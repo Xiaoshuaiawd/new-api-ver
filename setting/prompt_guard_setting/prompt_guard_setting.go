@@ -26,14 +26,15 @@ type StorageConfig struct {
 }
 
 type StorageEndpoint struct {
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	BaseURL        string `json:"base_url"`
-	Model          string `json:"model"`
-	TokenCipher    string `json:"token_cipher,omitempty"`
-	TimeoutMS      int    `json:"timeout_ms"`
-	InputLimit     int    `json:"input_limit"`
-	Enabled        bool   `json:"enabled"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	BaseURL     string `json:"base_url"`
+	Model       string `json:"model"`
+	Format      string `json:"format"` // "qwen3guard" (default) or "json"
+	TokenCipher string `json:"token_cipher,omitempty"`
+	TimeoutMS   int    `json:"timeout_ms"`
+	InputLimit  int    `json:"input_limit"`
+	Enabled     bool   `json:"enabled"`
 }
 
 var current StorageConfig
@@ -123,12 +124,17 @@ func buildActive(cfg StorageConfig, decrypt func(string) (string, error)) prompt
 		if inputLimit <= 0 {
 			inputLimit = promptguard.DefaultInputLimit
 		}
+		format := ep.Format
+		if format != promptguard.FormatJSON {
+			format = promptguard.FormatQwen3Guard
+		}
 		eps = append(eps, promptguard.Endpoint{
 			ID:         ep.ID,
 			Name:       ep.Name,
 			BaseURL:    ep.BaseURL,
 			Model:      ep.Model,
 			Token:      token,
+			Format:     format,
 			TimeoutMS:  timeoutMS,
 			InputLimit: inputLimit,
 			Enabled:    ep.Enabled,
@@ -170,6 +176,7 @@ type PublicEndpoint struct {
 	Name       string `json:"name"`
 	BaseURL    string `json:"base_url"`
 	Model      string `json:"model"`
+	Format     string `json:"format"`
 	HasToken   bool   `json:"has_token"`
 	TimeoutMS  int    `json:"timeout_ms"`
 	InputLimit int    `json:"input_limit"`
@@ -179,11 +186,16 @@ type PublicEndpoint struct {
 func toPublic(cfg StorageConfig) PublicConfig {
 	eps := make([]PublicEndpoint, 0, len(cfg.Endpoints))
 	for _, ep := range cfg.Endpoints {
+		format := ep.Format
+		if format != promptguard.FormatJSON {
+			format = promptguard.FormatQwen3Guard
+		}
 		eps = append(eps, PublicEndpoint{
 			ID:         ep.ID,
 			Name:       ep.Name,
 			BaseURL:    ep.BaseURL,
 			Model:      ep.Model,
+			Format:     format,
 			HasToken:   ep.TokenCipher != "",
 			TimeoutMS:  ep.TimeoutMS,
 			InputLimit: ep.InputLimit,
@@ -229,6 +241,7 @@ type UpdateEndpoint struct {
 	Name       string `json:"name"`
 	BaseURL    string `json:"base_url"`
 	Model      string `json:"model"`
+	Format     string `json:"format"`
 	Token      string `json:"token,omitempty"`
 	ClearToken bool   `json:"clear_token"`
 	TimeoutMS  int    `json:"timeout_ms"`

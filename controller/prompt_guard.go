@@ -65,6 +65,7 @@ func ProbePromptGuardEndpoint(c *gin.Context) {
 	var body struct {
 		BaseURL   string `json:"base_url"`
 		Model     string `json:"model"`
+		Format    string `json:"format"`
 		Token     string `json:"token"`
 		TimeoutMS int    `json:"timeout_ms"`
 	}
@@ -77,10 +78,15 @@ func ProbePromptGuardEndpoint(c *gin.Context) {
 		return
 	}
 
+	format := body.Format
+	if format != promptguard.FormatJSON {
+		format = promptguard.FormatQwen3Guard
+	}
 	ep := promptguard.Endpoint{
 		ID:        "probe",
 		BaseURL:   body.BaseURL,
 		Model:     body.Model,
+		Format:    format,
 		Token:     body.Token,
 		TimeoutMS: body.TimeoutMS,
 		Enabled:   true,
@@ -200,11 +206,16 @@ func buildStorageConfig(req prompt_guard_setting.UpdateRequest, current prompt_g
 		if inputLimit <= 0 {
 			inputLimit = promptguard.DefaultInputLimit
 		}
+		format := ep.Format
+		if format != promptguard.FormatJSON {
+			format = promptguard.FormatQwen3Guard
+		}
 		eps = append(eps, prompt_guard_setting.StorageEndpoint{
 			ID:          ep.ID,
 			Name:        ep.Name,
 			BaseURL:     ep.BaseURL,
 			Model:       ep.Model,
+			Format:      format,
 			TokenCipher: tokenCipher,
 			TimeoutMS:   timeoutMS,
 			InputLimit:  inputLimit,
