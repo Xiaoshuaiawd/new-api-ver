@@ -59,7 +59,18 @@ func CheckPromptGuard(c *gin.Context, tokenGroup, requestID, modelName string, r
 		return nil
 	}
 
-	totalMS := 7000
+	// Total budget must accommodate the configured per-node timeout (so raising
+	// it in the UI actually takes effect) plus a margin for queueing when the
+	// concurrency limit is momentarily saturated. Derive it from the largest
+	// enabled node timeout rather than a fixed cap.
+	nodeTimeoutMS := promptguard.DefaultTimeoutMS
+	for _, ep := range eps {
+		if ep.TimeoutMS > nodeTimeoutMS {
+			nodeTimeoutMS = ep.TimeoutMS
+		}
+	}
+	const queueWaitMarginMS = 3000
+	totalMS := nodeTimeoutMS + queueWaitMarginMS
 	ctx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(totalMS)*time.Millisecond)
 	defer cancel()
 
