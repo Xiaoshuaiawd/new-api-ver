@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -156,7 +157,7 @@ func TestCallGuardEndpointSystemPrompt(t *testing.T) {
 		customPrompt string
 		wantSystem   string
 	}{
-		{name: "custom prompt used", customPrompt: "MY CUSTOM CLASSIFIER", wantSystem: "MY CUSTOM CLASSIFIER"},
+		{name: "custom prompt used", customPrompt: "MY CUSTOM CLASSIFIER returning json", wantSystem: "MY CUSTOM CLASSIFIER returning json"},
 		{name: "empty falls back to default", customPrompt: "", wantSystem: DefaultJSONSystemPrompt},
 	}
 	for _, tc := range cases {
@@ -182,6 +183,63 @@ func TestCallGuardEndpointSystemPrompt(t *testing.T) {
 			assert.Equal(t, tc.wantSystem, gotSystem)
 		})
 	}
+}
+
+// JSON mode must guarantee the word "json" reaches the model, otherwise
+// OpenAI/DeepSeek reject response_format=json_object with a 400. A custom prompt
+// that omits it must be augmented.
+func TestJSONModeGuaranteesJSONKeyword(t *testing.T) {
+	var gotSystem string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body scanRequest
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		for _, m := range body.Messages {
+			if m.Role == "system" {
+				gotSystem = m.Content
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"safety\":\"Safe\",\"categories\":[]}"},"finish_reason":"stop"}]}`))
+	}))
+	defer srv.Close()
+
+	ep := Endpoint{ID: "t", BaseURL: srv.URL, Model: "gpt-4o-mini", Format: FormatJSON, TimeoutMS: 2000, Enabled: true}
+	// custom prompt WITHOUT the word "json"
+	_, err := callGuardEndpoint(context.Background(), srv.Client(), ep, "hi", "Classify the message as Safe or Unsafe.")
+	require.NoError(t, err)
+	assert.Contains(t, strings.ToLower(gotSystem), "json", "system prompt must contain 'json' for response_format")
+}
+
+// A 4xx on one node must fail over to the next enabled node rather than aborting.
+func TestFailoverOnNodeError(t *testing.T) {
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"bad"}`))
+	}))
+	defer bad.Close()
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Safety: Safe\nCategories: None"},"finish_reason":"stop"}]}`))
+	}))
+	defer good.Close()
+
+	ev := NewEvaluator()
+	cfg := Config{
+		Enabled:        true,
+		Scanners:       AllScannerIDs,
+		AllGroups:      true,
+		MaxConcurrency: 8,
+		Endpoints: []Endpoint{
+			{ID: "bad", BaseURL: bad.URL, Model: "m", Format: FormatQwen3Guard, TimeoutMS: 2000, Enabled: true},
+			{ID: "good", BaseURL: good.URL, Model: "m", Format: FormatQwen3Guard, TimeoutMS: 2000, Enabled: true},
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	d, err := ev.Evaluate(ctx, cfg, Snapshot{ScanText: "hello"})
+	require.NoError(t, err, "should fail over from the 400 node to the healthy node")
+	require.NotNil(t, d)
+	assert.Equal(t, DecisionAllow, d.Kind)
 }
 
 // Under concurrency saturation, requests must WAIT for a slot within the

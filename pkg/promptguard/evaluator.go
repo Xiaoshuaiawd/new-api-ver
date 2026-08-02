@@ -111,20 +111,27 @@ func (e *Evaluator) Evaluate(ctx context.Context, cfg Config, snap Snapshot) (*D
 func (e *Evaluator) scanWithFailover(ctx context.Context, endpoints []Endpoint, text string, systemPrompt string) (*guardResponse, error) {
 	var lastErr error
 	for _, ep := range endpoints {
+		// Out of time budget — no point trying further nodes.
+		if ctx.Err() != nil {
+			return nil, &GuardError{Code: ErrorCodeUnavailable, Retryable: false, Timeout: true, Cause: ctx.Err()}
+		}
+
 		client := e.getClient(ep)
 		result, err := callGuardEndpoint(ctx, client, ep, text, systemPrompt)
 		if err == nil {
+			// A successful classification is the only thing that returns early.
+			// Errors (4xx, network, timeout, invalid response) are never verdicts,
+			// so failing over to the next node cannot turn a block into an allow.
 			return result, nil
 		}
 		lastErr = err
-		var guardErr *GuardError
-		if errors.As(err, &guardErr) && !guardErr.Retryable {
-			return nil, err
-		}
-		// context cancelled/timed out — stop immediately
+
+		// The overall deadline was hit — stop; other nodes won't have time either.
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			return nil, &GuardError{Code: ErrorCodeUnavailable, Retryable: false, Timeout: true, Cause: err}
 		}
+		// Any other error (including a per-node 4xx misconfiguration) falls through
+		// to the next enabled node.
 	}
 	if lastErr == nil {
 		lastErr = &GuardError{Code: ErrorCodeUnavailable}

@@ -90,6 +90,13 @@ func callGuardEndpoint(ctx context.Context, client *http.Client, ep Endpoint, te
 		// General instruct model: system prompt + forced JSON output.
 		// No max_tokens — reasoning models would otherwise truncate before the
 		// JSON is emitted. The classifier output is tiny, so it stays cheap.
+		//
+		// OpenAI/DeepSeek reject response_format=json_object with a 400 unless the
+		// word "json" appears somewhere in the prompt. Guarantee it so a custom
+		// admin prompt that omits it never breaks the request.
+		if !strings.Contains(strings.ToLower(systemPrompt), "json") {
+			systemPrompt += "\nRespond with a JSON object only."
+		}
 		body.Messages = []scanMessage{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: text},
