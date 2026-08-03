@@ -28,8 +28,8 @@ var OpenAIUpstreamKeyLimitConfigValue = DefaultOpenAIUpstreamKeyLimitConfig()
 
 func DefaultOpenAIUpstreamKeyLimitConfig() OpenAIUpstreamKeyLimitConfig {
 	return OpenAIUpstreamKeyLimitConfig{
-		RPM:         3,
-		TPM:         50000,
+		RPM:         10,
+		TPM:         100000,
 		RPD:         50,
 		TPD:         200000,
 		DailyWindow: "rolling_24h",
