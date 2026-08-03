@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 package model
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -79,4 +80,30 @@ func TestSumUsedQuotaAggregatesRealConsumptionBeforeRounding(t *testing.T) {
 	stat, err := SumUsedQuota(LogTypeConsume, 0, 0, "", "", "", 0, "")
 	require.NoError(t, err)
 	assert.InDelta(t, 0.012, stat.RealConsumption, 0.000001)
+}
+
+func TestSumUsedQuotaUsesSubscriptionSnapshotForLegacyLog(t *testing.T) {
+	truncateTables(t)
+	for id := 1; id <= 20; id++ {
+		require.NoError(t, DB.Create(&UserSubscription{
+			Id:          id,
+			PriceAmount: 32,
+			AmountTotal: 200,
+			AmountUsed:  200,
+			Status:      "expired",
+		}).Error)
+		require.NoError(t, LOG_DB.Create(&Log{
+			Type: LogTypeConsume,
+			Other: fmt.Sprintf(`{
+				"billing_source": "subscription",
+				"subscription_id": %d,
+				"subscription_consumed": 200,
+				"subscription_total": 200
+			}`, id),
+		}).Error)
+	}
+
+	stat, err := SumUsedQuota(LogTypeConsume, 0, 0, "", "", "", 0, "")
+	require.NoError(t, err)
+	assert.InDelta(t, 640, stat.RealConsumption, 0.000001)
 }

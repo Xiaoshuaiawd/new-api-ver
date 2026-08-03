@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
@@ -227,6 +229,18 @@ func TestTaskBillingOtherFiltersHistoricalOtherRatios(t *testing.T) {
 	assert.NotContains(t, other, "inf")
 }
 
+func TestTaskBillingOtherPreservesSubscriptionPriceSnapshot(t *testing.T) {
+	task := makeTask(1, 1, 100, 0, BillingSourceSubscription, 77)
+	task.PrivateData.SubscriptionPriceAmount = 32
+	task.PrivateData.SubscriptionAmountTotal = 200
+
+	other := taskBillingOther(task)
+
+	assert.Equal(t, BillingSourceSubscription, other["billing_source"])
+	assert.Equal(t, int64(200), other["subscription_total"])
+	assert.Equal(t, 32.0, other["admin_info"].(map[string]interface{})["subscription_price"])
+}
+
 func TestTaskBillingContextPriceDataFiltersMultiplier(t *testing.T) {
 	priceData := taskBillingContextPriceData(&model.TaskBillingContext{
 		OtherRatios: map[string]float64{
@@ -303,6 +317,56 @@ func countLogs(t *testing.T) int64 {
 	var count int64
 	model.LOG_DB.Model(&model.Log{}).Count(&count)
 	return count
+}
+
+func TestLogTaskConsumptionRecordsSubscriptionPricingForRealConsumption(t *testing.T) {
+	truncate(t)
+	const userID, channelID = 1, 1
+	seedUser(t, userID, 10_000)
+	seedChannel(t, channelID)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	ctx.Set("username", "test_user")
+	info := &relaycommon.RelayInfo{
+		UserId:                                userID,
+		UsingGroup:                            "default",
+		OriginModelName:                       "test-model",
+		BillingSource:                         BillingSourceSubscription,
+		SubscriptionId:                        77,
+		SubscriptionPreConsumed:               200,
+		SubscriptionAmountTotal:               200,
+		SubscriptionAmountUsedAfterPreConsume: 200,
+		SubscriptionPriceAmount:               32,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId: channelID,
+		},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{
+			Action: "images/generations",
+		},
+		PriceData: types.PriceData{
+			Quota: 200,
+			GroupRatioInfo: types.GroupRatioInfo{
+				GroupRatio:    1,
+				BillingSource: BillingSourceSubscription,
+			},
+		},
+	}
+
+	LogTaskConsumption(ctx, info)
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	var other map[string]interface{}
+	require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
+	assert.Equal(t, float64(200), other["subscription_consumed"])
+	assert.Equal(t, float64(200), other["subscription_total"])
+	require.IsType(t, map[string]interface{}{}, other["admin_info"])
+	assert.Equal(t, 32.0, other["admin_info"].(map[string]interface{})["subscription_price"])
+
+	stat, err := model.SumUsedQuota(model.LogTypeConsume, 0, 0, "", "test_user", "", 0, "")
+	require.NoError(t, err)
+	assert.InDelta(t, 32, stat.RealConsumption, 0.000001)
 }
 
 // ===========================================================================
@@ -571,6 +635,35 @@ func TestRecalculate_Subscription_NegativeDelta(t *testing.T) {
 	log := getLastLog(t)
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeRefund, log.Type)
+}
+
+func TestRecalculateSubscriptionPositiveDeltaRecordsRealConsumption(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID, subID = 15, 15, 15, 3
+	seedUser(t, userID, 0)
+	seedToken(t, tokenID, userID, "sk-sub-recalc-positive", 10_000)
+	seedChannel(t, channelID)
+	seedSubscription(t, subID, userID, 100_000, 50_000)
+
+	task := makeTask(userID, channelID, 5_000, tokenID, BillingSourceSubscription, subID)
+	task.PrivateData.SubscriptionPriceAmount = 32
+	task.PrivateData.SubscriptionAmountTotal = 100_000
+	require.NoError(t, model.DB.Create(task).Error)
+
+	RecalculateTaskQuota(ctx, task, 8_000, "subscription under-charge")
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Equal(t, model.LogTypeConsume, log.Type)
+	var other map[string]interface{}
+	require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
+	assert.Equal(t, float64(3_000), other["subscription_consumed"])
+
+	stat, err := model.SumUsedQuota(model.LogTypeConsume, 0, 0, "", "test_user", "", 0, "")
+	require.NoError(t, err)
+	assert.InDelta(t, 0.96, stat.RealConsumption, 0.000001)
 }
 
 func TestRecalculateTaskQuotaByTokens_UsesModelFromTaskDataFallback(t *testing.T) {

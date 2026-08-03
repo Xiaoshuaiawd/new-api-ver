@@ -408,6 +408,43 @@ type UserSubscription struct {
 	UpdatedAt int64 `json:"updated_at" gorm:"bigint"`
 }
 
+// backfillLegacyUserSubscriptionPriceAmounts fills the price snapshot for
+// subscriptions created before PriceAmount was added. Those rows used zero as
+// the schema default, so the plan price is the only available historical
+// accounting value. Once filled, later plan edits do not affect the snapshot.
+func backfillLegacyUserSubscriptionPriceAmounts() error {
+	if DB == nil || !DB.Migrator().HasTable(&UserSubscription{}) || !DB.Migrator().HasTable(&SubscriptionPlan{}) {
+		return nil
+	}
+
+	var legacy []UserSubscription
+	if err := DB.Select("id", "plan_id").Where("price_amount = ?", 0).Find(&legacy).Error; err != nil {
+		return err
+	}
+	for _, subscription := range legacy {
+		if subscription.PlanId <= 0 {
+			continue
+		}
+		var plan SubscriptionPlan
+		err := DB.Select("price_amount").Where("id = ?", subscription.PlanId).First(&plan).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if plan.PriceAmount <= 0 {
+			continue
+		}
+		if err := DB.Model(&UserSubscription{}).
+			Where("id = ? AND price_amount = ?", subscription.Id, 0).
+			Update("price_amount", plan.PriceAmount).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *UserSubscription) BeforeCreate(tx *gorm.DB) error {
 	now := common.GetTimestamp()
 	s.CreatedAt = now

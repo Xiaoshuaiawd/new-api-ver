@@ -387,6 +387,46 @@ func calculateRealConsumptionAmount(quota int, other map[string]interface{}) dec
 		Mul(groupRatio)
 }
 
+// injectSubscriptionPriceSnapshot resolves the price for legacy subscription
+// logs that predate the per-log price snapshot. The user subscription itself
+// retains that price after the startup backfill, so later plan edits do not
+// change the calculated historical consumption.
+func injectSubscriptionPriceSnapshot(other map[string]interface{}, priceCache map[int]float64) {
+	if other == nil || other["billing_source"] != "subscription" {
+		return
+	}
+	adminInfo, _ := other["admin_info"].(map[string]interface{})
+	if adminInfo != nil {
+		if price, ok := adminInfo["subscription_price"].(float64); ok && price > 0 {
+			return
+		}
+	}
+
+	subscriptionID, ok := other["subscription_id"].(float64)
+	if !ok || subscriptionID <= 0 || subscriptionID > float64(math.MaxInt) || math.Trunc(subscriptionID) != subscriptionID {
+		return
+	}
+	id := int(subscriptionID)
+	price, cached := priceCache[id]
+	if !cached {
+		var subscription UserSubscription
+		if err := DB.Select("price_amount").Where("id = ?", id).First(&subscription).Error; err != nil {
+			priceCache[id] = 0
+			return
+		}
+		price = subscription.PriceAmount
+		priceCache[id] = price
+	}
+	if price <= 0 {
+		return
+	}
+	if adminInfo == nil {
+		adminInfo = make(map[string]interface{})
+		other["admin_info"] = adminInfo
+	}
+	adminInfo["subscription_price"] = price
+}
+
 func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams) {
 	if !common.LogConsumeEnabled {
 		return
@@ -762,7 +802,11 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	}
 	defer rows.Close()
 
-	realConsumption := decimal.Zero
+	type realConsumptionLog struct {
+		quota int64
+		other sql.NullString
+	}
+	logRows := make([]realConsumptionLog, 0)
 	for rows.Next() {
 		var quota sql.NullInt64
 		var other sql.NullString
@@ -770,15 +814,23 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 			common.SysError("failed to scan real consumption stat: " + err.Error())
 			return stat, errors.New("查询统计数据失败")
 		}
-		otherMap := map[string]interface{}{}
-		if other.Valid {
-			_ = common.UnmarshalJsonStr(other.String, &otherMap)
-		}
-		realConsumption = realConsumption.Add(calculateRealConsumptionAmount(int(quota.Int64), otherMap))
+		logRows = append(logRows, realConsumptionLog{quota: quota.Int64, other: other})
 	}
 	if err := rows.Err(); err != nil {
 		common.SysError("failed to iterate real consumption stat: " + err.Error())
 		return stat, errors.New("查询统计数据失败")
+	}
+	_ = rows.Close()
+
+	realConsumption := decimal.Zero
+	subscriptionPriceCache := make(map[int]float64)
+	for _, logRow := range logRows {
+		otherMap := map[string]interface{}{}
+		if logRow.other.Valid {
+			_ = common.UnmarshalJsonStr(logRow.other.String, &otherMap)
+		}
+		injectSubscriptionPriceSnapshot(otherMap, subscriptionPriceCache)
+		realConsumption = realConsumption.Add(calculateRealConsumptionAmount(int(logRow.quota), otherMap))
 	}
 	stat.RealConsumption = realConsumption.InexactFloat64()
 	if err := rpmTpmQuery.Scan(&stat).Error; err != nil {

@@ -323,6 +323,9 @@ func migrateDB() error {
 			return err
 		}
 	}
+	if err := backfillLegacyUserSubscriptionPriceAmounts(); err != nil {
+		return err
+	}
 	if err := BackfillReferralInvitesFromUsers(); err != nil {
 		return err
 	}
@@ -408,6 +411,9 @@ func migrateDBFast() error {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 			return err
 		}
+	}
+	if err := backfillLegacyUserSubscriptionPriceAmounts(); err != nil {
+		return err
 	}
 	if err := BackfillReferralInvitesFromUsers(); err != nil {
 		return err
