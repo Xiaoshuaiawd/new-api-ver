@@ -47,6 +47,22 @@ function StatBadge(props: {
   )
 }
 
+export function RealConsumptionStat(props: {
+  cents: number
+  sensitiveVisible: boolean
+}) {
+  const { t } = useTranslation()
+  const value = `¥${(props.cents / 100).toFixed(2)}`
+
+  return (
+    <StatBadge
+      label={t('Real Consumption')}
+      value={props.sensitiveVisible ? value : '••••'}
+      accent='bg-emerald-500/70'
+    />
+  )
+}
+
 export function CommonLogsStats() {
   const { t } = useTranslation()
   const { isAdminView: isAdmin } = useLogsViewScope()
@@ -92,6 +108,12 @@ export function CommonLogsStats() {
         value={sensitiveVisible ? formatLogQuota(stats?.quota || 0) : '••••'}
         accent='bg-sky-500/70'
       />
+      {isAdmin ? (
+        <RealConsumptionStat
+          cents={stats?.real_consumption_cents || 0}
+          sensitiveVisible={sensitiveVisible}
+        />
+      ) : null}
       <StatBadge
         label={t('RPM')}
         value={stats?.rpm || 0}
