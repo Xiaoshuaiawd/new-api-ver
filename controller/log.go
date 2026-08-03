@@ -116,7 +116,7 @@ func GetLogsStat(c *gin.Context) {
 		"tpm":   stat.Tpm,
 	}
 	if c.GetInt("role") >= common.RoleRootUser {
-		data["real_consumption_cents"] = stat.RealConsumptionCents
+		data["real_consumption"] = stat.RealConsumption
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

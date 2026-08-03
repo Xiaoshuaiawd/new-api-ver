@@ -22,21 +22,25 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestCalculateRealConsumptionCentsUsesFinalWalletQuota(t *testing.T) {
+func TestCalculateRealConsumptionAmountUsesActualQuotaAndGroupRatio(t *testing.T) {
 	previousQuotaPerUnit := common.QuotaPerUnit
 	common.QuotaPerUnit = 500_000
 	t.Cleanup(func() {
 		common.QuotaPerUnit = previousQuotaPerUnit
 	})
 
-	assert.EqualValues(t, 23_000, calculateRealConsumptionCents(115_000_000, nil))
+	amount := calculateRealConsumptionAmount(115_000_000, map[string]interface{}{
+		"group_ratio": 0.23,
+	})
+	assert.True(t, amount.Equal(decimal.NewFromInt(230)))
 }
 
-func TestCalculateRealConsumptionCentsProratesSubscriptionPrice(t *testing.T) {
+func TestCalculateRealConsumptionAmountProratesSubscriptionPrice(t *testing.T) {
 	fullPrice := map[string]interface{}{
 		"billing_source":        "subscription",
 		"subscription_consumed": int64(7_500_000),
@@ -46,26 +50,33 @@ func TestCalculateRealConsumptionCentsProratesSubscriptionPrice(t *testing.T) {
 		},
 	}
 
-	assert.EqualValues(t, 240, calculateRealConsumptionCents(0, fullPrice))
-	assert.EqualValues(t, 340, calculateRealConsumptionCents(0, map[string]interface{}{
+	assert.True(t, calculateRealConsumptionAmount(0, fullPrice).Equal(decimal.RequireFromString("2.4")))
+	assert.True(t, calculateRealConsumptionAmount(0, map[string]interface{}{
 		"billing_source":        "subscription",
 		"subscription_consumed": int64(15),
 		"subscription_total":    int64(15),
 		"admin_info": map[string]interface{}{
 			"subscription_price": 3.4,
 		},
-	}))
+	}).Equal(decimal.RequireFromString("3.4")))
 }
 
-func TestSumUsedQuotaIncludesRealConsumptionCents(t *testing.T) {
+func TestSumUsedQuotaAggregatesRealConsumptionBeforeRounding(t *testing.T) {
 	truncateTables(t)
-	require.NoError(t, LOG_DB.Create(&Log{
-		Type:                 LogTypeConsume,
-		Quota:                10,
-		RealConsumptionCents: 240,
-	}).Error)
+	previousQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 500_000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = previousQuotaPerUnit
+	})
+	for range 2 {
+		require.NoError(t, LOG_DB.Create(&Log{
+			Type:  LogTypeConsume,
+			Quota: 3_000,
+			Other: `{"group_ratio":1}`,
+		}).Error)
+	}
 
 	stat, err := SumUsedQuota(LogTypeConsume, 0, 0, "", "", "", 0, "")
 	require.NoError(t, err)
-	assert.EqualValues(t, 240, stat.RealConsumptionCents)
+	assert.InDelta(t, 0.012, stat.RealConsumption, 0.000001)
 }
