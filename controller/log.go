@@ -126,6 +126,7 @@ func GetLogsStat(c *gin.Context) {
 		"tpm":   stat.Tpm,
 	}
 	if c.GetInt("role") >= common.RoleRootUser {
+		data["real_consumption_cents"] = stat.RealConsumptionCents
 		revenueStartTimestamp, revenueEndTimestamp := revenueStatRange(startTimestamp, endTimestamp)
 		todayRevenue, err := model.SumRevenueByTimeRange(revenueStartTimestamp, revenueEndTimestamp)
 		if err != nil {

@@ -54,6 +54,22 @@ function StatBadge(props: {
   )
 }
 
+export function RealConsumptionStat(props: {
+  cents: number
+  sensitiveVisible: boolean
+}) {
+  const { t } = useTranslation()
+  const value = `¥${(props.cents / 100).toFixed(2)}`
+
+  return (
+    <StatBadge
+      label={t('Real Consumption')}
+      value={props.sensitiveVisible ? value : '••••'}
+      accent='bg-emerald-500/70'
+    />
+  )
+}
+
 export function CommonLogsStatsView(props: {
   stats: LogStatistics
   isRoot: boolean
@@ -102,6 +118,12 @@ export function CommonLogsStatsView(props: {
           accent='bg-amber-500/70'
         />
       ) : null}
+      {props.isRoot ? (
+        <RealConsumptionStat
+          cents={props.stats.real_consumption_cents ?? 0}
+          sensitiveVisible={props.sensitiveVisible}
+        />
+      ) : null}
     </div>
   )
 }
@@ -114,6 +136,7 @@ export function CommonLogsStatsSkeleton(props: { isRoot: boolean }) {
       <Skeleton className='h-7 w-[120px] rounded-md' />
       {props.isRoot ? <Skeleton className='h-7 w-[130px] rounded-md' /> : null}
       {props.isRoot ? <Skeleton className='h-7 w-[160px] rounded-md' /> : null}
+      {props.isRoot ? <Skeleton className='h-7 w-[150px] rounded-md' /> : null}
     </div>
   )
 }

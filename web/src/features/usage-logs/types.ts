@@ -248,6 +248,7 @@ export interface LogOtherData {
  */
 export interface LogStatistics {
   quota: number
+  real_consumption_cents?: number
   rpm: number
   tpm: number
   today_revenue?: number
