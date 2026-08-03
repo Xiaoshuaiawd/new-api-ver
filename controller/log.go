@@ -110,14 +110,18 @@ func GetLogsStat(c *gin.Context) {
 		return
 	}
 	//tokenNum := model.SumUsedToken(logType, startTimestamp, endTimestamp, modelName, username, "")
+	data := gin.H{
+		"quota": stat.Quota,
+		"rpm":   stat.Rpm,
+		"tpm":   stat.Tpm,
+	}
+	if c.GetInt("role") >= common.RoleRootUser {
+		data["real_consumption_cents"] = stat.RealConsumptionCents
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data": gin.H{
-			"quota": stat.Quota,
-			"rpm":   stat.Rpm,
-			"tpm":   stat.Tpm,
-		},
+		"data":    data,
 	})
 	return
 }

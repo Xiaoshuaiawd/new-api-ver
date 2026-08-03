@@ -136,6 +136,8 @@ type RelayInfo struct {
 	// SubscriptionPlanId / SubscriptionPlanTitle are used for logging/UI display.
 	SubscriptionPlanId    int
 	SubscriptionPlanTitle string
+	// SubscriptionPriceAmount is the selling-price snapshot used for accounting.
+	SubscriptionPriceAmount float64
 	// RequestId is used for idempotent pre-consume/refund
 	RequestId string
 	// SubscriptionAmountTotal / SubscriptionAmountUsedAfterPreConsume are used to compute remaining in logs.

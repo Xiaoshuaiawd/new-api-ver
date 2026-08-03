@@ -22,7 +22,9 @@ import { useTranslation } from 'react-i18next'
 
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatLogQuota } from '@/lib/format'
+import { ROLE } from '@/lib/roles'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { getLogStats, getUserLogStats } from '../api'
 import { DEFAULT_LOG_STATS } from '../constants'
@@ -47,9 +49,28 @@ function StatBadge(props: {
   )
 }
 
+export function RealConsumptionStat(props: {
+  cents: number
+  sensitiveVisible: boolean
+}) {
+  const { t } = useTranslation()
+  const value = `¥${(props.cents / 100).toFixed(2)}`
+
+  return (
+    <StatBadge
+      label={t('Real Consumption')}
+      value={props.sensitiveVisible ? value : '••••'}
+      accent='bg-emerald-500/70'
+    />
+  )
+}
+
 export function CommonLogsStats() {
   const { t } = useTranslation()
+  const userRole = useAuthStore((state) => state.auth.user?.role ?? 0)
+  const isRoot = userRole >= ROLE.SUPER_ADMIN
   const { isAdminView: isAdmin } = useLogsViewScope()
+  const canViewRealConsumption = isRoot && isAdmin
   const searchParams = route.useSearch()
   const { sensitiveVisible } = useUsageLogsContext()
 
@@ -81,6 +102,9 @@ export function CommonLogsStats() {
         <Skeleton className='h-7 w-[150px] rounded-md' />
         <Skeleton className='h-7 w-[100px] rounded-md' />
         <Skeleton className='h-7 w-[120px] rounded-md' />
+        {canViewRealConsumption ? (
+          <Skeleton className='h-7 w-[150px] rounded-md' />
+        ) : null}
       </div>
     )
   }
@@ -102,6 +126,12 @@ export function CommonLogsStats() {
         value={stats?.tpm || 0}
         accent='bg-slate-400/70'
       />
+      {canViewRealConsumption ? (
+        <RealConsumptionStat
+          cents={stats?.real_consumption_cents ?? 0}
+          sensitiveVisible={sensitiveVisible}
+        />
+      ) : null}
     </div>
   )
 }
