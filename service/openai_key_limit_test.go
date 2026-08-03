@@ -312,20 +312,15 @@ func TestOpenAIUpstreamKeyLimitUsesCommonJSONWrapper(t *testing.T) {
 func TestRestoreExpiredOpenAIUpstreamKeyLimitsRestoresEnabledMultiKeyChannel(t *testing.T) {
 	oldDB := model.DB
 	oldLogDB := model.LOG_DB
-	oldSQLite := common.UsingSQLite
-	oldMySQL := common.UsingMySQL
-	oldPostgreSQL := common.UsingPostgreSQL
+	oldMainDatabaseType := common.MainDatabaseType()
+	oldLogDatabaseType := common.LogDatabaseType()
 	t.Cleanup(func() {
 		model.DB = oldDB
 		model.LOG_DB = oldLogDB
-		common.UsingSQLite = oldSQLite
-		common.UsingMySQL = oldMySQL
-		common.UsingPostgreSQL = oldPostgreSQL
+		common.SetDatabaseTypes(oldMainDatabaseType, oldLogDatabaseType)
 	})
 
-	common.UsingSQLite = true
-	common.UsingMySQL = false
-	common.UsingPostgreSQL = false
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	db, err := gorm.Open(sqlite.Open("file:openai_key_limit_restore_enabled_multikey?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	model.DB = db

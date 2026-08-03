@@ -1,24 +1,226 @@
 package controller
 
 import (
+	"bytes"
+	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestValidateChannelProxy(t *testing.T) {
+	tests := []struct {
+		name    string
+		proxy   string
+		wantErr bool
+	}{
+		{name: "empty"},
+		{name: "http", proxy: "http://proxy.example:8080"},
+		{name: "https", proxy: "https://proxy.example:8443"},
+		{name: "socks5", proxy: "socks5://proxy.example"},
+		{name: "socks5h", proxy: "socks5h://proxy.example:1080/"},
+		{name: "unsupported", proxy: "ftp://proxy.example", wantErr: true},
+		{name: "path", proxy: "socks5://proxy.example:1080/path", wantErr: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			setting, err := common.Marshal(dto.ChannelSettings{Proxy: test.proxy})
+			require.NoError(t, err)
+			channel := &model.Channel{
+				Type:    constant.ChannelTypeOpenAI,
+				Setting: common.GetPointer(string(setting)),
+			}
+
+			err = validateChannel(channel, false)
+
+			if test.wantErr {
+				require.ErrorContains(t, err, "invalid channel proxy")
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestValidateChannelRequiresNewAPIBaseURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		baseURL *string
+		wantErr bool
+	}{
+		{name: "missing", wantErr: true},
+		{name: "blank", baseURL: common.GetPointer("  "), wantErr: true},
+		{name: "configured", baseURL: common.GetPointer("https://new-api.example")},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			channel := &model.Channel{
+				Type:    constant.ChannelTypeNewAPI,
+				BaseURL: test.baseURL,
+			}
+
+			err := validateChannel(channel, false)
+
+			if test.wantErr {
+				require.ErrorContains(t, err, "New API channel base URL cannot be empty")
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestNewAPIChannelRegistration(t *testing.T) {
+	apiType, ok := common.ChannelType2APIType(constant.ChannelTypeNewAPI)
+
+	require.True(t, ok)
+	assert.Equal(t, constant.APITypeNewAPI, apiType)
+	assert.Equal(t, "New API", constant.GetChannelTypeName(constant.ChannelTypeNewAPI))
+	require.Greater(t, len(constant.ChannelBaseURLs), constant.ChannelTypeNewAPI)
+	assert.Empty(t, constant.ChannelBaseURLs[constant.ChannelTypeNewAPI])
+}
+
+func TestResponsesCompactAPITypeSupport(t *testing.T) {
+	tests := []struct {
+		name    string
+		apiType int
+		want    bool
+	}{
+		{name: "OpenAI", apiType: constant.APITypeOpenAI, want: true},
+		{name: "Codex", apiType: constant.APITypeCodex, want: true},
+		{name: "Advanced Custom", apiType: constant.APITypeAdvancedCustom, want: true},
+		{name: "Sub2API", apiType: constant.APITypeSub2API, want: true},
+		{name: "New API", apiType: constant.APITypeNewAPI, want: true},
+		{name: "Anthropic", apiType: constant.APITypeAnthropic, want: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.want, common.IsResponsesCompactAPIType(test.apiType))
+		})
+	}
+}
+
+func TestMultiprotocolGatewayEndpointTypes(t *testing.T) {
+	want := []constant.EndpointType{
+		constant.EndpointTypeOpenAI,
+		constant.EndpointTypeOpenAIResponse,
+		constant.EndpointTypeOpenAIResponseCompact,
+		constant.EndpointTypeAnthropic,
+		constant.EndpointTypeGemini,
+		constant.EndpointTypeOpenAIAlphaSearch,
+	}
+
+	assert.Equal(t, want, common.GetEndpointTypesByChannelType(constant.ChannelTypeNewAPI, "gpt-5"))
+	assert.Equal(t, want, common.GetEndpointTypesByChannelType(constant.ChannelTypeSub2API, "gpt-5"))
+}
+
+func TestCopyChannelRejectsInvalidLegacyProxySettings(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	settingBytes, err := common.Marshal(dto.ChannelSettings{
+		Proxy: "socks5://proxy.example/legacy-path",
+	})
+	require.NoError(t, err)
+	setting := string(settingBytes)
+	origin := &model.Channel{
+		Type:    constant.ChannelTypeOpenAI,
+		Name:    "legacy proxy channel",
+		Key:     "test-key",
+		Models:  "gpt-test",
+		Group:   "default",
+		Setting: &setting,
+	}
+	require.NoError(t, db.Create(origin).Error)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "id", Value: fmt.Sprintf("%d", origin.Id)}}
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel/copy", nil)
+
+	CopyChannel(ctx)
+
+	assert.Contains(t, recorder.Body.String(), "invalid channel settings")
+	var channelCount int64
+	require.NoError(t, db.Model(&model.Channel{}).Count(&channelCount).Error)
+	assert.Equal(t, int64(1), channelCount)
+}
+
+func TestDeleteChannelResetsProxyCacheWhenPreReadFails(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Log{}))
+	service.ResetProxyClientCache()
+	t.Cleanup(service.ResetProxyClientCache)
+
+	proxyURL := "http://proxy.example:8080"
+	beforeDelete, err := service.GetHttpClientWithProxy(proxyURL)
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "id", Value: "999999"}}
+	ctx.Request = httptest.NewRequest(http.MethodDelete, "/api/channel/999999", nil)
+
+	DeleteChannel(ctx)
+
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	afterDelete, err := service.GetHttpClientWithProxy(proxyURL)
+	require.NoError(t, err)
+	assert.NotSame(t, beforeDelete, afterDelete)
+}
+
+func TestDeleteChannelBatchReportsAndAuditsActualDeletedCount(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Log{}))
+	channel := &model.Channel{Name: "existing", Key: "test-key"}
+	require.NoError(t, db.Create(channel).Error)
+
+	requestBody, err := common.Marshal(ChannelBatch{Ids: []int{channel.Id, 999999}})
+	require.NoError(t, err)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodDelete, "/api/channel/batch", bytes.NewReader(requestBody))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	DeleteChannelBatch(ctx)
+
+	var response struct {
+		Success bool  `json:"success"`
+		Data    int64 `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.True(t, response.Success)
+	assert.Equal(t, int64(1), response.Data)
+
+	var auditLog model.Log
+	require.NoError(t, db.Order("id desc").First(&auditLog).Error)
+	var auditData struct {
+		Operation struct {
+			Params map[string]any `json:"params"`
+		} `json:"op"`
+	}
+	require.NoError(t, common.UnmarshalJsonStr(auditLog.Other, &auditData))
+	assert.Equal(t, float64(1), auditData.Operation.Params["count"])
+}
 
 func TestSettleTestQuotaUsesTieredBilling(t *testing.T) {
 	info := &relaycommon.RelayInfo{
@@ -101,9 +303,8 @@ func TestGetChannelAppliesOpenAIKeyLimitToInitiallyDistributedChannel(t *testing
 
 	oldDB := model.DB
 	oldLogDB := model.LOG_DB
-	oldSQLite := common.UsingSQLite
-	oldMySQL := common.UsingMySQL
-	oldPostgreSQL := common.UsingPostgreSQL
+	oldMainDatabaseType := common.MainDatabaseType()
+	oldLogDatabaseType := common.LogDatabaseType()
 	oldEnabled := setting.OpenAIUpstreamKeyLimitEnabled
 	oldConfig := setting.OpenAIUpstreamKeyLimitConfigValue
 	oldRedis := common.RedisEnabled
@@ -111,18 +312,14 @@ func TestGetChannelAppliesOpenAIKeyLimitToInitiallyDistributedChannel(t *testing
 	t.Cleanup(func() {
 		model.DB = oldDB
 		model.LOG_DB = oldLogDB
-		common.UsingSQLite = oldSQLite
-		common.UsingMySQL = oldMySQL
-		common.UsingPostgreSQL = oldPostgreSQL
+		common.SetDatabaseTypes(oldMainDatabaseType, oldLogDatabaseType)
 		setting.OpenAIUpstreamKeyLimitEnabled = oldEnabled
 		setting.OpenAIUpstreamKeyLimitConfigValue = oldConfig
 		common.RedisEnabled = oldRedis
 		service.SetOpenAIUpstreamKeyLimiterForTest(oldLimiter)
 	})
 
-	common.UsingSQLite = true
-	common.UsingMySQL = false
-	common.UsingPostgreSQL = false
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	db, err := gorm.Open(sqlite.Open("file:openai_key_limit_initial_channel?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	model.DB = db
@@ -187,7 +384,7 @@ func TestGetChannelAppliesOpenAIKeyLimitToInitiallyDistributedChannel(t *testing
 
 	_, apiErr := getChannel(ctx, info, retryParam)
 	require.NotNil(t, apiErr)
-	require.Equal(t, types.ErrorCodeOpenAIUpstreamKeyRateLimited, apiErr.GetErrorCode())
+	require.Equal(t, relaytypes.ErrorCodeOpenAIUpstreamKeyRateLimited, apiErr.GetErrorCode())
 }
 
 func TestGetChannelPreservesInitiallyDistributedMultiKeyContext(t *testing.T) {
@@ -240,4 +437,49 @@ func TestGetChannelPreservesInitiallyDistributedMultiKeyContext(t *testing.T) {
 	require.Equal(t, "sk-a", common.GetContextKeyString(ctx, constant.ContextKeyChannelKey))
 	require.True(t, common.GetContextKeyBool(ctx, constant.ContextKeyChannelIsMultiKey))
 	require.Equal(t, 0, common.GetContextKeyInt(ctx, constant.ContextKeyChannelMultiKeyIndex))
+}
+
+func TestSelectChannelsForAutomaticTestPassiveRecoveryOnlyUsesAutoDisabled(t *testing.T) {
+	channels := []*model.Channel{
+		{Id: 1, Status: common.ChannelStatusEnabled},
+		{Id: 2, Status: common.ChannelStatusAutoDisabled},
+		{Id: 3, Status: common.ChannelStatusManuallyDisabled},
+	}
+
+	selected := selectChannelsForAutomaticTest(channels, operation_setting.ChannelTestModePassiveRecovery)
+
+	require.Len(t, selected, 1)
+	require.Equal(t, 2, selected[0].Id)
+}
+
+func TestSelectChannelsForAutomaticTestScheduledSkipsManualDisabled(t *testing.T) {
+	channels := []*model.Channel{
+		{Id: 1, Status: common.ChannelStatusEnabled},
+		{Id: 2, Status: common.ChannelStatusAutoDisabled},
+		{Id: 3, Status: common.ChannelStatusManuallyDisabled},
+	}
+
+	selected := selectChannelsForAutomaticTest(channels, operation_setting.ChannelTestModeScheduledAll)
+
+	require.Len(t, selected, 2)
+	require.Equal(t, 1, selected[0].Id)
+	require.Equal(t, 2, selected[1].Id)
+}
+
+func TestTestAllChannelsRejectsExistingActiveTask(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.SystemTask{}, &model.SystemTaskLock{}))
+
+	existing, err := model.CreateSystemTask(model.SystemTaskTypeChannelTest, nil, nil)
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel/test", nil)
+
+	TestAllChannels(ctx)
+
+	require.Equal(t, http.StatusConflict, recorder.Code)
+	require.Contains(t, recorder.Body.String(), existing.TaskID)
+	require.Contains(t, recorder.Body.String(), "已有通道测试任务正在运行或等待中")
 }
