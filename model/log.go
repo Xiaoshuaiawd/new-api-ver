@@ -60,28 +60,27 @@ func sanitizeClickHouseLikePattern(input string) (string, error) {
 }
 
 type Log struct {
-	Id                   int    `json:"id" gorm:"index:idx_created_at_id,priority:2;index:idx_user_id_id,priority:2"`
-	UserId               int    `json:"user_id" gorm:"index;index:idx_user_id_id,priority:1"`
-	CreatedAt            int64  `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:1;index:idx_created_at_type"`
-	Type                 int    `json:"type" gorm:"index:idx_created_at_type"`
-	Content              string `json:"content"`
-	Username             string `json:"username" gorm:"index;index:index_username_model_name,priority:2;default:''"`
-	TokenName            string `json:"token_name" gorm:"index;default:''"`
-	ModelName            string `json:"model_name" gorm:"index;index:index_username_model_name,priority:1;default:''"`
-	Quota                int    `json:"quota" gorm:"default:0"`
-	PromptTokens         int    `json:"prompt_tokens" gorm:"default:0"`
-	CompletionTokens     int    `json:"completion_tokens" gorm:"default:0"`
-	UseTime              int    `json:"use_time" gorm:"default:0"`
-	IsStream             bool   `json:"is_stream"`
-	ChannelId            int    `json:"channel" gorm:"index"`
-	ChannelName          string `json:"channel_name" gorm:"->"`
-	TokenId              int    `json:"token_id" gorm:"default:0;index"`
-	Group                string `json:"group" gorm:"index"`
-	Ip                   string `json:"ip" gorm:"index;default:''"`
-	RequestId            string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
-	UpstreamRequestId    string `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
-	Other                string `json:"other"`
-	RealConsumptionCents int64  `json:"-" gorm:"type:bigint;not null;default:0"`
+	Id                int    `json:"id" gorm:"index:idx_created_at_id,priority:2;index:idx_user_id_id,priority:2"`
+	UserId            int    `json:"user_id" gorm:"index;index:idx_user_id_id,priority:1"`
+	CreatedAt         int64  `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:1;index:idx_created_at_type"`
+	Type              int    `json:"type" gorm:"index:idx_created_at_type"`
+	Content           string `json:"content"`
+	Username          string `json:"username" gorm:"index;index:index_username_model_name,priority:2;default:''"`
+	TokenName         string `json:"token_name" gorm:"index;default:''"`
+	ModelName         string `json:"model_name" gorm:"index;index:index_username_model_name,priority:1;default:''"`
+	Quota             int    `json:"quota" gorm:"default:0"`
+	PromptTokens      int    `json:"prompt_tokens" gorm:"default:0"`
+	CompletionTokens  int    `json:"completion_tokens" gorm:"default:0"`
+	UseTime           int    `json:"use_time" gorm:"default:0"`
+	IsStream          bool   `json:"is_stream"`
+	ChannelId         int    `json:"channel" gorm:"index"`
+	ChannelName       string `json:"channel_name" gorm:"->"`
+	TokenId           int    `json:"token_id" gorm:"default:0;index"`
+	Group             string `json:"group" gorm:"index"`
+	Ip                string `json:"ip" gorm:"index;default:''"`
+	RequestId         string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
+	UpstreamRequestId string `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
+	Other             string `json:"other"`
 }
 
 // don't use iota, avoid change log type value
@@ -332,11 +331,11 @@ type RecordConsumeLogParams struct {
 	Other            map[string]interface{} `json:"other"`
 }
 
-// calculateRealConsumptionCents returns the accounting value for one consume
-// log. Wallet quota already includes the effective group multiplier; applying
-// it again would double-discount the amount. Subscription usage is prorated
-// against the immutable selling price snapshot stored in admin_info.
-func calculateRealConsumptionCents(quota int, other map[string]interface{}) int64 {
+// calculateRealConsumptionAmount returns the monetary cost of one consume log.
+// For wallet billing, convert the logged quota back to the actual quota and
+// apply the group ratio explicitly. Subscription billing is prorated against
+// the price snapshot saved with the log.
+func calculateRealConsumptionAmount(quota int, other map[string]interface{}) decimal.Decimal {
 	toDecimal := func(value interface{}) (decimal.Decimal, bool) {
 		switch value := value.(type) {
 		case int:
@@ -348,6 +347,12 @@ func calculateRealConsumptionCents(quota int, other map[string]interface{}) int6
 				return decimal.Zero, false
 			}
 			return decimal.NewFromFloat(value), true
+		case string:
+			amount, err := decimal.NewFromString(value)
+			if err != nil {
+				return decimal.Zero, false
+			}
+			return amount, true
 		default:
 			return decimal.Zero, false
 		}
@@ -355,28 +360,31 @@ func calculateRealConsumptionCents(quota int, other map[string]interface{}) int6
 
 	if other != nil && other["billing_source"] == "subscription" {
 		adminInfo, _ := other["admin_info"].(map[string]interface{})
-		price, ok := adminInfo["subscription_price"].(float64)
-		if !ok || price <= 0 || math.IsNaN(price) || math.IsInf(price, 0) {
-			return 0
+		price, priceOK := toDecimal(adminInfo["subscription_price"])
+		if !priceOK || !price.IsPositive() {
+			return decimal.Zero
 		}
 		consumed, consumedOK := toDecimal(other["subscription_consumed"])
 		total, totalOK := toDecimal(other["subscription_total"])
 		if !consumedOK || !totalOK || consumed.IsNegative() || !total.IsPositive() {
-			return 0
+			return decimal.Zero
 		}
-		return consumed.Div(total).
-			Mul(decimal.NewFromFloat(price)).
-			Mul(decimal.NewFromInt(100)).
-			Round(0).IntPart()
+		return consumed.Div(total).Mul(price)
 	}
 
 	if quota <= 0 || common.QuotaPerUnit <= 0 {
-		return 0
+		return decimal.Zero
 	}
-	return decimal.NewFromInt(int64(quota)).
+	groupRatio := decimal.NewFromInt(1)
+	if other != nil {
+		if value, ok := toDecimal(other["group_ratio"]); ok && value.IsPositive() {
+			groupRatio = value
+		}
+	}
+	actualQuota := decimal.NewFromInt(int64(quota)).Div(groupRatio)
+	return actualQuota.
 		Div(decimal.NewFromFloat(common.QuotaPerUnit)).
-		Mul(decimal.NewFromInt(100)).
-		Round(0).IntPart()
+		Mul(groupRatio)
 }
 
 func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams) {
@@ -390,26 +398,25 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	createdAt := common.GetTimestamp()
 	otherStr := common.MapToJsonStr(params.Other)
 	log := &Log{
-		UserId:               userId,
-		Username:             username,
-		CreatedAt:            createdAt,
-		Type:                 LogTypeConsume,
-		Content:              params.Content,
-		PromptTokens:         params.PromptTokens,
-		CompletionTokens:     params.CompletionTokens,
-		TokenName:            params.TokenName,
-		ModelName:            params.ModelName,
-		Quota:                params.Quota,
-		ChannelId:            params.ChannelId,
-		TokenId:              params.TokenId,
-		UseTime:              params.UseTimeSeconds,
-		IsStream:             params.IsStream,
-		Group:                params.Group,
-		Ip:                   c.ClientIP(),
-		RequestId:            requestId,
-		UpstreamRequestId:    upstreamRequestId,
-		RealConsumptionCents: calculateRealConsumptionCents(params.Quota, params.Other),
-		Other:                otherStr,
+		UserId:            userId,
+		Username:          username,
+		CreatedAt:         createdAt,
+		Type:              LogTypeConsume,
+		Content:           params.Content,
+		PromptTokens:      params.PromptTokens,
+		CompletionTokens:  params.CompletionTokens,
+		TokenName:         params.TokenName,
+		ModelName:         params.ModelName,
+		Quota:             params.Quota,
+		ChannelId:         params.ChannelId,
+		TokenId:           params.TokenId,
+		UseTime:           params.UseTimeSeconds,
+		IsStream:          params.IsStream,
+		Group:             params.Group,
+		Ip:                c.ClientIP(),
+		RequestId:         requestId,
+		UpstreamRequestId: upstreamRequestId,
+		Other:             otherStr,
 	}
 	err := createLog(log)
 	if err != nil {
@@ -457,19 +464,18 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 	createdAt := common.GetTimestamp()
 	log := &Log{
-		UserId:               params.UserId,
-		Username:             username,
-		CreatedAt:            createdAt,
-		Type:                 params.LogType,
-		Content:              params.Content,
-		TokenName:            tokenName,
-		ModelName:            params.ModelName,
-		Quota:                params.Quota,
-		ChannelId:            params.ChannelId,
-		TokenId:              params.TokenId,
-		Group:                params.Group,
-		RealConsumptionCents: calculateRealConsumptionCents(params.Quota, params.Other),
-		Other:                common.MapToJsonStr(params.Other),
+		UserId:    params.UserId,
+		Username:  username,
+		CreatedAt: createdAt,
+		Type:      params.LogType,
+		Content:   params.Content,
+		TokenName: tokenName,
+		ModelName: params.ModelName,
+		Quota:     params.Quota,
+		ChannelId: params.ChannelId,
+		TokenId:   params.TokenId,
+		Group:     params.Group,
+		Other:     common.MapToJsonStr(params.Other),
 	}
 	err := createLog(log)
 	if err != nil {
@@ -639,11 +645,11 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 }
 
 type Stat struct {
-	Quota                int     `json:"quota"`
-	RealConsumptionCents int64   `json:"real_consumption_cents"`
-	Rpm                  int     `json:"rpm"`
-	Tpm                  int     `json:"tpm"`
-	TodayRevenue         float64 `json:"today_revenue,omitempty"`
+	Quota           int     `json:"quota"`
+	RealConsumption float64 `json:"real_consumption"`
+	Rpm             int     `json:"rpm"`
+	Tpm             int     `json:"tpm"`
+	TodayRevenue    float64 `json:"today_revenue,omitempty"`
 }
 
 func scanMoneySum(tx *gorm.DB) (float64, error) {
@@ -689,7 +695,8 @@ func SumRevenueByTimeRange(startTimestamp int64, endTimestamp int64) (float64, e
 }
 
 func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {
-	tx := LOG_DB.Table("logs").Select("COALESCE(sum(quota), 0) quota, COALESCE(sum(real_consumption_cents), 0) real_consumption_cents")
+	tx := LOG_DB.Table("logs").Select("COALESCE(sum(quota), 0) quota")
+	realConsumptionQuery := LOG_DB.Table("logs").Select("quota, other")
 
 	// 为rpm和tpm创建单独的查询
 	rpmTpmQuery := LOG_DB.Table("logs").Select("count(*) rpm, COALESCE(sum(prompt_tokens), 0) + COALESCE(sum(completion_tokens), 0) tpm")
@@ -697,20 +704,29 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	if tx, err = applyExplicitLogTextFilter(tx, "username", username); err != nil {
 		return stat, err
 	}
+	if realConsumptionQuery, err = applyExplicitLogTextFilter(realConsumptionQuery, "username", username); err != nil {
+		return stat, err
+	}
 	if rpmTpmQuery, err = applyExplicitLogTextFilter(rpmTpmQuery, "username", username); err != nil {
 		return stat, err
 	}
 	if tokenName != "" {
 		tx = tx.Where("token_name = ?", tokenName)
+		realConsumptionQuery = realConsumptionQuery.Where("token_name = ?", tokenName)
 		rpmTpmQuery = rpmTpmQuery.Where("token_name = ?", tokenName)
 	}
 	if startTimestamp != 0 {
 		tx = tx.Where("created_at >= ?", startTimestamp)
+		realConsumptionQuery = realConsumptionQuery.Where("created_at >= ?", startTimestamp)
 	}
 	if endTimestamp != 0 {
 		tx = tx.Where("created_at <= ?", endTimestamp)
+		realConsumptionQuery = realConsumptionQuery.Where("created_at <= ?", endTimestamp)
 	}
 	if tx, err = applyExplicitLogTextFilter(tx, "model_name", modelName); err != nil {
+		return stat, err
+	}
+	if realConsumptionQuery, err = applyExplicitLogTextFilter(realConsumptionQuery, "model_name", modelName); err != nil {
 		return stat, err
 	}
 	if rpmTpmQuery, err = applyExplicitLogTextFilter(rpmTpmQuery, "model_name", modelName); err != nil {
@@ -718,14 +734,17 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	}
 	if channel != 0 {
 		tx = tx.Where("channel_id = ?", channel)
+		realConsumptionQuery = realConsumptionQuery.Where("channel_id = ?", channel)
 		rpmTpmQuery = rpmTpmQuery.Where("channel_id = ?", channel)
 	}
 	if group != "" {
 		tx = tx.Where(logGroupCol+" = ?", group)
+		realConsumptionQuery = realConsumptionQuery.Where(logGroupCol+" = ?", group)
 		rpmTpmQuery = rpmTpmQuery.Where(logGroupCol+" = ?", group)
 	}
 
 	tx = tx.Where("type = ?", LogTypeConsume)
+	realConsumptionQuery = realConsumptionQuery.Where("type = ?", LogTypeConsume)
 	rpmTpmQuery = rpmTpmQuery.Where("type = ?", LogTypeConsume)
 
 	// 只统计最近60秒的rpm和tpm
@@ -736,6 +755,32 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 		common.SysError("failed to query log stat: " + err.Error())
 		return stat, errors.New("查询统计数据失败")
 	}
+	rows, err := realConsumptionQuery.Rows()
+	if err != nil {
+		common.SysError("failed to query real consumption stat: " + err.Error())
+		return stat, errors.New("查询统计数据失败")
+	}
+	defer rows.Close()
+
+	realConsumption := decimal.Zero
+	for rows.Next() {
+		var quota sql.NullInt64
+		var other sql.NullString
+		if err := rows.Scan(&quota, &other); err != nil {
+			common.SysError("failed to scan real consumption stat: " + err.Error())
+			return stat, errors.New("查询统计数据失败")
+		}
+		otherMap := map[string]interface{}{}
+		if other.Valid {
+			_ = common.UnmarshalJsonStr(other.String, &otherMap)
+		}
+		realConsumption = realConsumption.Add(calculateRealConsumptionAmount(int(quota.Int64), otherMap))
+	}
+	if err := rows.Err(); err != nil {
+		common.SysError("failed to iterate real consumption stat: " + err.Error())
+		return stat, errors.New("查询统计数据失败")
+	}
+	stat.RealConsumption = realConsumption.InexactFloat64()
 	if err := rpmTpmQuery.Scan(&stat).Error; err != nil {
 		common.SysError("failed to query rpm/tpm stat: " + err.Error())
 		return stat, errors.New("查询统计数据失败")

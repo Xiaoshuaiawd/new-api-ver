@@ -81,7 +81,7 @@ test('formats real consumption in yuan', async () => {
   await act(async () => {
     root.render(
       <I18nextProvider i18n={i18n}>
-        <RealConsumptionStat cents={240} sensitiveVisible />
+        <RealConsumptionStat amount={2.4} sensitiveVisible />
       </I18nextProvider>
     )
   })

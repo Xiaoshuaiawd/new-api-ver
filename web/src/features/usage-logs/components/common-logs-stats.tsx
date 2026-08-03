@@ -55,11 +55,11 @@ function StatBadge(props: {
 }
 
 export function RealConsumptionStat(props: {
-  cents: number
+  amount: number
   sensitiveVisible: boolean
 }) {
   const { t } = useTranslation()
-  const value = `¥${(props.cents / 100).toFixed(2)}`
+  const value = `¥${props.amount.toFixed(2)}`
 
   return (
     <StatBadge
@@ -120,7 +120,7 @@ export function CommonLogsStatsView(props: {
       ) : null}
       {props.isRoot ? (
         <RealConsumptionStat
-          cents={props.stats.real_consumption_cents ?? 0}
+          amount={props.stats.real_consumption ?? 0}
           sensitiveVisible={props.sensitiveVisible}
         />
       ) : null}
