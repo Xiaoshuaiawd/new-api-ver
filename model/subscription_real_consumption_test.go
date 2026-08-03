@@ -51,3 +51,28 @@ func TestCreateUserSubscriptionSnapshotsPlanPrice(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 32.0, subscription.PriceAmount)
 }
+
+func TestBackfillLegacyUserSubscriptionPriceAmounts(t *testing.T) {
+	truncateTables(t)
+
+	plan := &SubscriptionPlan{
+		Title:         "legacy 200 quota",
+		PriceAmount:   32,
+		DurationUnit:  SubscriptionDurationMonth,
+		DurationValue: 1,
+		TotalAmount:   200,
+	}
+	require.NoError(t, DB.Create(plan).Error)
+	require.NoError(t, DB.Create(&UserSubscription{
+		UserId:      1,
+		PlanId:      plan.Id,
+		AmountTotal: 200,
+		Status:      "expired",
+	}).Error)
+
+	require.NoError(t, backfillLegacyUserSubscriptionPriceAmounts())
+
+	var subscription UserSubscription
+	require.NoError(t, DB.Where("plan_id = ?", plan.Id).First(&subscription).Error)
+	assert.Equal(t, 32.0, subscription.PriceAmount)
+}

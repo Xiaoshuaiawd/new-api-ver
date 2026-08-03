@@ -44,6 +44,12 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 		other["model_ratio"] = info.PriceData.ModelRatio
 	}
 	other["group_ratio"] = info.PriceData.GroupRatioInfo.GroupRatio
+	if info.PriceData.GroupRatioInfo.BillingSource != "" {
+		other["billing_source"] = info.PriceData.GroupRatioInfo.BillingSource
+	}
+	// Task logs build their metadata here instead of going through
+	// GenerateTextOtherInfo, so append the billing snapshot explicitly.
+	appendBillingInfo(info, other)
 	if info.PriceData.GroupRatioInfo.HasSpecialRatio {
 		other["user_group_ratio"] = info.PriceData.GroupRatioInfo.GroupSpecialRatio
 	}
@@ -127,6 +133,26 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 			other["model_ratio"] = bc.ModelRatio
 		}
 		other["group_ratio"] = bc.GroupRatio
+		billingSource := bc.BillingSource
+		if billingSource == "" {
+			billingSource = task.PrivateData.BillingSource
+		}
+		if billingSource != "" {
+			other["billing_source"] = billingSource
+		}
+		if billingSource == BillingSourceSubscription {
+			if task.PrivateData.SubscriptionId > 0 {
+				other["subscription_id"] = task.PrivateData.SubscriptionId
+			}
+			if task.PrivateData.SubscriptionAmountTotal > 0 {
+				other["subscription_total"] = task.PrivateData.SubscriptionAmountTotal
+			}
+			if task.PrivateData.SubscriptionPriceAmount > 0 {
+				other["admin_info"] = map[string]interface{}{
+					"subscription_price": task.PrivateData.SubscriptionPriceAmount,
+				}
+			}
+		}
 		if priceData := taskBillingContextPriceData(bc); priceData != nil {
 			for k, v := range priceData.OtherRatios() {
 				other[k] = v
@@ -260,6 +286,9 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		logQuota = -quotaDelta
 	}
 	other := taskBillingOther(task)
+	if logType == model.LogTypeConsume && task.PrivateData.BillingSource == BillingSourceSubscription && task.PrivateData.SubscriptionAmountTotal > 0 {
+		other["subscription_consumed"] = logQuota
+	}
 	other["task_id"] = task.TaskID
 	other["pre_consumed_quota"] = preConsumedQuota
 	other["actual_quota"] = actualQuota
