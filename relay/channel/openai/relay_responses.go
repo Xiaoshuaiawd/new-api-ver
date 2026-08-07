@@ -91,6 +91,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	var responseTextBuilder strings.Builder
 	imageCounter := &relaycommon.ImageGenerationCallCounter{}
 	imageCommitted := false
+	var streamErr *types.NewAPIError
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 
@@ -140,16 +141,19 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 		case "error", "response.error", "response.failed":
 			if streamResponse.Error != nil && hasOpenAIError(streamResponse.Error) {
-				sr.Stop(types.WithOpenAIError(*streamResponse.Error, http.StatusInternalServerError))
+				streamErr = types.WithOpenAIError(*streamResponse.Error, http.StatusInternalServerError)
+				sr.Stop(streamErr)
 				return
 			}
 			if streamResponse.Response != nil {
 				if oaiErr := streamResponse.Response.GetOpenAIError(); hasOpenAIError(oaiErr) {
-					sr.Stop(types.WithOpenAIError(*oaiErr, http.StatusInternalServerError))
+					streamErr = types.WithOpenAIError(*oaiErr, http.StatusInternalServerError)
+					sr.Stop(streamErr)
 					return
 				}
 			}
-			sr.Stop(types.NewOpenAIError(fmt.Errorf("responses stream error: %s", streamResponse.Type), types.ErrorCodeBadResponse, http.StatusInternalServerError))
+			streamErr = types.NewOpenAIError(fmt.Errorf("responses stream error: %s", streamResponse.Type), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+			sr.Stop(streamErr)
 		case "response.incomplete", "response.cancelled", "response.canceled":
 			if !imageCommitted {
 				imageCounter.Reset()
@@ -176,6 +180,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 		}
 	})
+	if streamErr != nil {
+		return nil, streamErr
+	}
 
 	if usage.CompletionTokens == 0 {
 		// 计算输出文本的 token 数量
