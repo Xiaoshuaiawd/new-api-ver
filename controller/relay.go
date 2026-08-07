@@ -390,6 +390,13 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if retryTimes <= 0 {
 		return false
 	}
+	// Upstream Responses API may return an overload error after an HTTP 200
+	// stream has started. A specific-channel token still needs another attempt
+	// on that same channel; otherwise the overload is returned immediately and
+	// the configured retry count is bypassed.
+	if openaiErr.GetErrorCode() == types.ErrorCode("server_is_overloaded") {
+		return true
+	}
 	if _, ok := c.Get("specific_channel_id"); ok {
 		return false
 	}
