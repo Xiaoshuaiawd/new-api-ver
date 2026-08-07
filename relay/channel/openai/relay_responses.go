@@ -19,6 +19,10 @@ import (
 	"github.com/tidwall/sjson"
 )
 
+func hasOpenAIError(err *types.OpenAIError) bool {
+	return err != nil && (err.Type != "" || err.Message != "" || err.Code != nil)
+}
+
 func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
 
@@ -32,7 +36,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
-	if oaiError := responsesResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
+	if oaiError := responsesResponse.GetOpenAIError(); hasOpenAIError(oaiError) {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
 
@@ -134,7 +138,19 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				imageCounter.Commit(info)
 				imageCommitted = true
 			}
-		case "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
+		case "error", "response.error", "response.failed":
+			if streamResponse.Error != nil && hasOpenAIError(streamResponse.Error) {
+				sr.Stop(types.WithOpenAIError(*streamResponse.Error, http.StatusInternalServerError))
+				return
+			}
+			if streamResponse.Response != nil {
+				if oaiErr := streamResponse.Response.GetOpenAIError(); hasOpenAIError(oaiErr) {
+					sr.Stop(types.WithOpenAIError(*oaiErr, http.StatusInternalServerError))
+					return
+				}
+			}
+			sr.Stop(types.NewOpenAIError(fmt.Errorf("responses stream error: %s", streamResponse.Type), types.ErrorCodeBadResponse, http.StatusInternalServerError))
+		case "response.incomplete", "response.cancelled", "response.canceled":
 			if !imageCommitted {
 				imageCounter.Reset()
 				imageCounter.Commit(info)

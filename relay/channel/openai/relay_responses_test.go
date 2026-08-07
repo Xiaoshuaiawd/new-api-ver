@@ -46,6 +46,19 @@ func TestOaiResponsesHandlerRestoresMappedModelName(t *testing.T) {
 	assert.NotContains(t, recorder.Body.String(), "gpt-5.4")
 }
 
+func TestOaiResponsesHandlerDetectsOverloadErrorWithHTTP200(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+	body := `{"id":"resp_1","status":"failed","error":{"code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}`
+	resp := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
+
+	_, apiErr := OaiResponsesHandler(ctx, info, resp)
+	require.NotNil(t, apiErr)
+	assert.Contains(t, apiErr.Error(), "overloaded")
+}
+
 func TestOaiResponsesStreamHandlerRestoresMappedModelName(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()

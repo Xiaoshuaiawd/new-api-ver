@@ -2,24 +2,14 @@ package common
 
 import (
 	"encoding/json"
-	"strings"
 
 	projectcommon "github.com/QuantumNous/new-api/common"
 )
 
-var responsesInputIDPrefixes = map[string]string{
-	"message":                 "msg",
-	"function_call":           "fc",
-	"function_call_output":    "fco",
-	"custom_tool_call":        "ctc",
-	"custom_tool_call_output": "ctco",
-	"reasoning":               "rs",
-	"agent_message":           "amsg",
-}
-
-// SanitizeResponsesInputItemIDs removes IDs that cannot be accepted by the
-// Responses API for their input item type. Clients may replay local item_* IDs
-// from a different provider; omitting those IDs lets the upstream assign one.
+// SanitizeResponsesInputItemIDs removes all item IDs from array-form Responses
+// input. Replaying upstream IDs can also replay hidden dependencies between an
+// assistant message and its reasoning item, which may not be present in input.
+// The upstream assigns fresh IDs while call_id remains available for tool links.
 func SanitizeResponsesInputItemIDs(raw []byte) ([]byte, bool, error) {
 	if projectcommon.GetJsonType(raw) != "array" {
 		return raw, false, nil
@@ -32,13 +22,7 @@ func SanitizeResponsesInputItemIDs(raw []byte) ([]byte, bool, error) {
 
 	changed := false
 	for _, item := range items {
-		itemType := strings.TrimSpace(projectcommon.Interface2String(item["type"]))
-		prefix, knownType := responsesInputIDPrefixes[itemType]
-		if !knownType {
-			continue
-		}
-		id, hasID := item["id"].(string)
-		if hasID && !strings.HasPrefix(id, prefix) {
+		if _, hasID := item["id"]; hasID {
 			delete(item, "id")
 			changed = true
 		}
