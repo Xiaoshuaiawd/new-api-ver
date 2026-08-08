@@ -5459,6 +5459,21 @@
     "Leave empty to use the built-in default classifier prompt": "Leave empty to use the built-in default classifier prompt",
     "Please enter the API Token before testing this node.": "Please enter the API Token before testing this node.",
     "Max Concurrent Audits": "Max Concurrent Audits",
-    "Upper bound on concurrent guard calls. When reached, requests wait for a slot within the timeout budget instead of being rejected. Raise this if high traffic causes 503 errors.": "Upper bound on concurrent guard calls. When reached, requests wait for a slot within the timeout budget instead of being rejected. Raise this if high traffic causes 503 errors."
+    "Upper bound on concurrent guard calls. When reached, requests wait for a slot within the timeout budget instead of being rejected. Raise this if high traffic causes 503 errors.": "Upper bound on concurrent guard calls. When reached, requests wait for a slot within the timeout budget instead of being rejected. Raise this if high traffic causes 503 errors.",
+    "Juice Value Fixer": "Juice Value Fixer",
+    "Juice Value Fixer settings saved": "Juice Value Fixer settings saved",
+    "Enable Juice Value Fixer": "Enable Juice Value Fixer",
+    "Replace Juice numbers in matching upstream answers with the configured value.": "Replace Juice numbers in matching upstream answers with the configured value.",
+    "Model rules": "Model rules",
+    "Rules require an exact model and reasoning effort match. Unmatched requests pass through unchanged.": "Rules require an exact model and reasoning effort match. Unmatched requests pass through unchanged.",
+    "Add rule": "Add rule",
+    "No Juice rules configured": "No Juice rules configured",
+    "Model": "Model",
+    "Reasoning effort": "Reasoning effort",
+    "Juice value": "Juice value",
+    "Remove rule": "Remove rule",
+    "Saving...": "Saving...",
+    "Save": "Save",
+    "Model is required for every Juice rule": "Model is required for every Juice rule"
   }
 }

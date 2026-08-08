@@ -2,10 +2,6 @@
 Copyright (C) 2023-2026 QuantumNous
 This program is free software: GNU AGPL v3+.
 */
-import type { TFunction } from 'i18next'
-import { ShieldCheck } from 'lucide-react'
-
-import { getSecuritySectionNavItems } from '../security/section-registry.tsx'
 import type { SecuritySettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
 import { PromptGuardSection } from './prompt-guard-section'

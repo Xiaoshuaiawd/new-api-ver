@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/channel_health_setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	juice_fixer_setting "github.com/QuantumNous/new-api/setting/juice_fixer_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/performance_setting"
 	prompt_guard_setting "github.com/QuantumNous/new-api/setting/prompt_guard_setting"
@@ -208,6 +209,8 @@ func InitOptionMap() {
 
 	// prompt_guard: stored as a single JSON blob; default is disabled
 	common.OptionMap["prompt_guard_setting"] = "{}"
+	// juice_fixer: stored as a single JSON blob; default is disabled
+	common.OptionMap["juice_fixer_setting"] = "{}"
 
 	common.OptionMapRWMutex.Unlock()
 	// Remove stale option rows from the reverted channel-health feature before
@@ -719,6 +722,8 @@ func updateOptionMap(key string, value string) (err error) {
 	case "prompt_guard_setting":
 		// Stored as JSON blob; token fields are plaintext (same pattern as SMTPToken/StripeApiSecret)
 		prompt_guard_setting.LoadFromJSON(value, nil)
+	case "juice_fixer_setting":
+		juice_fixer_setting.LoadFromJSON(value)
 	}
 	return err
 }

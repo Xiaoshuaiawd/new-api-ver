@@ -5388,6 +5388,21 @@
     "Cooldown After (failures)": "Охлаждение после (сбоев)",
     "Number of consecutive failures that trigger a cooldown": "Число последовательных сбоев, запускающих охлаждение",
     "Cooldown Duration (minutes)": "Длительность охлаждения (минуты)",
-    "How long a channel stays in cooldown before automatically recovering": "Как долго канал остаётся в охлаждении до автоматического восстановления"
+    "How long a channel stays in cooldown before automatically recovering": "Как долго канал остаётся в охлаждении до автоматического восстановления",
+    "Juice Value Fixer": "Фиксатор значения Juice",
+    "Juice Value Fixer settings saved": "Настройки фиксатора значения Juice сохранены",
+    "Enable Juice Value Fixer": "Включить фиксатор значения Juice",
+    "Replace Juice numbers in matching upstream answers with the configured value.": "Заменяет числа Juice в подходящих ответах провайдера настроенным значением.",
+    "Model rules": "Правила модели",
+    "Rules require an exact model and reasoning effort match. Unmatched requests pass through unchanged.": "Правила требуют точного совпадения модели и уровня рассуждений. Несовпавшие запросы передаются без изменений.",
+    "Add rule": "Добавить правило",
+    "No Juice rules configured": "Правила Juice не настроены",
+    "Model": "Модель",
+    "Reasoning effort": "Уровень рассуждений",
+    "Juice value": "Значение Juice",
+    "Remove rule": "Удалить правило",
+    "Saving...": "Сохранение...",
+    "Save": "Сохранить",
+    "Model is required for every Juice rule": "Для каждого правила Juice требуется модель"
   }
 }

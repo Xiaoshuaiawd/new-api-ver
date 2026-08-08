@@ -5388,6 +5388,21 @@
     "Cooldown After (failures)": "クールダウン開始までの失敗数",
     "Number of consecutive failures that trigger a cooldown": "クールダウンを開始する連続失敗数",
     "Cooldown Duration (minutes)": "クールダウン時間（分）",
-    "How long a channel stays in cooldown before automatically recovering": "自動回復前にチャネルがクールダウン状態を維持する時間"
+    "How long a channel stays in cooldown before automatically recovering": "自動回復前にチャネルがクールダウン状態を維持する時間",
+    "Juice Value Fixer": "Juice 値固定器",
+    "Juice Value Fixer settings saved": "Juice 値固定器の設定を保存しました",
+    "Enable Juice Value Fixer": "Juice 値固定器を有効化",
+    "Replace Juice numbers in matching upstream answers with the configured value.": "一致する上流回答の Juice 数値を設定値に置き換えます。",
+    "Model rules": "モデルルール",
+    "Rules require an exact model and reasoning effort match. Unmatched requests pass through unchanged.": "ルールはモデルと推論強度の完全一致が必要です。一致しないリクエストは変更されません。",
+    "Add rule": "ルールを追加",
+    "No Juice rules configured": "Juice ルールが設定されていません",
+    "Model": "モデル",
+    "Reasoning effort": "推論強度",
+    "Juice value": "Juice 値",
+    "Remove rule": "ルールを削除",
+    "Saving...": "保存中...",
+    "Save": "保存",
+    "Model is required for every Juice rule": "すべての Juice ルールにモデルが必要です"
   }
 }

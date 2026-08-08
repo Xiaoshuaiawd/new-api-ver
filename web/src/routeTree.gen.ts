@@ -60,6 +60,7 @@ import { Route as AuthenticatedSystemSettingsSecurityIndexRouteImport } from './
 import { Route as AuthenticatedSystemSettingsPromptGuardIndexRouteImport } from './routes/_authenticated/system-settings/prompt-guard/index'
 import { Route as AuthenticatedSystemSettingsOperationsIndexRouteImport } from './routes/_authenticated/system-settings/operations/index'
 import { Route as AuthenticatedSystemSettingsModelsIndexRouteImport } from './routes/_authenticated/system-settings/models/index'
+import { Route as AuthenticatedSystemSettingsJuiceFixerIndexRouteImport } from './routes/_authenticated/system-settings/juice-fixer/index'
 import { Route as AuthenticatedSystemSettingsContentIndexRouteImport } from './routes/_authenticated/system-settings/content/index'
 import { Route as AuthenticatedSystemSettingsChannelHealthIndexRouteImport } from './routes/_authenticated/system-settings/channel-health/index'
 import { Route as AuthenticatedSystemSettingsBillingIndexRouteImport } from './routes/_authenticated/system-settings/billing/index'
@@ -69,6 +70,7 @@ import { Route as AuthenticatedSystemSettingsSecuritySectionRouteImport } from '
 import { Route as AuthenticatedSystemSettingsPromptGuardSectionRouteImport } from './routes/_authenticated/system-settings/prompt-guard/$section'
 import { Route as AuthenticatedSystemSettingsOperationsSectionRouteImport } from './routes/_authenticated/system-settings/operations/$section'
 import { Route as AuthenticatedSystemSettingsModelsSectionRouteImport } from './routes/_authenticated/system-settings/models/$section'
+import { Route as AuthenticatedSystemSettingsJuiceFixerSectionRouteImport } from './routes/_authenticated/system-settings/juice-fixer/$section'
 import { Route as AuthenticatedSystemSettingsContentSectionRouteImport } from './routes/_authenticated/system-settings/content/$section'
 import { Route as AuthenticatedSystemSettingsChannelHealthSectionRouteImport } from './routes/_authenticated/system-settings/channel-health/$section'
 import { Route as AuthenticatedSystemSettingsBillingSectionRouteImport } from './routes/_authenticated/system-settings/billing/$section'
@@ -349,6 +351,12 @@ const AuthenticatedSystemSettingsModelsIndexRoute =
     path: '/models/',
     getParentRoute: () => AuthenticatedSystemSettingsRouteRoute,
   } as any)
+const AuthenticatedSystemSettingsJuiceFixerIndexRoute =
+  AuthenticatedSystemSettingsJuiceFixerIndexRouteImport.update({
+    id: '/juice-fixer/',
+    path: '/juice-fixer/',
+    getParentRoute: () => AuthenticatedSystemSettingsRouteRoute,
+  } as any)
 const AuthenticatedSystemSettingsContentIndexRoute =
   AuthenticatedSystemSettingsContentIndexRouteImport.update({
     id: '/content/',
@@ -401,6 +409,12 @@ const AuthenticatedSystemSettingsModelsSectionRoute =
   AuthenticatedSystemSettingsModelsSectionRouteImport.update({
     id: '/models/$section',
     path: '/models/$section',
+    getParentRoute: () => AuthenticatedSystemSettingsRouteRoute,
+  } as any)
+const AuthenticatedSystemSettingsJuiceFixerSectionRoute =
+  AuthenticatedSystemSettingsJuiceFixerSectionRouteImport.update({
+    id: '/juice-fixer/$section',
+    path: '/juice-fixer/$section',
     getParentRoute: () => AuthenticatedSystemSettingsRouteRoute,
   } as any)
 const AuthenticatedSystemSettingsContentSectionRoute =
@@ -477,6 +491,7 @@ export interface FileRoutesByFullPath {
   '/system-settings/billing/$section': typeof AuthenticatedSystemSettingsBillingSectionRoute
   '/system-settings/channel-health/$section': typeof AuthenticatedSystemSettingsChannelHealthSectionRoute
   '/system-settings/content/$section': typeof AuthenticatedSystemSettingsContentSectionRoute
+  '/system-settings/juice-fixer/$section': typeof AuthenticatedSystemSettingsJuiceFixerSectionRoute
   '/system-settings/models/$section': typeof AuthenticatedSystemSettingsModelsSectionRoute
   '/system-settings/operations/$section': typeof AuthenticatedSystemSettingsOperationsSectionRoute
   '/system-settings/prompt-guard/$section': typeof AuthenticatedSystemSettingsPromptGuardSectionRoute
@@ -486,6 +501,7 @@ export interface FileRoutesByFullPath {
   '/system-settings/billing/': typeof AuthenticatedSystemSettingsBillingIndexRoute
   '/system-settings/channel-health/': typeof AuthenticatedSystemSettingsChannelHealthIndexRoute
   '/system-settings/content/': typeof AuthenticatedSystemSettingsContentIndexRoute
+  '/system-settings/juice-fixer/': typeof AuthenticatedSystemSettingsJuiceFixerIndexRoute
   '/system-settings/models/': typeof AuthenticatedSystemSettingsModelsIndexRoute
   '/system-settings/operations/': typeof AuthenticatedSystemSettingsOperationsIndexRoute
   '/system-settings/prompt-guard/': typeof AuthenticatedSystemSettingsPromptGuardIndexRoute
@@ -540,6 +556,7 @@ export interface FileRoutesByTo {
   '/system-settings/billing/$section': typeof AuthenticatedSystemSettingsBillingSectionRoute
   '/system-settings/channel-health/$section': typeof AuthenticatedSystemSettingsChannelHealthSectionRoute
   '/system-settings/content/$section': typeof AuthenticatedSystemSettingsContentSectionRoute
+  '/system-settings/juice-fixer/$section': typeof AuthenticatedSystemSettingsJuiceFixerSectionRoute
   '/system-settings/models/$section': typeof AuthenticatedSystemSettingsModelsSectionRoute
   '/system-settings/operations/$section': typeof AuthenticatedSystemSettingsOperationsSectionRoute
   '/system-settings/prompt-guard/$section': typeof AuthenticatedSystemSettingsPromptGuardSectionRoute
@@ -549,6 +566,7 @@ export interface FileRoutesByTo {
   '/system-settings/billing': typeof AuthenticatedSystemSettingsBillingIndexRoute
   '/system-settings/channel-health': typeof AuthenticatedSystemSettingsChannelHealthIndexRoute
   '/system-settings/content': typeof AuthenticatedSystemSettingsContentIndexRoute
+  '/system-settings/juice-fixer': typeof AuthenticatedSystemSettingsJuiceFixerIndexRoute
   '/system-settings/models': typeof AuthenticatedSystemSettingsModelsIndexRoute
   '/system-settings/operations': typeof AuthenticatedSystemSettingsOperationsIndexRoute
   '/system-settings/prompt-guard': typeof AuthenticatedSystemSettingsPromptGuardIndexRoute
@@ -607,6 +625,7 @@ export interface FileRoutesById {
   '/_authenticated/system-settings/billing/$section': typeof AuthenticatedSystemSettingsBillingSectionRoute
   '/_authenticated/system-settings/channel-health/$section': typeof AuthenticatedSystemSettingsChannelHealthSectionRoute
   '/_authenticated/system-settings/content/$section': typeof AuthenticatedSystemSettingsContentSectionRoute
+  '/_authenticated/system-settings/juice-fixer/$section': typeof AuthenticatedSystemSettingsJuiceFixerSectionRoute
   '/_authenticated/system-settings/models/$section': typeof AuthenticatedSystemSettingsModelsSectionRoute
   '/_authenticated/system-settings/operations/$section': typeof AuthenticatedSystemSettingsOperationsSectionRoute
   '/_authenticated/system-settings/prompt-guard/$section': typeof AuthenticatedSystemSettingsPromptGuardSectionRoute
@@ -616,6 +635,7 @@ export interface FileRoutesById {
   '/_authenticated/system-settings/billing/': typeof AuthenticatedSystemSettingsBillingIndexRoute
   '/_authenticated/system-settings/channel-health/': typeof AuthenticatedSystemSettingsChannelHealthIndexRoute
   '/_authenticated/system-settings/content/': typeof AuthenticatedSystemSettingsContentIndexRoute
+  '/_authenticated/system-settings/juice-fixer/': typeof AuthenticatedSystemSettingsJuiceFixerIndexRoute
   '/_authenticated/system-settings/models/': typeof AuthenticatedSystemSettingsModelsIndexRoute
   '/_authenticated/system-settings/operations/': typeof AuthenticatedSystemSettingsOperationsIndexRoute
   '/_authenticated/system-settings/prompt-guard/': typeof AuthenticatedSystemSettingsPromptGuardIndexRoute
@@ -673,6 +693,7 @@ export interface FileRouteTypes {
     | '/system-settings/billing/$section'
     | '/system-settings/channel-health/$section'
     | '/system-settings/content/$section'
+    | '/system-settings/juice-fixer/$section'
     | '/system-settings/models/$section'
     | '/system-settings/operations/$section'
     | '/system-settings/prompt-guard/$section'
@@ -682,6 +703,7 @@ export interface FileRouteTypes {
     | '/system-settings/billing/'
     | '/system-settings/channel-health/'
     | '/system-settings/content/'
+    | '/system-settings/juice-fixer/'
     | '/system-settings/models/'
     | '/system-settings/operations/'
     | '/system-settings/prompt-guard/'
@@ -736,6 +758,7 @@ export interface FileRouteTypes {
     | '/system-settings/billing/$section'
     | '/system-settings/channel-health/$section'
     | '/system-settings/content/$section'
+    | '/system-settings/juice-fixer/$section'
     | '/system-settings/models/$section'
     | '/system-settings/operations/$section'
     | '/system-settings/prompt-guard/$section'
@@ -745,6 +768,7 @@ export interface FileRouteTypes {
     | '/system-settings/billing'
     | '/system-settings/channel-health'
     | '/system-settings/content'
+    | '/system-settings/juice-fixer'
     | '/system-settings/models'
     | '/system-settings/operations'
     | '/system-settings/prompt-guard'
@@ -802,6 +826,7 @@ export interface FileRouteTypes {
     | '/_authenticated/system-settings/billing/$section'
     | '/_authenticated/system-settings/channel-health/$section'
     | '/_authenticated/system-settings/content/$section'
+    | '/_authenticated/system-settings/juice-fixer/$section'
     | '/_authenticated/system-settings/models/$section'
     | '/_authenticated/system-settings/operations/$section'
     | '/_authenticated/system-settings/prompt-guard/$section'
@@ -811,6 +836,7 @@ export interface FileRouteTypes {
     | '/_authenticated/system-settings/billing/'
     | '/_authenticated/system-settings/channel-health/'
     | '/_authenticated/system-settings/content/'
+    | '/_authenticated/system-settings/juice-fixer/'
     | '/_authenticated/system-settings/models/'
     | '/_authenticated/system-settings/operations/'
     | '/_authenticated/system-settings/prompt-guard/'
@@ -1196,6 +1222,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSystemSettingsModelsIndexRouteImport
       parentRoute: typeof AuthenticatedSystemSettingsRouteRoute
     }
+    '/_authenticated/system-settings/juice-fixer/': {
+      id: '/_authenticated/system-settings/juice-fixer/'
+      path: '/juice-fixer'
+      fullPath: '/system-settings/juice-fixer/'
+      preLoaderRoute: typeof AuthenticatedSystemSettingsJuiceFixerIndexRouteImport
+      parentRoute: typeof AuthenticatedSystemSettingsRouteRoute
+    }
     '/_authenticated/system-settings/content/': {
       id: '/_authenticated/system-settings/content/'
       path: '/content'
@@ -1257,6 +1290,13 @@ declare module '@tanstack/react-router' {
       path: '/models/$section'
       fullPath: '/system-settings/models/$section'
       preLoaderRoute: typeof AuthenticatedSystemSettingsModelsSectionRouteImport
+      parentRoute: typeof AuthenticatedSystemSettingsRouteRoute
+    }
+    '/_authenticated/system-settings/juice-fixer/$section': {
+      id: '/_authenticated/system-settings/juice-fixer/$section'
+      path: '/juice-fixer/$section'
+      fullPath: '/system-settings/juice-fixer/$section'
+      preLoaderRoute: typeof AuthenticatedSystemSettingsJuiceFixerSectionRouteImport
       parentRoute: typeof AuthenticatedSystemSettingsRouteRoute
     }
     '/_authenticated/system-settings/content/$section': {
@@ -1322,6 +1362,7 @@ interface AuthenticatedSystemSettingsRouteRouteChildren {
   AuthenticatedSystemSettingsBillingSectionRoute: typeof AuthenticatedSystemSettingsBillingSectionRoute
   AuthenticatedSystemSettingsChannelHealthSectionRoute: typeof AuthenticatedSystemSettingsChannelHealthSectionRoute
   AuthenticatedSystemSettingsContentSectionRoute: typeof AuthenticatedSystemSettingsContentSectionRoute
+  AuthenticatedSystemSettingsJuiceFixerSectionRoute: typeof AuthenticatedSystemSettingsJuiceFixerSectionRoute
   AuthenticatedSystemSettingsModelsSectionRoute: typeof AuthenticatedSystemSettingsModelsSectionRoute
   AuthenticatedSystemSettingsOperationsSectionRoute: typeof AuthenticatedSystemSettingsOperationsSectionRoute
   AuthenticatedSystemSettingsPromptGuardSectionRoute: typeof AuthenticatedSystemSettingsPromptGuardSectionRoute
@@ -1331,6 +1372,7 @@ interface AuthenticatedSystemSettingsRouteRouteChildren {
   AuthenticatedSystemSettingsBillingIndexRoute: typeof AuthenticatedSystemSettingsBillingIndexRoute
   AuthenticatedSystemSettingsChannelHealthIndexRoute: typeof AuthenticatedSystemSettingsChannelHealthIndexRoute
   AuthenticatedSystemSettingsContentIndexRoute: typeof AuthenticatedSystemSettingsContentIndexRoute
+  AuthenticatedSystemSettingsJuiceFixerIndexRoute: typeof AuthenticatedSystemSettingsJuiceFixerIndexRoute
   AuthenticatedSystemSettingsModelsIndexRoute: typeof AuthenticatedSystemSettingsModelsIndexRoute
   AuthenticatedSystemSettingsOperationsIndexRoute: typeof AuthenticatedSystemSettingsOperationsIndexRoute
   AuthenticatedSystemSettingsPromptGuardIndexRoute: typeof AuthenticatedSystemSettingsPromptGuardIndexRoute
@@ -1350,6 +1392,8 @@ const AuthenticatedSystemSettingsRouteRouteChildren: AuthenticatedSystemSettings
       AuthenticatedSystemSettingsChannelHealthSectionRoute,
     AuthenticatedSystemSettingsContentSectionRoute:
       AuthenticatedSystemSettingsContentSectionRoute,
+    AuthenticatedSystemSettingsJuiceFixerSectionRoute:
+      AuthenticatedSystemSettingsJuiceFixerSectionRoute,
     AuthenticatedSystemSettingsModelsSectionRoute:
       AuthenticatedSystemSettingsModelsSectionRoute,
     AuthenticatedSystemSettingsOperationsSectionRoute:
@@ -1368,6 +1412,8 @@ const AuthenticatedSystemSettingsRouteRouteChildren: AuthenticatedSystemSettings
       AuthenticatedSystemSettingsChannelHealthIndexRoute,
     AuthenticatedSystemSettingsContentIndexRoute:
       AuthenticatedSystemSettingsContentIndexRoute,
+    AuthenticatedSystemSettingsJuiceFixerIndexRoute:
+      AuthenticatedSystemSettingsJuiceFixerIndexRoute,
     AuthenticatedSystemSettingsModelsIndexRoute:
       AuthenticatedSystemSettingsModelsIndexRoute,
     AuthenticatedSystemSettingsOperationsIndexRoute:

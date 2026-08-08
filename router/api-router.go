@@ -223,6 +223,13 @@ func SetApiRouter(router *gin.Engine) {
 			promptGuardRoute.POST("/probe", controller.ProbePromptGuardEndpoint)
 		}
 
+		juiceFixerRoute := apiRouter.Group("/juice-fixer")
+		juiceFixerRoute.Use(middleware.RootAuth())
+		{
+			juiceFixerRoute.GET("/config", controller.GetJuiceFixerConfig)
+			juiceFixerRoute.PUT("/config", controller.UpdateJuiceFixerConfig)
+		}
+
 		// Custom OAuth provider management (root only)
 		customOAuthRoute := apiRouter.Group("/custom-oauth-provider")
 		customOAuthRoute.Use(middleware.RootAuth())

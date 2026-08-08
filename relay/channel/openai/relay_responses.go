@@ -40,6 +40,20 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
 
+	if transformResponsesResponse(c, info, &responsesResponse) {
+		for i := range responsesResponse.Output {
+			for j := range responsesResponse.Output[i].Content {
+				content := responsesResponse.Output[i].Content[j]
+				if content.Type != "output_text" && content.Type != "text" {
+					continue
+				}
+				responseBody, err = sjson.SetBytes(responseBody, fmt.Sprintf("output.%d.content.%d.text", i, j), content.Text)
+				if err != nil {
+					return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+				}
+			}
+		}
+	}
 	responseBody = restoreResponsesModelInBody(responseBody, info)
 	// 写入新的 response body
 	service.IOCopyBytesGracefully(c, resp, responseBody)
@@ -92,6 +106,8 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	imageCounter := &relaycommon.ImageGenerationCallCounter{}
 	imageCommitted := false
 	var streamErr *types.NewAPIError
+	juiceValue, juiceActive := service.ResolveJuiceValue(service.GetJuiceContext(c), info.OriginModelName, info.ReasoningEffort)
+	var bufferedJuiceStream []string
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 
@@ -102,7 +118,11 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Error(err)
 			return
 		}
-		sendResponsesStreamData(c, streamResponse, restoreResponsesModelInStreamData(data, info))
+		if juiceActive {
+			bufferedJuiceStream = append(bufferedJuiceStream, data)
+		} else {
+			sendResponsesStreamData(c, streamResponse, restoreResponsesModelInStreamData(data, info))
+		}
 		switch streamResponse.Type {
 		case "response.completed", "response.done":
 			if streamResponse.Response != nil {
@@ -182,6 +202,16 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	})
 	if streamErr != nil {
 		return nil, streamErr
+	}
+	if juiceActive {
+		for _, data := range service.TransformResponsesStreamChunks(bufferedJuiceStream, juiceValue) {
+			var streamResponse dto.ResponsesStreamResponse
+			if err := common.UnmarshalJsonStr(data, &streamResponse); err != nil {
+				logger.LogError(c, "failed to unmarshal transformed stream response: "+err.Error())
+				continue
+			}
+			sendResponsesStreamData(c, streamResponse, restoreResponsesModelInStreamData(data, info))
+		}
 	}
 
 	if usage.CompletionTokens == 0 {

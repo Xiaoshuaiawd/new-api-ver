@@ -5638,6 +5638,21 @@
     "Cooldown After (failures)": "觸發冷卻的失敗次數",
     "Number of consecutive failures that trigger a cooldown": "觸發冷卻所需的連續失敗次數",
     "Cooldown Duration (minutes)": "冷卻時間（分鐘）",
-    "How long a channel stays in cooldown before automatically recovering": "通道自動恢復前保持冷卻的時間"
+    "How long a channel stays in cooldown before automatically recovering": "通道自動恢復前保持冷卻的時間",
+    "Juice Value Fixer": "Juice 值固定器",
+    "Juice Value Fixer settings saved": "Juice 值固定器設定已儲存",
+    "Enable Juice Value Fixer": "啟用 Juice 值固定器",
+    "Replace Juice numbers in matching upstream answers with the configured value.": "將命中的上游回答中的 Juice 數字替換為設定值。",
+    "Model rules": "模型規則",
+    "Rules require an exact model and reasoning effort match. Unmatched requests pass through unchanged.": "規則需要模型與推理強度完全相符，未命中的請求會原樣傳遞。",
+    "Add rule": "新增規則",
+    "No Juice rules configured": "尚未設定 Juice 規則",
+    "Model": "模型",
+    "Reasoning effort": "推理強度",
+    "Juice value": "Juice 值",
+    "Remove rule": "移除規則",
+    "Saving...": "儲存中...",
+    "Save": "儲存",
+    "Model is required for every Juice rule": "每條 Juice 規則都必須填寫模型"
   }
 }

@@ -5388,6 +5388,21 @@
     "Cooldown After (failures)": "Chờ sau (lỗi)",
     "Number of consecutive failures that trigger a cooldown": "Số lỗi liên tiếp kích hoạt thời gian chờ",
     "Cooldown Duration (minutes)": "Thời gian chờ (phút)",
-    "How long a channel stays in cooldown before automatically recovering": "Khoảng thời gian kênh ở trạng thái chờ trước khi tự động phục hồi"
+    "How long a channel stays in cooldown before automatically recovering": "Khoảng thời gian kênh ở trạng thái chờ trước khi tự động phục hồi",
+    "Juice Value Fixer": "Bộ cố định giá trị Juice",
+    "Juice Value Fixer settings saved": "Đã lưu cài đặt bộ cố định giá trị Juice",
+    "Enable Juice Value Fixer": "Bật bộ cố định giá trị Juice",
+    "Replace Juice numbers in matching upstream answers with the configured value.": "Thay số Juice trong các câu trả lời thượng nguồn khớp bằng giá trị đã cấu hình.",
+    "Model rules": "Quy tắc mô hình",
+    "Rules require an exact model and reasoning effort match. Unmatched requests pass through unchanged.": "Quy tắc yêu cầu khớp chính xác mô hình và mức suy luận. Yêu cầu không khớp sẽ được chuyển tiếp nguyên vẹn.",
+    "Add rule": "Thêm quy tắc",
+    "No Juice rules configured": "Chưa cấu hình quy tắc Juice",
+    "Model": "Mô hình",
+    "Reasoning effort": "Mức suy luận",
+    "Juice value": "Giá trị Juice",
+    "Remove rule": "Xóa quy tắc",
+    "Saving...": "Đang lưu...",
+    "Save": "Lưu",
+    "Model is required for every Juice rule": "Mỗi quy tắc Juice phải có mô hình"
   }
 }

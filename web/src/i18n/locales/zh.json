@@ -5459,6 +5459,21 @@
     "Leave empty to use the built-in default classifier prompt": "留空则使用内置默认审核提示词",
     "Please enter the API Token before testing this node.": "测试该节点前请先填写 API Token。",
     "Max Concurrent Audits": "最大并发审核数",
-    "Upper bound on concurrent guard calls. When reached, requests wait for a slot within the timeout budget instead of being rejected. Raise this if high traffic causes 503 errors.": "并发审核调用的上限。达到上限时，请求会在超时预算内排队等待空位，而不是被直接拒绝。若高并发时出现 503，请调大此值。"
+    "Upper bound on concurrent guard calls. When reached, requests wait for a slot within the timeout budget instead of being rejected. Raise this if high traffic causes 503 errors.": "并发审核调用的上限。达到上限时，请求会在超时预算内排队等待空位，而不是被直接拒绝。若高并发时出现 503，请调大此值。",
+    "Juice Value Fixer": "Juice 值固定器",
+    "Juice Value Fixer settings saved": "Juice 值固定器配置已保存",
+    "Enable Juice Value Fixer": "启用 Juice 值固定器",
+    "Replace Juice numbers in matching upstream answers with the configured value.": "将命中的上游回答中的 Juice 数字替换为配置值。",
+    "Model rules": "模型规则",
+    "Rules require an exact model and reasoning effort match. Unmatched requests pass through unchanged.": "规则要求模型和推理强度精确匹配，未命中的请求将原样透传。",
+    "Add rule": "添加规则",
+    "No Juice rules configured": "尚未配置 Juice 规则",
+    "Model": "模型",
+    "Reasoning effort": "推理强度",
+    "Juice value": "Juice 值",
+    "Remove rule": "删除规则",
+    "Saving...": "保存中...",
+    "Save": "保存",
+    "Model is required for every Juice rule": "每条 Juice 规则都必须填写模型"
   }
 }

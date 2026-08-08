@@ -5388,6 +5388,21 @@
     "Cooldown After (failures)": "Refroidissement après (échecs)",
     "Number of consecutive failures that trigger a cooldown": "Nombre d’échecs consécutifs déclenchant le refroidissement",
     "Cooldown Duration (minutes)": "Durée du refroidissement (minutes)",
-    "How long a channel stays in cooldown before automatically recovering": "Durée pendant laquelle un canal reste en refroidissement avant de se rétablir automatiquement"
+    "How long a channel stays in cooldown before automatically recovering": "Durée pendant laquelle un canal reste en refroidissement avant de se rétablir automatiquement",
+    "Juice Value Fixer": "Correcteur de valeur Juice",
+    "Juice Value Fixer settings saved": "Paramètres du correcteur de valeur Juice enregistrés",
+    "Enable Juice Value Fixer": "Activer le correcteur de valeur Juice",
+    "Replace Juice numbers in matching upstream answers with the configured value.": "Remplace les nombres Juice dans les réponses amont correspondantes par la valeur configurée.",
+    "Model rules": "Règles de modèle",
+    "Rules require an exact model and reasoning effort match. Unmatched requests pass through unchanged.": "Les règles exigent une correspondance exacte du modèle et de l'effort de raisonnement. Les demandes sans correspondance restent inchangées.",
+    "Add rule": "Ajouter une règle",
+    "No Juice rules configured": "Aucune règle Juice configurée",
+    "Model": "Modèle",
+    "Reasoning effort": "Effort de raisonnement",
+    "Juice value": "Valeur Juice",
+    "Remove rule": "Supprimer la règle",
+    "Saving...": "Enregistrement...",
+    "Save": "Enregistrer",
+    "Model is required for every Juice rule": "Un modèle est requis pour chaque règle Juice"
   }
 }
