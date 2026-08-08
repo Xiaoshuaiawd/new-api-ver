@@ -25,6 +25,7 @@ import {
   Shield,
   ShieldAlert,
   Wrench,
+  Gauge,
 } from 'lucide-react'
 
 import { getAuthSectionNavItems } from '@/features/system-settings/auth/section-registry.tsx'
@@ -32,6 +33,7 @@ import { getBillingSectionNavItems } from '@/features/system-settings/billing/se
 import { getContentSectionNavItems } from '@/features/system-settings/content/section-registry.tsx'
 import { getModelsSectionNavItems } from '@/features/system-settings/models/section-registry.tsx'
 import { getOperationsSectionNavItems } from '@/features/system-settings/operations/section-registry.tsx'
+import { getJuiceFixerSectionNavItems } from '@/features/system-settings/juice-fixer/section-registry'
 import { getSecuritySectionNavItems } from '@/features/system-settings/security/section-registry.tsx'
 import { getSiteSectionNavItems } from '@/features/system-settings/site/section-registry.tsx'
 
@@ -84,6 +86,11 @@ function getSystemSettingsNavGroups(t: TFunction): NavGroup[] {
           title: t('Operations'),
           icon: Wrench,
           items: getOperationsSectionNavItems(t),
+        },
+        {
+          title: t('Juice Value Fixer'),
+          icon: Gauge,
+          items: getJuiceFixerSectionNavItems(t),
         },
       ],
     },

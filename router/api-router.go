@@ -204,6 +204,12 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.GET("/waffo-pancake/subscription-product-options", controller.ListWaffoPancakeSubscriptionProductOptions)
 		}
 
+		juiceFixerRoute := apiRouter.Group("/juice-fixer")
+		juiceFixerRoute.Use(middleware.RootAuth())
+		{
+			juiceFixerRoute.GET("/config", controller.GetJuiceFixerConfig)
+			juiceFixerRoute.PUT("/config", controller.UpdateJuiceFixerConfig)
+		}
 		// Custom OAuth provider management (root only)
 		customOAuthRoute := apiRouter.Group("/custom-oauth-provider")
 		customOAuthRoute.Use(middleware.RootAuth())

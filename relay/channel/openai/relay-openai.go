@@ -127,15 +127,20 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 
 	// 检查是否为音频模型
 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
+	juiceValue, juiceActive := service.ResolveJuiceValue(service.GetJuiceContext(c), info.OriginModelName, info.ReasoningEffort)
+	var bufferedJuiceStream []string
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
-		if lastStreamData != "" {
+		if !juiceActive && lastStreamData != "" {
 			if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
 				common.SysLog("error handling stream format: " + err.Error())
 				sr.Error(err)
 			}
 		}
 		if len(data) > 0 {
+			if juiceActive {
+				bufferedJuiceStream = append(bufferedJuiceStream, data)
+			}
 			// 对音频模型，保存倒数第二个stream data
 			if isAudioModel && lastStreamData != "" {
 				secondLastStreamData = lastStreamData
@@ -149,6 +154,18 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			}
 		}
 	})
+	if juiceActive && len(bufferedJuiceStream) > 0 {
+		transformed := service.TransformChatStreamChunks(bufferedJuiceStream, juiceValue)
+		for i, data := range transformed {
+			if i == len(transformed)-1 {
+				lastStreamData = data
+				continue
+			}
+			if err := HandleStreamFormat(c, info, data, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
+				logger.LogError(c, "error handling transformed stream format: "+err.Error())
+			}
+		}
+	}
 
 	// 对音频模型，从倒数第二个stream data中提取usage信息
 	if isAudioModel && secondLastStreamData != "" {
@@ -292,6 +309,7 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 	}
 
 	applyUsagePostProcessing(info, &simpleResponse.Usage, responseBody)
+	juiceChanged := transformChatResponse(c, info, &simpleResponse)
 
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:
@@ -303,6 +321,14 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 			}
 			bodyMap["usage"] = simpleResponse.Usage
 			responseBody, _ = common.Marshal(bodyMap)
+		}
+		if juiceChanged && !forceFormat {
+			for i := range simpleResponse.Choices {
+				responseBody, err = sjson.SetBytes(responseBody, fmt.Sprintf("choices.%d.message.content", i), simpleResponse.Choices[i].Message.Content)
+				if err != nil {
+					return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
+				}
+			}
 		}
 		if forceFormat {
 			responseBody, err = common.Marshal(simpleResponse)

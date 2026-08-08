@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	juice_fixer_setting "github.com/QuantumNous/new-api/setting/juice_fixer_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/performance_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -183,6 +184,8 @@ func InitOptionMap() {
 		common.OptionMap[k] = v
 	}
 
+	// juice_fixer: stored as a single JSON blob; default is disabled
+	common.OptionMap["juice_fixer_setting"] = "{}"
 	common.OptionMapRWMutex.Unlock()
 	loadOptionsFromDatabase()
 }
@@ -599,6 +602,8 @@ func updateOptionMap(key string, value string) (err error) {
 		// WaffoPayMethods is read directly from OptionMap via setting.GetWaffoPayMethods().
 		// The value is already stored in OptionMap at the top of this function (line: common.OptionMap[key] = value).
 		// No additional in-memory variable to update.
+	case "juice_fixer_setting":
+		juice_fixer_setting.LoadFromJSON(value)
 	}
 	return err
 }
