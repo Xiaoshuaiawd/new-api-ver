@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { SettingsPageActionsPortal } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
+import { createRuleId } from './rule-id'
 import {
   type JuiceFixerRule,
   getJuiceFixerConfig,
@@ -26,7 +27,7 @@ type EditableRule = JuiceFixerRule & { id: string }
 
 const toEditableRule = (rule: JuiceFixerRule): EditableRule => ({
   ...rule,
-  id: crypto.randomUUID(),
+  id: createRuleId(),
 })
 
 export function JuiceFixerSection() {
