@@ -86,34 +86,8 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
 		}
-		rawBody, err := storage.Bytes()
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
-		}
-		sanitizedBody, changed, err := relaycommon.SanitizeResponsesRequestBody(rawBody)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
-		}
-		if !changed {
-			requestBody = common.ReaderOnly(storage)
-		} else {
-			body, size, closer, err := relaycommon.NewOutboundJSONBody(sanitizedBody)
-			if err != nil {
-				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-			}
-			defer closer.Close()
-			info.UpstreamRequestBodySize = size
-			requestBody = body
-		}
+		requestBody = common.ReaderOnly(storage)
 	} else {
-		var changed bool
-		request.Input, changed, err = relaycommon.SanitizeResponsesInputItemIDs(request.Input)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
-		}
-		if changed {
-			logger.LogDebug(c, "removed incompatible Responses input item IDs")
-		}
 		convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *request)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
