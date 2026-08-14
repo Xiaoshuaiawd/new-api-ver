@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -12,7 +13,6 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
-	"github.com/QuantumNous/new-api/pkg/channelhealth"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
@@ -111,14 +111,10 @@ func SyncChannelCache(frequency int) {
 	}
 }
 
-// GetRandomSatisfiedChannel picks a channel for the given group/model.
-//
-// excludeIDs lists channel IDs already tried in this request; they are skipped
-// within every priority tier. Selection falls through to lower priorities only
-// after every untried channel in the current tier is unavailable.
-func GetRandomSatisfiedChannel(group string, model string, excludeIDs []int, requestPath string) (*Channel, error) {
+func GetRandomSatisfiedChannel(group string, model string, retry int, requestPath string) (*Channel, error) {
+	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
-		return getRandomSatisfiedChannelFromDB(group, model, excludeIDs, requestPath)
+		return GetChannel(group, model, retry, requestPath)
 	}
 
 	channelSyncLock.RLock()
@@ -137,137 +133,79 @@ func GetRandomSatisfiedChannel(group string, model string, excludeIDs []int, req
 		return nil, nil
 	}
 
-	candidates := make([]*Channel, 0, len(channels))
+	if len(channels) == 1 {
+		if channel, ok := channelsIDM[channels[0]]; ok {
+			return channel, nil
+		}
+		return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channels[0])
+	}
+
+	uniquePriorities := make(map[int]bool)
 	for _, channelId := range channels {
-		channel, ok := channelsIDM[channelId]
-		if !ok {
+		if channel, ok := channelsIDM[channelId]; ok {
+			uniquePriorities[int(channel.GetPriority())] = true
+		} else {
 			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId)
 		}
-		candidates = append(candidates, channel)
-	}
-
-	return selectHealthyChannel(candidates, excludeIDs), nil
-}
-
-func getRandomSatisfiedChannelFromDB(group string, model string, excludeIDs []int, requestPath string) (*Channel, error) {
-	candidates, err := getAvailableChannelsFromDB(group, model, requestPath)
-	if err != nil {
-		return nil, err
-	}
-	if len(candidates) == 0 {
-		normalizedModel := ratio_setting.FormatMatchingModelName(model)
-		if normalizedModel != model {
-			candidates, err = getAvailableChannelsFromDB(group, normalizedModel, requestPath)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	return selectHealthyChannel(candidates, excludeIDs), nil
-}
-
-func getAvailableChannelsFromDB(group string, model string, requestPath string) ([]*Channel, error) {
-	var abilities []Ability
-	if err := DB.Where(&Ability{Group: group, Model: model, Enabled: true}).Find(&abilities).Error; err != nil {
-		return nil, err
-	}
-	abilities = filterAbilitiesByRequestPathAndModel(abilities, requestPath, model)
-	if len(abilities) == 0 {
-		return nil, nil
-	}
-
-	channelIDs := make([]int, 0, len(abilities))
-	seen := make(map[int]struct{}, len(abilities))
-	for _, ability := range abilities {
-		if _, ok := seen[ability.ChannelId]; ok {
-			continue
-		}
-		seen[ability.ChannelId] = struct{}{}
-		channelIDs = append(channelIDs, ability.ChannelId)
-	}
-
-	var channels []*Channel
-	if err := DB.Where("id IN ? AND status = ?", channelIDs, common.ChannelStatusEnabled).Find(&channels).Error; err != nil {
-		return nil, err
-	}
-	return channels, nil
-}
-
-func selectHealthyChannel(channels []*Channel, excludeIDs []int) *Channel {
-	if len(channels) == 0 {
-		return nil
-	}
-
-	excluded := make(map[int]bool, len(excludeIDs))
-	for _, id := range excludeIDs {
-		excluded[id] = true
 	}
 	var sortedUniquePriorities []int
-	uniquePriorities := make(map[int]struct{}, len(channels))
-	for _, channel := range channels {
-		uniquePriorities[int(channel.GetPriority())] = struct{}{}
-	}
 	for priority := range uniquePriorities {
 		sortedUniquePriorities = append(sortedUniquePriorities, priority)
 	}
 	sort.Sort(sort.Reverse(sort.IntSlice(sortedUniquePriorities)))
 
-	type weightedChannel struct {
-		channel        *Channel
-		adjustedWeight int
+	if retry >= len(uniquePriorities) {
+		retry = len(uniquePriorities) - 1
+	}
+	targetPriority := int64(sortedUniquePriorities[retry])
+
+	// get the priority for the given retry number
+	var sumWeight = 0
+	var targetChannels []*Channel
+	for _, channelId := range channels {
+		if channel, ok := channelsIDM[channelId]; ok {
+			if channel.GetPriority() == targetPriority {
+				sumWeight += channel.GetWeight()
+				targetChannels = append(targetChannels, channel)
+			}
+		} else {
+			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId)
+		}
 	}
 
-	for _, priority := range sortedUniquePriorities {
-		targetPriority := int64(priority)
-		var candidates []weightedChannel
-
-		for _, ch := range channels {
-			if ch.GetPriority() != targetPriority {
-				continue
-			}
-			if excluded[ch.Id] {
-				continue
-			}
-			m := channelhealth.Multiplier(ch.Id)
-			if m == 0 {
-				continue
-			}
-			raw := ch.GetWeight()
-			if raw == 0 {
-				raw = 100
-			}
-			adjusted := int(float64(raw) * m)
-			if adjusted < 1 {
-				adjusted = 1
-			}
-			candidates = append(candidates, weightedChannel{channel: ch, adjustedWeight: adjusted})
-		}
-
-		if len(candidates) == 0 {
-			continue
-		}
-
-		sumWeight := 0
-		for _, c := range candidates {
-			sumWeight += c.adjustedWeight
-		}
-		smoothingFactor := 1
-		if sumWeight/len(candidates) < 10 {
-			smoothingFactor = 100
-		}
-		totalWeight := sumWeight * smoothingFactor
-		randomWeight := rand.Intn(totalWeight)
-		for _, c := range candidates {
-			randomWeight -= c.adjustedWeight * smoothingFactor
-			if randomWeight < 0 {
-				return c.channel
-			}
-		}
-		return candidates[len(candidates)-1].channel
+	if len(targetChannels) == 0 {
+		return nil, errors.New(fmt.Sprintf("no channel found, group: %s, model: %s, priority: %d", group, model, targetPriority))
 	}
 
-	return nil
+	// smoothing factor and adjustment
+	smoothingFactor := 1
+	smoothingAdjustment := 0
+
+	if sumWeight == 0 {
+		// when all channels have weight 0, set sumWeight to the number of channels and set smoothing adjustment to 100
+		// each channel's effective weight = 100
+		sumWeight = len(targetChannels) * 100
+		smoothingAdjustment = 100
+	} else if sumWeight/len(targetChannels) < 10 {
+		// when the average weight is less than 10, set smoothing factor to 100
+		smoothingFactor = 100
+	}
+
+	// Calculate the total weight of all channels up to endIdx
+	totalWeight := sumWeight * smoothingFactor
+
+	// Generate a random value in the range [0, totalWeight)
+	randomWeight := rand.Intn(totalWeight)
+
+	// Find a channel based on its weight
+	for _, channel := range targetChannels {
+		randomWeight -= channel.GetWeight()*smoothingFactor + smoothingAdjustment
+		if randomWeight < 0 {
+			return channel, nil
+		}
+	}
+	// return null if no channel is not found
+	return nil, errors.New("channel not found")
 }
 
 // filterChannelsByRequestPathAndModel restricts candidates by request path and
