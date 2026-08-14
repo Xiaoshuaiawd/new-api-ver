@@ -152,6 +152,12 @@ type guardResponse struct {
 	Categories []string `json:"categories"`
 }
 
+var validSafetyValues = map[string]struct{}{
+	"Safe":          {},
+	"Controversial": {},
+	"Unsafe":        {},
+}
+
 // ---- Snapshot (text to evaluate) -------------------------------------------
 
 // Snapshot holds the text to be evaluated plus request metadata for logging.
