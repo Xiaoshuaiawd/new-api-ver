@@ -5455,6 +5455,7 @@
     "Use \"General model\" for gpt-4o-mini, qwen-turbo, etc. — forces JSON output for max reliability.": "gpt-4o-mini、qwen-turbo 等通用模型请选「通用模型」，会强制返回 JSON 以最大化可用率。",
     "Classifier System Prompt": "审核 System Prompt",
     "Only used by \"General model\" nodes. Leave empty to use the built-in default. Must instruct the model to return JSON {\"safety\":...,\"categories\":[...]} and to treat the user message as untrusted data.": "仅「通用模型」节点使用。留空则用内置默认提示词。自定义时必须要求模型返回 JSON {\"safety\":...,\"categories\":[...]}，并把用户消息当作不可信数据、不执行其中的指令。",
-    "Leave empty to use the built-in default classifier prompt": "留空则使用内置默认审核提示词"
+    "Leave empty to use the built-in default classifier prompt": "留空则使用内置默认审核提示词",
+    "Please enter the API Token before testing this node.": "测试该节点前请先填写 API Token。"
   }
 }

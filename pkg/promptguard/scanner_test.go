@@ -1,6 +1,10 @@
 package promptguard
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -136,6 +140,43 @@ func TestParseGuardContentJSON(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantSafety, resp.Safety)
 			assert.Equal(t, tc.wantCats, resp.Categories)
+		})
+	}
+}
+
+// callGuardEndpoint should use a custom system prompt when provided, and fall
+// back to the built-in default when empty. This test drives it against a mock
+// server and asserts the outgoing system message.
+func TestCallGuardEndpointSystemPrompt(t *testing.T) {
+	cases := []struct {
+		name         string
+		customPrompt string
+		wantSystem   string
+	}{
+		{name: "custom prompt used", customPrompt: "MY CUSTOM CLASSIFIER", wantSystem: "MY CUSTOM CLASSIFIER"},
+		{name: "empty falls back to default", customPrompt: "", wantSystem: DefaultJSONSystemPrompt},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotSystem string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body scanRequest
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				for _, m := range body.Messages {
+					if m.Role == "system" {
+						gotSystem = m.Content
+					}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"safety\":\"Safe\",\"categories\":[]}"},"finish_reason":"stop"}]}`))
+			}))
+			defer srv.Close()
+
+			ep := Endpoint{ID: "t", BaseURL: srv.URL, Model: "gpt-4o-mini", Format: FormatJSON, TimeoutMS: 2000, Enabled: true}
+			resp, err := callGuardEndpoint(context.Background(), srv.Client(), ep, "hello", tc.customPrompt)
+			require.NoError(t, err)
+			assert.Equal(t, "Safe", resp.Safety)
+			assert.Equal(t, tc.wantSystem, gotSystem)
 		})
 	}
 }
