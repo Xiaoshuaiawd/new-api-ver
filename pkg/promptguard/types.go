@@ -68,16 +68,13 @@ type Decision struct {
 // ---- Config types ----------------------------------------------------------
 
 const (
-	DefaultTimeoutMS      = 4000
-	DefaultTotalMS        = 7000
-	DefaultInputLimit     = 16000
-	MinTimeoutMS          = 500
-	MaxTimeoutMS          = 30000
-	MinInputLimit         = 128
-	MaxInputLimit         = 100000
-	DefaultMaxConcurrency = 256
-	MinMaxConcurrency     = 1
-	MaxMaxConcurrency     = 100000
+	DefaultTimeoutMS  = 4000
+	DefaultTotalMS    = 7000
+	DefaultInputLimit = 16000
+	MinTimeoutMS      = 500
+	MaxTimeoutMS      = 30000
+	MinInputLimit     = 128
+	MaxInputLimit     = 100000
 )
 
 // Endpoint format determines how the request is built and parsed.
@@ -105,22 +102,15 @@ type Endpoint struct {
 
 // Config is the validated, decrypted runtime snapshot passed to the evaluator.
 type Config struct {
-	Enabled         bool
-	BlockingEnabled bool
-	LatestTurnOnly  bool
-	StorePassEvents bool
-	Scanners        []string // enabled scanner IDs
-	AllGroups       bool
-	GroupNames      []string // token group names (empty = AllGroups)
-	Endpoints       []Endpoint
-	// SystemPrompt overrides the built-in JSON-mode system prompt (FormatJSON only).
-	// Empty falls back to the built-in DefaultJSONSystemPrompt.
-	SystemPrompt string
-	// MaxConcurrency bounds concurrent in-flight guard calls. When the limit is
-	// reached, requests WAIT for a slot within the overall timeout budget rather
-	// than immediately failing closed. 0 falls back to DefaultMaxConcurrency.
-	MaxConcurrency int
-	ConfigVersion  int64
+	Enabled                bool
+	BlockingEnabled        bool
+	LatestTurnOnly         bool
+	StorePassEvents        bool
+	Scanners               []string // enabled scanner IDs
+	AllGroups              bool
+	GroupNames             []string // token group names (empty = AllGroups)
+	Endpoints              []Endpoint
+	ConfigVersion          int64
 }
 
 // EnabledEndpoints returns only enabled endpoints.

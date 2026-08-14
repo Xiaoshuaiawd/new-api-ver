@@ -96,7 +96,7 @@ func (e *Evaluator) Evaluate(ctx context.Context, cfg Config, snap Snapshot) (*D
 	evalCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	result, err := e.scanWithFailover(evalCtx, endpoints, snap.ScanText, cfg.SystemPrompt)
+	result, err := e.scanWithFailover(evalCtx, endpoints, snap.ScanText)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +108,7 @@ func (e *Evaluator) Evaluate(ctx context.Context, cfg Config, snap Snapshot) (*D
 
 // scanWithFailover tries enabled endpoints in order; retryable errors advance
 // to the next endpoint. Non-retryable errors (invalid response) propagate immediately.
-func (e *Evaluator) scanWithFailover(ctx context.Context, endpoints []Endpoint, text string, systemPrompt string) (*guardResponse, error) {
+func (e *Evaluator) scanWithFailover(ctx context.Context, endpoints []Endpoint, text string) (*guardResponse, error) {
 	var lastErr error
 	for _, ep := range endpoints {
 		// Out of time budget — no point trying further nodes.
@@ -117,7 +117,7 @@ func (e *Evaluator) scanWithFailover(ctx context.Context, endpoints []Endpoint, 
 		}
 
 		client := e.getClient(ep)
-		result, err := callGuardEndpoint(ctx, client, ep, text, systemPrompt)
+		result, err := callGuardEndpoint(ctx, client, ep, text)
 		if err == nil {
 			// A successful classification is the only thing that returns early.
 			// Errors (4xx, network, timeout, invalid response) are never verdicts,

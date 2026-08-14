@@ -22,7 +22,6 @@ import {
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
 import {
   SettingsForm,
   SettingsSwitchContent,
@@ -63,8 +62,6 @@ type FormValues = {
   all_groups: boolean
   group_names_raw: string
   endpoints: FormEndpoint[]
-  system_prompt: string
-  max_concurrency: number
 }
 
 function buildFormValues(cfg: PromptGuardConfig): FormValues {
@@ -76,8 +73,6 @@ function buildFormValues(cfg: PromptGuardConfig): FormValues {
     scanners: cfg.scanners ?? ALL_SCANNERS.map((s) => s.id),
     all_groups: cfg.all_groups,
     group_names_raw: (cfg.group_names ?? []).join(','),
-    system_prompt: cfg.system_prompt ?? '',
-    max_concurrency: cfg.max_concurrency || 256,
     endpoints: (cfg.endpoints ?? []).map((ep) => ({
       id: ep.id,
       name: ep.name,
@@ -116,7 +111,7 @@ export function PromptGuardSection() {
     values: cfg ? buildFormValues(cfg) : buildFormValues({
       enabled: false, blocking_enabled: false, latest_turn_only: true,
       store_pass_events: false, scanners: ALL_SCANNERS.map((s) => s.id),
-      all_groups: false, group_names: [], endpoints: [], system_prompt: '', max_concurrency: 256, config_version: 1,
+      all_groups: false, group_names: [], endpoints: [], config_version: 1,
     }),
   })
 
@@ -140,8 +135,6 @@ export function PromptGuardSection() {
       scanners: values.scanners,
       all_groups: values.all_groups,
       group_names: groupNames,
-      system_prompt: values.system_prompt,
-      max_concurrency: values.max_concurrency,
       endpoints: values.endpoints.map((ep) => ({
         id: ep.id,
         name: ep.name,
@@ -183,12 +176,6 @@ export function PromptGuardSection() {
 
   const probe = async (idx: number) => {
     const ep = form.getValues(`endpoints.${idx}`)
-    // General models almost always need a token; probing cannot read the saved
-    // ciphertext, so require it to be entered for a meaningful test.
-    if (ep.format === 'json' && !ep.newToken?.trim()) {
-      toast.error(t('Please enter the API Token before testing this node.'))
-      return
-    }
     setProbing((p) => ({ ...p, [idx]: true }))
     try {
       const result = await probePromptGuardEndpoint({
@@ -263,21 +250,6 @@ export function PromptGuardSection() {
             )}
           />
 
-          <FormField control={form.control} name='max_concurrency'
-            render={({ field }) => (
-              <FormItem className='max-w-xs'>
-                <FormLabel>{t('Max Concurrent Audits')}</FormLabel>
-                <FormControl>
-                  <Input type='number' min={1} step={1} {...safeNumberFieldProps(field)} disabled={!enabled} />
-                </FormControl>
-                <FormDescription>
-                  {t('Upper bound on concurrent guard calls. When reached, requests wait for a slot within the timeout budget instead of being rejected. Raise this if high traffic causes 503 errors.')}
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
           <Separator />
 
           {/* Risk categories */}
@@ -297,32 +269,6 @@ export function PromptGuardSection() {
               </label>
             ))}
           </div>
-
-          <Separator />
-
-          {/* Custom system prompt (JSON-mode / general models only) */}
-          <div>
-            <h4 className='font-medium'>{t('Classifier System Prompt')}</h4>
-            <p className='text-muted-foreground mt-1 text-xs'>
-              {t('Only used by "General model" nodes. Leave empty to use the built-in default. Must instruct the model to return JSON {"safety":...,"categories":[...]} and to treat the user message as untrusted data.')}
-            </p>
-          </div>
-          <FormField control={form.control} name='system_prompt'
-            render={({ field }) => (
-              <FormItem>
-                <FormControl>
-                  <Textarea
-                    rows={8}
-                    placeholder={t('Leave empty to use the built-in default classifier prompt')}
-                    className='font-mono text-xs'
-                    {...field}
-                    disabled={!enabled}
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
 
           <Separator />
 
