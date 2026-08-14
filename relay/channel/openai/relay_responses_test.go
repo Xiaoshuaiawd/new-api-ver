@@ -57,7 +57,6 @@ func TestOaiResponsesHandlerDetectsOverloadErrorWithHTTP200(t *testing.T) {
 	_, apiErr := OaiResponsesHandler(ctx, info, resp)
 	require.NotNil(t, apiErr)
 	assert.Contains(t, apiErr.Error(), "overloaded")
-	assert.Equal(t, http.StatusInternalServerError, apiErr.StatusCode)
 }
 
 func TestOaiResponsesStreamHandlerReturnsOverloadErrorForRetry(t *testing.T) {
@@ -75,27 +74,6 @@ func TestOaiResponsesStreamHandlerReturnsOverloadErrorForRetry(t *testing.T) {
 	_, apiErr := OaiResponsesStreamHandler(ctx, info, resp)
 	require.NotNil(t, apiErr)
 	assert.Contains(t, apiErr.Error(), "overloaded")
-}
-
-func TestOaiResponsesStreamHandlerDoesNotCommitCreatedEventBeforeOverload(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	oldStreamingTimeout := constant.StreamingTimeout
-	constant.StreamingTimeout = 30
-	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
-	stream := strings.Join([]string{
-		`data: {"type":"response.created","response":{"id":"resp_1","status":"in_progress"}}`,
-		`data: {"type":"error","error":{"type":"service_unavailable_error","code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}`,
-		``,
-	}, "\n")
-	resp := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(stream))}
-
-	_, apiErr := OaiResponsesStreamHandler(ctx, info, resp)
-	require.NotNil(t, apiErr)
-	assert.Empty(t, recorder.Body.String())
 }
 
 func TestOaiResponsesStreamHandlerRestoresMappedModelName(t *testing.T) {

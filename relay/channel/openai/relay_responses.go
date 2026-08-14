@@ -23,13 +23,6 @@ func hasOpenAIError(err *types.OpenAIError) bool {
 	return err != nil && (err.Type != "" || err.Message != "" || err.Code != nil)
 }
 
-func upstreamErrorStatusCode(statusCode int) int {
-	if statusCode >= http.StatusOK && statusCode < http.StatusMultipleChoices {
-		return http.StatusInternalServerError
-	}
-	return statusCode
-}
-
 func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
 
@@ -44,7 +37,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 	if oaiError := responsesResponse.GetOpenAIError(); hasOpenAIError(oaiError) {
-		return nil, types.WithOpenAIError(*oaiError, upstreamErrorStatusCode(resp.StatusCode))
+		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
 
 	if transformResponsesResponse(c, info, &responsesResponse) {
@@ -113,7 +106,6 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	imageCounter := &relaycommon.ImageGenerationCallCounter{}
 	imageCommitted := false
 	var streamErr *types.NewAPIError
-	var pendingCreated []string
 	juiceValue, juiceActive := service.ResolveJuiceValue(service.GetJuiceContext(c), info.OriginModelName, info.ReasoningEffort)
 	var bufferedJuiceStream []string
 
@@ -126,41 +118,10 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Error(err)
 			return
 		}
-		if streamResponse.Type == "error" || streamResponse.Type == "response.error" || streamResponse.Type == "response.failed" {
-			if streamResponse.Error != nil && hasOpenAIError(streamResponse.Error) {
-				streamErr = types.WithOpenAIError(*streamResponse.Error, http.StatusInternalServerError)
-				sr.Stop(streamErr)
-				return
-			}
-			if streamResponse.Response != nil {
-				if oaiErr := streamResponse.Response.GetOpenAIError(); hasOpenAIError(oaiErr) {
-					streamErr = types.WithOpenAIError(*oaiErr, http.StatusInternalServerError)
-					sr.Stop(streamErr)
-					return
-				}
-			}
-			streamErr = types.NewOpenAIError(fmt.Errorf("responses stream error: %s", streamResponse.Type), types.ErrorCodeBadResponse, http.StatusInternalServerError)
-			sr.Stop(streamErr)
-			return
-		}
-		transformedData := restoreResponsesModelInStreamData(data, info)
-		if streamResponse.Type == "response.created" {
-			if juiceActive {
-				bufferedJuiceStream = append(bufferedJuiceStream, data)
-			} else {
-				pendingCreated = append(pendingCreated, transformedData)
-			}
-		} else if juiceActive {
+		if juiceActive {
 			bufferedJuiceStream = append(bufferedJuiceStream, data)
 		} else {
-			for _, pending := range pendingCreated {
-				var pendingResponse dto.ResponsesStreamResponse
-				if err := common.UnmarshalJsonStr(pending, &pendingResponse); err == nil {
-					sendResponsesStreamData(c, pendingResponse, pending)
-				}
-			}
-			pendingCreated = nil
-			sendResponsesStreamData(c, streamResponse, transformedData)
+			sendResponsesStreamData(c, streamResponse, restoreResponsesModelInStreamData(data, info))
 		}
 		switch streamResponse.Type {
 		case "response.completed", "response.done":
@@ -198,6 +159,21 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				imageCounter.Commit(info)
 				imageCommitted = true
 			}
+		case "error", "response.error", "response.failed":
+			if streamResponse.Error != nil && hasOpenAIError(streamResponse.Error) {
+				streamErr = types.WithOpenAIError(*streamResponse.Error, http.StatusInternalServerError)
+				sr.Stop(streamErr)
+				return
+			}
+			if streamResponse.Response != nil {
+				if oaiErr := streamResponse.Response.GetOpenAIError(); hasOpenAIError(oaiErr) {
+					streamErr = types.WithOpenAIError(*oaiErr, http.StatusInternalServerError)
+					sr.Stop(streamErr)
+					return
+				}
+			}
+			streamErr = types.NewOpenAIError(fmt.Errorf("responses stream error: %s", streamResponse.Type), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+			sr.Stop(streamErr)
 		case "response.incomplete", "response.cancelled", "response.canceled":
 			if !imageCommitted {
 				imageCounter.Reset()
@@ -235,14 +211,6 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				continue
 			}
 			sendResponsesStreamData(c, streamResponse, restoreResponsesModelInStreamData(data, info))
-		}
-	}
-	if len(pendingCreated) > 0 {
-		for _, data := range pendingCreated {
-			var streamResponse dto.ResponsesStreamResponse
-			if err := common.UnmarshalJsonStr(data, &streamResponse); err == nil {
-				sendResponsesStreamData(c, streamResponse, data)
-			}
 		}
 	}
 
