@@ -10,7 +10,6 @@ export type PromptGuardEndpoint = {
   name: string
   base_url: string
   model: string
-  format: string
   has_token: boolean
   timeout_ms: number
   input_limit: number
@@ -35,7 +34,6 @@ export type UpdatePromptGuardEndpoint = {
   name: string
   base_url: string
   model: string
-  format: string
   token?: string
   clear_token?: boolean
   timeout_ms: number
@@ -73,7 +71,6 @@ export async function updatePromptGuardConfig(
 export async function probePromptGuardEndpoint(params: {
   base_url: string
   model: string
-  format?: string
   token?: string
   timeout_ms?: number
 }): Promise<{ decision: string; latency_ms: number }> {
