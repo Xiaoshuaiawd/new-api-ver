@@ -36,11 +36,15 @@ Violent, Non-violent Illegal Acts, Sexual Content or Sexual Acts, PII, Suicide &
 //   - FormatJSON: general instruct models. A system prompt is prepended and
 //     response_format=json_object is set to force valid JSON output.
 type scanRequest struct {
-	Model          string          `json:"model"`
-	Messages       []scanMessage   `json:"messages"`
-	Stream         bool            `json:"stream"`
-	Temperature    float64         `json:"temperature"`
-	MaxTokens      int             `json:"max_tokens"`
+	Model       string        `json:"model"`
+	Messages    []scanMessage `json:"messages"`
+	Stream      bool          `json:"stream"`
+	Temperature float64       `json:"temperature"`
+	// MaxTokens is intentionally omitted: for reasoning models (deepseek-v4-flash
+	// etc.) max_tokens bounds reasoning+output combined, so a small cap truncates
+	// the reasoning and the JSON is never emitted (finish_reason=length → invalid).
+	// The guard output is a short JSON object, so leaving it unbounded is safe.
+	MaxTokens      int             `json:"max_tokens,omitempty"`
 	Seed           int             `json:"seed"`
 	ResponseFormat *responseFormat `json:"response_format,omitempty"`
 }
@@ -84,21 +88,18 @@ func callGuardEndpoint(ctx context.Context, client *http.Client, ep Endpoint, te
 	}
 	if ep.Format == FormatJSON {
 		// General instruct model: system prompt + forced JSON output.
+		// No max_tokens — reasoning models would otherwise truncate before the
+		// JSON is emitted. The classifier output is tiny, so it stays cheap.
 		body.Messages = []scanMessage{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: text},
 		}
-		// Reasoning models (e.g. deepseek-v4-flash) spend tokens on hidden
-		// reasoning before emitting the JSON, so keep a generous budget to avoid
-		// truncation (finish_reason=length) being treated as an invalid response.
-		body.MaxTokens = 1024
 		body.ResponseFormat = &responseFormat{Type: "json_object"}
 	} else {
 		// qwen3guard: raw content, no system prompt, native line format.
 		body.Messages = []scanMessage{
 			{Role: "user", Content: text},
 		}
-		body.MaxTokens = 64
 	}
 
 	bodyBytes, err := json.Marshal(body)
