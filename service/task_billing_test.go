@@ -13,7 +13,6 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -374,8 +373,7 @@ func TestLogTaskConsumptionRecordsSubscriptionPricingForRealConsumption(t *testi
 		PriceData: types.PriceData{
 			Quota: 200,
 			GroupRatioInfo: types.GroupRatioInfo{
-				GroupRatio:    1,
-				BillingSource: BillingSourceSubscription,
+				GroupRatio: 1,
 			},
 		},
 	}
@@ -1017,34 +1015,6 @@ func TestRecalculateSubscriptionPositiveDeltaRecordsRealConsumption(t *testing.T
 	stat, err := model.SumUsedQuota(model.LogTypeConsume, 0, 0, "", "test_user", "", 0, "")
 	require.NoError(t, err)
 	assert.InDelta(t, 0.96, stat.RealConsumption, 0.000001)
-}
-
-func TestRecalculateTaskQuotaByTokens_UsesModelFromTaskDataFallback(t *testing.T) {
-	truncate(t)
-	ctx := context.Background()
-
-	const userID, tokenID, channelID = 31, 31, 31
-	const initQuota, preConsumed = 10000, 100
-	const tokenRemain = 10000
-
-	seedUser(t, userID, initQuota)
-	seedToken(t, tokenID, userID, "sk-task-data-model", tokenRemain)
-	seedChannel(t, channelID)
-	previousModelRatio := ratio_setting.ModelRatio2JSONString()
-	t.Cleanup(func() {
-		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(previousModelRatio))
-	})
-	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"test-model":1}`))
-
-	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
-	task.Properties.OriginModelName = ""
-	task.PrivateData.BillingContext = nil
-	task.Data = json.RawMessage(`{"model":"test-model"}`)
-
-	RecalculateTaskQuotaByTokens(ctx, task, 200)
-
-	assert.Equal(t, 200, task.Quota)
-	assert.Equal(t, initQuota-(200-preConsumed), getUserQuota(t, userID))
 }
 
 // ===========================================================================

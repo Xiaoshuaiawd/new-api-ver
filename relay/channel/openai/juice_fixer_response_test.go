@@ -3,8 +3,8 @@ package openai
 import (
 	"testing"
 
-	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	juice_setting "github.com/QuantumNous/new-api/setting/juice_fixer_setting"
 	"github.com/gin-gonic/gin"

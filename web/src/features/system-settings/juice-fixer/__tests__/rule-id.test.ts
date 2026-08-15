@@ -16,10 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { test } from 'node:test'
+import { expect, test } from 'vitest'
 
-import { createRuleId } from './rule-id.ts'
+import { createRuleId } from '../rule-id'
 
 test('creates a rule ID when crypto.randomUUID is unavailable', () => {
   const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto')
@@ -29,9 +28,7 @@ test('creates a rule ID when crypto.randomUUID is unavailable', () => {
   })
 
   try {
-    const id = createRuleId()
-
-    assert.ok(id)
+    expect(createRuleId()).toBeTruthy()
   } finally {
     if (cryptoDescriptor) {
       Object.defineProperty(globalThis, 'crypto', cryptoDescriptor)

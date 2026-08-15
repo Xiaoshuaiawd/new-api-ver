@@ -3,7 +3,7 @@ package service
 import (
 	"testing"
 
-	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	juice_setting "github.com/QuantumNous/new-api/setting/juice_fixer_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

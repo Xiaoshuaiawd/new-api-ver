@@ -44,8 +44,8 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 		other["model_ratio"] = info.PriceData.ModelRatio
 	}
 	other["group_ratio"] = info.PriceData.GroupRatioInfo.GroupRatio
-	if info.PriceData.GroupRatioInfo.BillingSource != "" {
-		other["billing_source"] = info.PriceData.GroupRatioInfo.BillingSource
+	if info.BillingSource != "" {
+		other["billing_source"] = info.BillingSource
 	}
 	// Task logs build their metadata here instead of going through
 	// GenerateTextOtherInfo, so append the billing snapshot explicitly.
@@ -133,10 +133,7 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 			other["model_ratio"] = bc.ModelRatio
 		}
 		other["group_ratio"] = bc.GroupRatio
-		billingSource := bc.BillingSource
-		if billingSource == "" {
-			billingSource = task.PrivateData.BillingSource
-		}
+		billingSource := task.PrivateData.BillingSource
 		if billingSource != "" {
 			other["billing_source"] = billingSource
 		}

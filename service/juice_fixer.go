@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	juice_setting "github.com/QuantumNous/new-api/setting/juice_fixer_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/sjson"
