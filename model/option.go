@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/error_model_redaction"
 	juice_fixer_setting "github.com/QuantumNous/new-api/setting/juice_fixer_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/performance_setting"
@@ -177,6 +178,7 @@ func InitOptionMap() {
 	common.OptionMap["AutomaticDisableStatusCodes"] = operation_setting.AutomaticDisableStatusCodesToString()
 	common.OptionMap["AutomaticRetryStatusCodes"] = operation_setting.AutomaticRetryStatusCodesToString()
 	common.OptionMap["ExposeRatioEnabled"] = strconv.FormatBool(ratio_setting.IsExposeRatioEnabled())
+	common.OptionMap[error_model_redaction.OptionKey] = error_model_redaction.PatternsJSON()
 
 	// 自动添加所有注册的模型配置
 	modelConfigs := config.GlobalConfig.ExportAllConfigs()
@@ -214,6 +216,9 @@ func validateOptionValue(key string, value string) error {
 	}
 	if key == "MaxTokenAutoGroups" {
 		return setting.ValidateMaxTokenAutoGroups(value)
+	}
+	if key == error_model_redaction.OptionKey {
+		return error_model_redaction.ValidatePatternsJSON(value)
 	}
 	return nil
 }
@@ -604,6 +609,8 @@ func updateOptionMap(key string, value string) (err error) {
 		// No additional in-memory variable to update.
 	case "juice_fixer_setting":
 		juice_fixer_setting.LoadFromJSON(value)
+	case error_model_redaction.OptionKey:
+		err = error_model_redaction.UpdatePatternsJSON(value)
 	}
 	return err
 }
