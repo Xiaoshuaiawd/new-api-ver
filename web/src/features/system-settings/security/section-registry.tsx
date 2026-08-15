@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { ErrorModelRedactionSection } from '../request-limits/error-model-redaction-section'
 import { RateLimitSection } from '../request-limits/rate-limit-section'
 import { SensitiveWordsSection } from '../request-limits/sensitive-words-section'
 import { SSRFSection } from '../request-limits/ssrf-section'
@@ -38,6 +39,15 @@ const SECURITY_SECTIONS = [
             settings.ModelRequestRateLimitDurationMinutes,
           ModelRequestRateLimitGroup: settings.ModelRequestRateLimitGroup,
         }}
+      />
+    ),
+  },
+  {
+    id: 'error-model-redaction',
+    titleKey: 'Error Model Redaction',
+    build: (settings: SecuritySettings) => (
+      <ErrorModelRedactionSection
+        defaultValue={settings.ErrorModelRedactionPatterns}
       />
     ),
   },
