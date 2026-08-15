@@ -93,7 +93,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	defer func() {
 		if newAPIError != nil {
-			displayError := redactRelayError(newAPIError, relayInfo)
+			displayError := redactRelayError(c, newAPIError, relayInfo)
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(displayError.Error())))
 			displayError.SetMessage(common.MessageWithRequestId(displayError.Error(), requestId))
 			switch relayFormat {
@@ -374,8 +374,9 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
 	if service.ShouldDisableChannel(err) && channelError.AutoBan {
+		reason := redactRelayErrorText(c, relayInfo, err.ErrorWithStatusCode())
 		gopool.Go(func() {
-			service.DisableChannel(channelError, err.ErrorWithStatusCode())
+			service.DisableChannel(channelError, reason)
 		})
 	}
 
@@ -435,18 +436,19 @@ func redactRelayErrorText(c *gin.Context, info *relaycommon.RelayInfo, message s
 	return error_model_redaction.Redact(message, relayErrorModelNames(c, info)...)
 }
 
-func redactRelayError(err *types.NewAPIError, info *relaycommon.RelayInfo) *types.NewAPIError {
+func redactRelayError(c *gin.Context, err *types.NewAPIError, info *relaycommon.RelayInfo) *types.NewAPIError {
 	if err == nil {
 		return nil
 	}
+	modelNames := relayErrorModelNames(c, info)
 	redacted := *err
-	redacted.SetMessage(error_model_redaction.Redact(err.Error(), relayErrorModelNames(nil, info)...))
+	redacted.SetMessage(error_model_redaction.Redact(err.Error(), modelNames...))
 	switch relayError := err.RelayError.(type) {
 	case types.OpenAIError:
-		relayError.Message = error_model_redaction.Redact(relayError.Message, relayErrorModelNames(nil, info)...)
+		relayError.Message = error_model_redaction.Redact(relayError.Message, modelNames...)
 		redacted.RelayError = relayError
 	case types.ClaudeError:
-		relayError.Message = error_model_redaction.Redact(relayError.Message, relayErrorModelNames(nil, info)...)
+		relayError.Message = error_model_redaction.Redact(relayError.Message, modelNames...)
 		redacted.RelayError = relayError
 	}
 	return &redacted
