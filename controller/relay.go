@@ -24,6 +24,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/error_model_redaction"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
@@ -76,6 +77,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	var (
 		newAPIError *types.NewAPIError
+		relayInfo   *relaycommon.RelayInfo
 		ws          *websocket.Conn
 	)
 
@@ -91,19 +93,20 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	defer func() {
 		if newAPIError != nil {
-			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
-			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
+			displayError := redactRelayError(newAPIError, relayInfo)
+			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(displayError.Error())))
+			displayError.SetMessage(common.MessageWithRequestId(displayError.Error(), requestId))
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
-				helper.WssError(c, ws, newAPIError.ToOpenAIError())
+				helper.WssError(c, ws, displayError.ToOpenAIError())
 			case types.RelayFormatClaude:
-				c.JSON(newAPIError.StatusCode, gin.H{
+				c.JSON(displayError.StatusCode, gin.H{
 					"type":  "error",
-					"error": newAPIError.ToClaudeError(),
+					"error": displayError.ToClaudeError(),
 				})
 			default:
-				c.JSON(newAPIError.StatusCode, gin.H{
-					"error": newAPIError.ToOpenAIError(),
+				c.JSON(displayError.StatusCode, gin.H{
+					"error": displayError.ToOpenAIError(),
 				})
 			}
 		}
@@ -120,7 +123,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
-	relayInfo, err := relaycommon.GenRelayInfo(c, relayFormat, request, ws)
+	relayInfo, err = relaycommon.GenRelayInfo(c, relayFormat, request, ws)
 	if err != nil {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
@@ -237,7 +240,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 
-		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayInfo)
 
 		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
 			break
@@ -361,8 +364,13 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	return operation_setting.ShouldRetryByStatusCode(code)
 }
 
-func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
-	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
+func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, relayInfos ...*relaycommon.RelayInfo) {
+	var relayInfo *relaycommon.RelayInfo
+	if len(relayInfos) > 0 {
+		relayInfo = relayInfos[0]
+	}
+	redactedError := redactRelayErrorText(c, relayInfo, err.Error())
+	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(redactedError)))
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
 	if service.ShouldDisableChannel(err) && channelError.AutoBan {
@@ -403,9 +411,45 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 			startTime = time.Now()
 		}
 		useTimeSeconds := int(time.Since(startTime).Seconds())
-		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, err.MaskSensitiveErrorWithStatusCode(), tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
+		content := redactRelayErrorText(c, relayInfo, err.MaskSensitiveErrorWithStatusCode())
+		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, content, tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
 	}
 
+}
+
+func relayErrorModelNames(c *gin.Context, info *relaycommon.RelayInfo) []string {
+	modelNames := make([]string, 0, 2)
+	if info != nil {
+		modelNames = append(modelNames, info.OriginModelName)
+		if info.ChannelMeta != nil {
+			modelNames = append(modelNames, info.UpstreamModelName)
+		}
+	}
+	if c != nil {
+		modelNames = append(modelNames, common.GetContextKeyString(c, constant.ContextKeyOriginalModel))
+	}
+	return modelNames
+}
+
+func redactRelayErrorText(c *gin.Context, info *relaycommon.RelayInfo, message string) string {
+	return error_model_redaction.Redact(message, relayErrorModelNames(c, info)...)
+}
+
+func redactRelayError(err *types.NewAPIError, info *relaycommon.RelayInfo) *types.NewAPIError {
+	if err == nil {
+		return nil
+	}
+	redacted := *err
+	redacted.SetMessage(error_model_redaction.Redact(err.Error(), relayErrorModelNames(nil, info)...))
+	switch relayError := err.RelayError.(type) {
+	case types.OpenAIError:
+		relayError.Message = error_model_redaction.Redact(relayError.Message, relayErrorModelNames(nil, info)...)
+		redacted.RelayError = relayError
+	case types.ClaudeError:
+		relayError.Message = error_model_redaction.Redact(relayError.Message, relayErrorModelNames(nil, info)...)
+		redacted.RelayError = relayError
+	}
+	return &redacted
 }
 
 func RelayMidjourney(c *gin.Context) {
@@ -564,7 +608,7 @@ func RelayTask(c *gin.Context) {
 			processChannelError(c,
 				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
 					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
-				types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode))
+				types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode), relayInfo)
 		}
 
 		if !shouldRetryTaskRelay(c, channel.Id, taskErr, common.RetryTimes-retryParam.GetRetry()) {
