@@ -59,6 +59,28 @@ func relayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIErro
 	return err
 }
 
+const disabledNonStreamMessage = "当前号池正在遭受恶意毁号请求，暂停同步请求"
+
+func rejectDisabledNonStreamRequest(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
+	if c == nil || info == nil || info.IsStream {
+		return nil
+	}
+	if info.RelayMode != relayconstant.RelayModeChatCompletions &&
+		info.RelayMode != relayconstant.RelayModeResponses {
+		return nil
+	}
+	settings, ok := common.GetContextKeyType[dto.ChannelSettings](c, constant.ContextKeyChannelSetting)
+	if !ok || !settings.DisableNonStream {
+		return nil
+	}
+	return types.NewErrorWithStatusCode(
+		errors.New(disabledNonStreamMessage),
+		types.ErrorCodeInvalidRequest,
+		http.StatusBadRequest,
+		types.ErrOptionWithSkipRetry(),
+	)
+}
+
 func geminiRelayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
 	var err *types.NewAPIError
 	if strings.Contains(c.Request.URL.Path, "embed") {
@@ -201,6 +223,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if channelErr != nil {
 			logger.LogError(c, channelErr.Error())
 			newAPIError = channelErr
+			break
+		}
+		if policyErr := rejectDisabledNonStreamRequest(c, relayInfo); policyErr != nil {
+			newAPIError = policyErr
 			break
 		}
 		addUsedChannel(c, channel.Id)
