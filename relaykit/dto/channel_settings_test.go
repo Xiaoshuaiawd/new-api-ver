@@ -556,6 +556,25 @@ func TestChannelSettingsHTTPTransportJSONRoundTrip(t *testing.T) {
 	assert.NotContains(t, string(encoded), "http_protocol")
 }
 
+func TestChannelSettingsDisableNonStreamJSONRoundTrip(t *testing.T) {
+	var legacy ChannelSettings
+	require.NoError(t, json.Unmarshal([]byte(`{"proxy":""}`), &legacy))
+	assert.False(t, legacy.DisableNonStream)
+
+	explicit := ChannelSettings{DisableNonStream: true}
+	encoded, err := json.Marshal(explicit)
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"disable_non_stream":true`)
+
+	var decoded ChannelSettings
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	assert.True(t, decoded.DisableNonStream)
+
+	encoded, err = json.Marshal(ChannelSettings{})
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "disable_non_stream")
+}
+
 func TestChannelSettingsValidateHTTPTransport(t *testing.T) {
 	require.NoError(t, (&ChannelSettings{}).ValidateHTTPTransport())
 	require.NoError(t, (&ChannelSettings{HTTPProtocol: "AUTO"}).ValidateHTTPTransport())
