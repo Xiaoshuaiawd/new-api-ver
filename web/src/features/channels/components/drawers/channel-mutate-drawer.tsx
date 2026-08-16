@@ -190,6 +190,7 @@ import {
   ChannelApiAccessSection,
   ChannelAuthSection,
   ChannelBasicSection,
+  ChannelDisableNonStreamField,
   ChannelEditorLoadingState,
   ChannelModelsSection,
 } from './sections'
@@ -290,6 +291,7 @@ const SENSITIVE_FORM_FIELDS = [
   'http_protocol',
   'http2_connection_shards',
   'pass_through_body_enabled',
+  'disable_non_stream',
   'system_prompt',
   'system_prompt_override',
   'allow_service_tier',
@@ -343,6 +345,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.force_format ||
     values.thinking_to_content ||
     values.pass_through_body_enabled ||
+    values.disable_non_stream ||
     values.system_prompt_override ||
     (values.http_protocol && values.http_protocol !== 'auto') ||
     (values.http2_connection_shards != null &&
@@ -749,6 +752,7 @@ export function ChannelMutateDrawer({
   const currentForceFormat = form.watch('force_format')
   const currentThinkingToContent = form.watch('thinking_to_content')
   const currentPassThroughBodyEnabled = form.watch('pass_through_body_enabled')
+  const currentDisableNonStream = form.watch('disable_non_stream')
   const currentDisableTaskPollingSleep = form.watch(
     'disable_task_polling_sleep'
   )
@@ -1021,6 +1025,7 @@ export function ChannelMutateDrawer({
     currentForceFormat ||
     currentThinkingToContent ||
     currentPassThroughBodyEnabled ||
+    currentDisableNonStream ||
     currentDisableTaskPollingSleep ||
     currentProxy?.trim() ||
     currentSystemPrompt?.trim() ||
@@ -4148,6 +4153,10 @@ export function ChannelMutateDrawer({
                                     </FormControl>
                                   </FormItem>
                                 )}
+                              />
+
+                              <ChannelDisableNonStreamField
+                                control={form.control}
                               />
 
                               <FormField
