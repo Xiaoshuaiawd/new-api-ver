@@ -7,6 +7,7 @@ import (
 )
 
 const DefaultSessionCookieName = "session"
+const DefaultRefreshCookieName = "new_api_refresh"
 
 func BuildSessionCookieName(secret string, configuredName string) string {
 	configuredName = strings.TrimSpace(configuredName)

@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/require"
@@ -264,7 +265,7 @@ func TestBuildChatLogEventFallbackRawRequestFromRelayInfo(t *testing.T) {
 	common.SetContextKey(ctx, constant.ContextKeyChatLogRawResponse, []byte(`{"id":"resp_1","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`))
 
 	relayInfo := &relaycommon.RelayInfo{
-		Request: &dto.OpenAIResponsesRequest{
+		Request: &kitdto.OpenAIResponsesRequest{
 			Model: "gpt-5.3-codex",
 			Input: json.RawMessage(`[{"role":"user","content":[{"type":"input_text","text":"1+1"}]}]`),
 		},
