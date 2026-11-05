@@ -146,6 +146,7 @@ import {
   CHANNEL_TYPE_TASK_PLUGIN,
   CHANNEL_TYPE_VLLM,
   CHANNEL_TYPE_SGLANG,
+  CHANNEL_TYPE_XTERMINAL,
   CHANNEL_TYPE_WARNINGS,
   ERROR_MESSAGES,
   FIELD_PASSTHROUGH_TYPES,
@@ -1259,6 +1260,7 @@ export function ChannelMutateDrawer({
     if (
       !isEditing &&
       type !== CHANNEL_TYPE_ADVANCED_CUSTOM &&
+      type !== CHANNEL_TYPE_XTERMINAL &&
       !form.getValues('key')?.trim()
     ) {
       form.setError('key', {
@@ -1610,7 +1612,11 @@ export function ChannelMutateDrawer({
       if (isEditing && !channelData?.data) return
       if (!isEditing && (!providerTarget || !canEditSensitive)) return
       // Validate key is required when creating
-      if (!isEditing && !data.key?.trim()) {
+      if (
+        !isEditing &&
+        !data.key?.trim() &&
+        data.type !== CHANNEL_TYPE_XTERMINAL
+      ) {
         form.setError('key', {
           type: 'manual',
           message: ERROR_MESSAGES.REQUIRED_KEY,
@@ -4214,7 +4220,9 @@ export function ChannelMutateDrawer({
             )}
 
             {/* General base_url for other types */}
-            {![3, 8, 22, 36, 45].includes(currentType) && (
+            {![3, 8, 22, 36, 45, CHANNEL_TYPE_XTERMINAL].includes(
+              currentType
+            ) && (
               <FormField
                 control={form.control}
                 name='base_url'
@@ -4360,7 +4368,17 @@ export function ChannelMutateDrawer({
             )}
 
             <ChannelAuthSection>
-              {!isEditing && (
+              {currentType === CHANNEL_TYPE_XTERMINAL && (
+                <Alert>
+                  <AlertDescription>
+                    {t(
+                      'This channel type has a built-in API address and mints its own access tokens. No base URL or API key is needed.'
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {!isEditing && currentType !== CHANNEL_TYPE_XTERMINAL && (
                 <FormField
                   control={form.control}
                   name='multi_key_mode'
@@ -4402,151 +4420,153 @@ export function ChannelMutateDrawer({
                 />
               )}
 
-              <FormField
-                control={form.control}
-                name='key'
-                render={({ field }) => {
-                  let keyPlaceholder = t(getKeyPromptForType(currentType))
-                  if (isEditing) {
-                    keyPlaceholder = t('Leave empty to keep existing key')
-                  } else if (
-                    currentType === 33 &&
-                    awsKeyType === 'api_key' &&
-                    isBatchMode
-                  ) {
-                    keyPlaceholder = t(
-                      'Enter API Key, one per line, format: APIKey|Region'
-                    )
-                  } else if (currentType === 33 && awsKeyType === 'api_key') {
-                    keyPlaceholder = t('Enter API Key, format: APIKey|Region')
-                  } else if (currentType === 33 && isBatchMode) {
-                    keyPlaceholder = t(
-                      'Enter key, one per line, format: AccessKey|SecretAccessKey|Region'
-                    )
-                  } else if (currentType === 33) {
-                    keyPlaceholder = t(
-                      'Enter key, format: AccessKey|SecretAccessKey|Region'
-                    )
-                  } else if (isBatchMode) {
-                    keyPlaceholder = t(
-                      'Enter one key per line for batch creation'
-                    )
-                  }
-
-                  let keyDescription: ReactNode = t(FIELD_DESCRIPTIONS.KEY)
-                  if (isEditing) {
-                    let keyModeDescription = t(
-                      'Append mode: New keys will be added to the end of the existing key list'
-                    )
-                    if (keyMode === 'replace') {
-                      keyModeDescription = t(
-                        'Replace mode: Will completely replace all existing keys'
+              {currentType !== CHANNEL_TYPE_XTERMINAL && (
+                <FormField
+                  control={form.control}
+                  name='key'
+                  render={({ field }) => {
+                    let keyPlaceholder = t(getKeyPromptForType(currentType))
+                    if (isEditing) {
+                      keyPlaceholder = t('Leave empty to keep existing key')
+                    } else if (
+                      currentType === 33 &&
+                      awsKeyType === 'api_key' &&
+                      isBatchMode
+                    ) {
+                      keyPlaceholder = t(
+                        'Enter API Key, one per line, format: APIKey|Region'
+                      )
+                    } else if (currentType === 33 && awsKeyType === 'api_key') {
+                      keyPlaceholder = t('Enter API Key, format: APIKey|Region')
+                    } else if (currentType === 33 && isBatchMode) {
+                      keyPlaceholder = t(
+                        'Enter key, one per line, format: AccessKey|SecretAccessKey|Region'
+                      )
+                    } else if (currentType === 33) {
+                      keyPlaceholder = t(
+                        'Enter key, format: AccessKey|SecretAccessKey|Region'
+                      )
+                    } else if (isBatchMode) {
+                      keyPlaceholder = t(
+                        'Enter one key per line for batch creation'
                       )
                     }
-                    keyDescription = (
-                      <>
-                        {t(
-                          'Enter new key to update, or leave empty to keep current key'
-                        )}
-                        {isMultiKeyChannel && (
-                          <span className='text-warning mt-1 block'>
-                            {keyModeDescription}
-                          </span>
-                        )}
-                      </>
-                    )
-                  } else if (isBatchMode) {
-                    keyDescription = t(
-                      'Enter one API key per line for batch creation'
-                    )
-                  }
-                  return (
-                    <FormItem>
-                      <FormLabel required>{t('API Key')}</FormLabel>
-                      <FormControl>
-                        <Textarea
-                          placeholder={keyPlaceholder}
-                          rows={isBatchMode ? 8 : 4}
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        <span className='flex flex-col gap-2'>
-                          <span>{keyDescription}</span>
-                          {!isEditing && isBatchMode && (
-                            <Button
-                              type='button'
-                              variant='outline'
-                              size='sm'
-                              onClick={handleDeduplicateKeys}
-                              className='w-fit'
-                            >
-                              <Trash2 className='mr-2 h-4 w-4' />
-                              {t('Remove Duplicates')}
-                            </Button>
+
+                    let keyDescription: ReactNode = t(FIELD_DESCRIPTIONS.KEY)
+                    if (isEditing) {
+                      let keyModeDescription = t(
+                        'Append mode: New keys will be added to the end of the existing key list'
+                      )
+                      if (keyMode === 'replace') {
+                        keyModeDescription = t(
+                          'Replace mode: Will completely replace all existing keys'
+                        )
+                      }
+                      keyDescription = (
+                        <>
+                          {t(
+                            'Enter new key to update, or leave empty to keep current key'
                           )}
-                        </span>
-                      </FormDescription>
-                      {isEditing && canRevealChannelKey && (
-                        <div className='border-border/60 mt-4 flex flex-col gap-3 border-y border-dashed py-4'>
-                          <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
-                            <div>
-                              <p className='text-sm font-medium'>
-                                {t('Current key')}
-                              </p>
-                              <p className='text-muted-foreground text-xs'>
-                                {t(
-                                  'Verification required to reveal the saved key.'
-                                )}
-                              </p>
-                            </div>
-                            <div className='flex items-center gap-2'>
+                          {isMultiKeyChannel && (
+                            <span className='text-warning mt-1 block'>
+                              {keyModeDescription}
+                            </span>
+                          )}
+                        </>
+                      )
+                    } else if (isBatchMode) {
+                      keyDescription = t(
+                        'Enter one API key per line for batch creation'
+                      )
+                    }
+                    return (
+                      <FormItem>
+                        <FormLabel required>{t('API Key')}</FormLabel>
+                        <FormControl>
+                          <Textarea
+                            placeholder={keyPlaceholder}
+                            rows={isBatchMode ? 8 : 4}
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          <span className='flex flex-col gap-2'>
+                            <span>{keyDescription}</span>
+                            {!isEditing && isBatchMode && (
                               <Button
                                 type='button'
                                 variant='outline'
                                 size='sm'
-                                onClick={handleRevealKey}
-                                disabled={
-                                  isChannelKeyLoading || verification.isActive
-                                }
+                                onClick={handleDeduplicateKeys}
+                                className='w-fit'
                               >
-                                {isChannelKeyLoading ||
-                                verification.isActive ? (
-                                  <Loader2 className='mr-2 h-4 w-4 animate-spin' />
-                                ) : (
-                                  <Eye className='mr-2 h-4 w-4' />
-                                )}
-                                {t('Reveal key')}
+                                <Trash2 className='mr-2 h-4 w-4' />
+                                {t('Remove Duplicates')}
                               </Button>
-                              <Button
-                                type='button'
-                                variant='ghost'
-                                size='sm'
-                                onClick={async () => {
-                                  if (channelKey) {
-                                    await copyToClipboard(channelKey)
+                            )}
+                          </span>
+                        </FormDescription>
+                        {isEditing && canRevealChannelKey && (
+                          <div className='border-border/60 mt-4 flex flex-col gap-3 border-y border-dashed py-4'>
+                            <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
+                              <div>
+                                <p className='text-sm font-medium'>
+                                  {t('Current key')}
+                                </p>
+                                <p className='text-muted-foreground text-xs'>
+                                  {t(
+                                    'Verification required to reveal the saved key.'
+                                  )}
+                                </p>
+                              </div>
+                              <div className='flex items-center gap-2'>
+                                <Button
+                                  type='button'
+                                  variant='outline'
+                                  size='sm'
+                                  onClick={handleRevealKey}
+                                  disabled={
+                                    isChannelKeyLoading || verification.isActive
                                   }
-                                }}
-                                disabled={!channelKey}
-                              >
-                                <Copy className='mr-2 h-4 w-4' />
-                                {t('Copy')}
-                              </Button>
+                                >
+                                  {isChannelKeyLoading ||
+                                  verification.isActive ? (
+                                    <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+                                  ) : (
+                                    <Eye className='mr-2 h-4 w-4' />
+                                  )}
+                                  {t('Reveal key')}
+                                </Button>
+                                <Button
+                                  type='button'
+                                  variant='ghost'
+                                  size='sm'
+                                  onClick={async () => {
+                                    if (channelKey) {
+                                      await copyToClipboard(channelKey)
+                                    }
+                                  }}
+                                  disabled={!channelKey}
+                                >
+                                  <Copy className='mr-2 h-4 w-4' />
+                                  {t('Copy')}
+                                </Button>
+                              </div>
                             </div>
+                            <Input
+                              readOnly
+                              value={channelKey ?? ''}
+                              placeholder={t('Hidden — verify to reveal')}
+                              className='font-mono'
+                            />
                           </div>
-                          <Input
-                            readOnly
-                            value={channelKey ?? ''}
-                            placeholder={t('Hidden — verify to reveal')}
-                            className='font-mono'
-                          />
-                        </div>
-                      )}
-                      <FormMessage />
-                    </FormItem>
-                  )
-                }}
-              />
+                        )}
+                        <FormMessage />
+                      </FormItem>
+                    )
+                  }}
+                />
+              )}
 
               {currentType === 57 && (
                 <div className='border-border/60 flex flex-col gap-3 border-y py-4'>

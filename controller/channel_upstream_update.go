@@ -21,6 +21,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel/advancedcustom"
 	"github.com/QuantumNous/new-api/relay/channel/gemini"
 	"github.com/QuantumNous/new-api/relay/channel/ollama"
+	"github.com/QuantumNous/new-api/relay/channel/xterminal"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -442,6 +443,14 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 		return nil, fmt.Errorf("failed to get channel key: %w", apiErr)
 	}
 	key = strings.TrimSpace(key)
+	// XTerminal stores no key; model discovery borrows a pooled token instead.
+	if channel.Type == constant.ChannelTypeXTerminal {
+		token, tokenErr := xterminal.TakeToken(channel.Id)
+		if tokenErr != nil {
+			return nil, tokenErr
+		}
+		key = token
+	}
 
 	headers, err := buildFetchModelsHeaders(channel, key)
 	if err != nil {

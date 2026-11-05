@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/ollama"
+	"github.com/QuantumNous/new-api/relay/channel/xterminal"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
@@ -607,7 +608,7 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 
 	// 如果是添加操作，检查 channel 和 key 是否为空
 	if isAdd {
-		if channel.Key == "" {
+		if channel.Key == "" && !constant.ChannelTypeSelfCredentialed(channel.Type) {
 			return fmt.Errorf("channel cannot be empty")
 		}
 
@@ -767,6 +768,11 @@ func AddChannel(c *gin.Context) {
 	}
 
 	addChannelRequest.Channel.CreatedTime = common.GetTimestamp()
+	// A self-credentialed channel carries no key, so key-based add modes have
+	// nothing to split and would create an unusable multi-key channel.
+	if constant.ChannelTypeSelfCredentialed(addChannelRequest.Channel.Type) {
+		addChannelRequest.Mode = "single"
+	}
 	keys := make([]string, 0)
 	inputIndices := make([]int, 0)
 	switch addChannelRequest.Mode {
@@ -820,8 +826,11 @@ func AddChannel(c *gin.Context) {
 
 	channels := make([]model.Channel, 0, len(keys))
 	channelInputIndices := make([][]int, 0, len(keys))
+	// A self-credentialed channel carries no key, so an empty key is a valid
+	// row rather than a blank line to skip.
+	allowEmptyKey := constant.ChannelTypeSelfCredentialed(addChannelRequest.Channel.Type)
 	for i, key := range keys {
-		if key == "" {
+		if key == "" && !allowEmptyKey {
 			continue
 		}
 		localChannel := addChannelRequest.Channel
@@ -897,6 +906,7 @@ func DeleteChannel(c *gin.Context) {
 	} else {
 		service.InvalidateProxyClient(channelProxy)
 	}
+	xterminal.ForgetPool(id)
 	recordManageAudit(c, "channel.delete", map[string]any{
 		"id":   id,
 		"name": channelName,
@@ -925,6 +935,9 @@ func DeleteDisabledChannel(c *gin.Context) {
 	model.InitChannelCache()
 	if rows > 0 {
 		service.ResetProxyClientCache()
+	}
+	for _, id := range ids {
+		xterminal.ForgetPool(id)
 	}
 	recordManageAudit(c, "channel.delete_disabled", map[string]any{
 		"count": rows,
@@ -1071,6 +1084,9 @@ func DeleteChannelBatch(c *gin.Context) {
 	model.InitChannelCache()
 	if deletedCount > 0 {
 		service.ResetProxyClientCache()
+	}
+	for _, id := range channelBatch.Ids {
+		xterminal.ForgetPool(id)
 	}
 	recordManageAudit(c, "channel.delete_batch", map[string]any{
 		"count": deletedCount,

@@ -20,6 +20,7 @@ import {
   CHANNEL_TYPES,
   CHANNEL_TYPE_VLLM,
   CHANNEL_TYPE_SGLANG,
+  CHANNEL_TYPE_XTERMINAL,
 } from '../constants'
 
 // ============================================================================
@@ -178,6 +179,16 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       baseUrl: 'Base URL is required for this channel type',
       key: 'Enter API key for this channel',
       models: 'Models',
+    },
+  },
+  [CHANNEL_TYPE_XTERMINAL]: {
+    id: CHANNEL_TYPE_XTERMINAL,
+    name: CHANNEL_TYPES[CHANNEL_TYPE_XTERMINAL],
+    icon: 'OpenAI',
+    hints: {
+      baseUrl: 'XTerminal API address (built in): https://api.xterminal.cn/chatv2',
+      key: 'Minted automatically by the gateway',
+      models: 'Model names exposed by this channel',
     },
   },
 }

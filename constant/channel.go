@@ -61,6 +61,7 @@ const (
 	ChannelTypeTaskPlugin     = 61
 	ChannelTypeVLLM           = 62
 	ChannelTypeSGLang         = 63
+	ChannelTypeXTerminal      = 64
 	ChannelTypeDummy          // this one is only for count, do not add any channel after this
 
 )
@@ -132,6 +133,7 @@ var ChannelBaseURLs = []string{
 	"",                                          //61
 	"",                                          //62
 	"",                                          //63
+	"https://api.xterminal.cn/chatv2",           //64
 }
 
 func GetChannelBaseURL(channelType int) string {
@@ -202,6 +204,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeTaskPlugin:     "Task Plugin",
 	ChannelTypeVLLM:           "vLLM",
 	ChannelTypeSGLang:         "SGLang",
+	ChannelTypeXTerminal:      "XTerminal",
 }
 
 func GetChannelTypeName(channelType int) string {
@@ -243,4 +246,11 @@ func IsAdvancedCustomChannel(channelType int) bool {
 	default:
 		return false
 	}
+}
+
+// ChannelTypeSelfCredentialed reports whether a channel type mints its own
+// upstream credentials at request time instead of storing an administrator
+// supplied key. Such channels are valid with an empty key column.
+func ChannelTypeSelfCredentialed(channelType int) bool {
+	return channelType == ChannelTypeXTerminal
 }
